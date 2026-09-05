@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "predcircuit"
+version = "0.1.0"
+description = "Predictive coding and local learning on biological and artificial neural circuits"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "numpy>=2.0",
+  "pandas>=2.2",
+  "pyarrow>=17",
+  "torch>=2.4",
+  "networkx>=3.3",
+  "matplotlib>=3.9",
+]
+
+[project.optional-dependencies]
+malecns = ["neuprint-python>=0.5"]
+dev = ["pytest>=8.3", "ruff>=0.8"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
