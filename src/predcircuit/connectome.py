@@ -137,3 +137,34 @@ def graph_from_connectivity(
         edge_weight=weight,
         node_ids=tuple(map(str, ids)),
     )
+
+
+def attach_node_rank(
+    graph: CircuitGraph,
+    table: pd.DataFrame,
+    *,
+    node_col: str = "node",
+    rank_col: str = "layer_median",
+) -> CircuitGraph:
+    """Attach an anatomical/graph-traversal rank to a graph from a metadata table.
+
+    `graph.node_ids` are compared as strings so integer body IDs and string IDs interoperate.
+    Missing ranks are rejected instead of silently inventing an ordering.
+    """
+    if graph.node_ids is None:
+        raise ValueError("attach_node_rank requires graph.node_ids")
+    if node_col not in table or rank_col not in table:
+        raise ValueError(f"table must contain {node_col!r} and {rank_col!r}")
+    mapping = dict(zip(table[node_col].astype(str), table[rank_col], strict=True))
+    missing = [node for node in graph.node_ids if node not in mapping or pd.isna(mapping[node])]
+    if missing:
+        sample = ", ".join(missing[:5])
+        raise ValueError(f"missing rank for {len(missing)} nodes (e.g. {sample})")
+    rank = torch.tensor([float(mapping[node]) for node in graph.node_ids], dtype=torch.float32)
+    return CircuitGraph(
+        num_nodes=graph.num_nodes,
+        edge_index=graph.edge_index.clone(),
+        edge_weight=None if graph.edge_weight is None else graph.edge_weight.clone(),
+        node_ids=graph.node_ids,
+        node_rank=rank,
+    )
