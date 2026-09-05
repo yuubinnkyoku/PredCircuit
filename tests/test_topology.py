@@ -1,6 +1,6 @@
 import torch
 
-from predcircuit.topology import layered_graph
+from predcircuit.topology import erdos_renyi_matched, layered_graph
 
 
 def test_degree_preserving_rewire_keeps_degree_sequence() -> None:
@@ -18,3 +18,11 @@ def test_remove_feedback_obeys_rank() -> None:
     ff = graph.remove_feedback_edges()
     src, dst = ff.edge_index
     assert torch.all(ff.node_rank[src] < ff.node_rank[dst])
+
+
+def test_er_matched_preserves_n_and_e_only() -> None:
+    graph = layered_graph([3, 5, 2], recurrent_probability=0.3, feedback_probability=0.1, seed=5)
+    null = erdos_renyi_matched(graph, seed=6)
+    assert null.num_nodes == graph.num_nodes
+    assert null.num_edges == graph.num_edges
+    assert torch.all(null.edge_index[0] != null.edge_index[1])
