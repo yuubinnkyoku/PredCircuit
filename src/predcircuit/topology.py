@@ -123,6 +123,30 @@ class CircuitGraph:
             node_rank=self.node_rank,
         )
 
+    def shuffle_edge_weights(self, seed: int = 0) -> "CircuitGraph":
+        """Keep adjacency fixed and randomly permute measured edge strengths."""
+        if self.edge_weight is None:
+            raise ValueError("shuffle_edge_weights requires edge_weight")
+        gen = torch.Generator().manual_seed(seed)
+        perm = torch.randperm(self.num_edges, generator=gen)
+        return CircuitGraph(
+            num_nodes=self.num_nodes,
+            edge_index=self.edge_index.clone(),
+            edge_weight=self.edge_weight[perm].clone(),
+            node_ids=self.node_ids,
+            node_rank=self.node_rank,
+        )
+
+    def binary_edge_weights(self) -> "CircuitGraph":
+        """Keep adjacency fixed but replace measured strengths with unit weights."""
+        return CircuitGraph(
+            num_nodes=self.num_nodes,
+            edge_index=self.edge_index.clone(),
+            edge_weight=torch.ones(self.num_edges, dtype=torch.float32),
+            node_ids=self.node_ids,
+            node_rank=self.node_rank,
+        )
+
     def _subset_edges(self, keep: torch.Tensor) -> "CircuitGraph":
         return CircuitGraph(
             num_nodes=self.num_nodes,
@@ -163,13 +187,11 @@ def layered_graph(
     ranks = np.concatenate([np.full(s, i) for i, s in enumerate(layer_sizes)])
     edges: set[tuple[int, int]] = set()
 
-    # Guarantee at least a dense bridge between adjacent layers for small benchmark tasks.
     for li in range(len(layer_sizes) - 1):
         for u in range(offsets[li], offsets[li + 1]):
             for v in range(offsets[li + 1], offsets[li + 2]):
                 edges.add((u, v))
 
-    # Lateral/recurrent edges within hidden layers.
     for li in range(1, len(layer_sizes) - 1):
         nodes = range(offsets[li], offsets[li + 1])
         for u in nodes:
@@ -177,7 +199,6 @@ def layered_graph(
                 if u != v and rng.random() < recurrent_probability:
                     edges.add((u, v))
 
-    # Sparse feedback from a layer to its immediate predecessor.
     for li in range(1, len(layer_sizes)):
         for u in range(offsets[li], offsets[li + 1]):
             for v in range(offsets[li - 1], offsets[li]):
@@ -189,4 +210,34 @@ def layered_graph(
         num_nodes=sum(layer_sizes),
         edge_index=edge_index,
         node_rank=torch.tensor(ranks, dtype=torch.long),
+    )
+
+
+def erdos_renyi_matched(graph: CircuitGraph, seed: int = 0) -> CircuitGraph:
+    """Directed simple random graph with exactly the same node and edge counts.
+
+    This is intentionally a weak null model: unlike degree-preserving rewiring, it does
+    not preserve the in/out-degree sequence. It is useful only alongside stronger controls.
+    """
+    n = graph.num_nodes
+    max_edges = n * max(n - 1, 0)
+    if graph.num_edges > max_edges:
+        raise ValueError("graph has more edges than a directed simple graph can contain")
+    rng = np.random.default_rng(seed)
+    all_edges = np.array([(u, v) for u in range(n) for v in range(n) if u != v], dtype=np.int64)
+    if graph.num_edges:
+        chosen = rng.choice(len(all_edges), size=graph.num_edges, replace=False)
+        edges = torch.from_numpy(all_edges[chosen]).long().t().contiguous()
+    else:
+        edges = torch.empty((2, 0), dtype=torch.long)
+    weight = None
+    if graph.edge_weight is not None:
+        perm = torch.as_tensor(rng.permutation(graph.num_edges), dtype=torch.long)
+        weight = graph.edge_weight[perm].clone()
+    return CircuitGraph(
+        num_nodes=n,
+        edge_index=edges,
+        edge_weight=weight,
+        node_ids=graph.node_ids,
+        node_rank=graph.node_rank,
     )
