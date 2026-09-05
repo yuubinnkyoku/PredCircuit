@@ -1,0 +1,22 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.venv/
+venv/
+.env
+*.egg-info/
+dist/
+build/
+
+# Large/raw data are never committed.
+data/raw/
+data/cache/
+*.feather
+*.parquet
+*.npy
+*.npz
+
+# Local experiment products; curated small CSVs may be committed explicitly.
+results/generated/
+figures/generated/
