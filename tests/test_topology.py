@@ -17,6 +17,7 @@ def test_remove_feedback_obeys_rank() -> None:
     graph = layered_graph([2, 4, 1], recurrent_probability=0.5, feedback_probability=0.5, seed=2)
     ff = graph.remove_feedback_edges()
     src, dst = ff.edge_index
+    assert ff.node_rank is not None
     assert torch.all(ff.node_rank[src] < ff.node_rank[dst])
 
 
