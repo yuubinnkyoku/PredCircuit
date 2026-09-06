@@ -1,7 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Iterable
 
 import networkx as nx
 import numpy as np
@@ -32,9 +32,10 @@ class CircuitGraph:
             raise ValueError("edge_weight must have one value per edge")
         if self.node_ids is not None and len(self.node_ids) != self.num_nodes:
             raise ValueError("node_ids must have one value per node")
-        if self.num_edges:
-            if int(self.edge_index.min()) < 0 or int(self.edge_index.max()) >= self.num_nodes:
-                raise ValueError("edge_index contains an out-of-range node")
+        if self.num_edges and (
+            int(self.edge_index.min()) < 0 or int(self.edge_index.max()) >= self.num_nodes
+        ):
+            raise ValueError("edge_index contains an out-of-range node")
 
     @property
     def num_edges(self) -> int:
@@ -55,12 +56,12 @@ class CircuitGraph:
         edges = set(map(tuple, self.edge_index.t().tolist()))
         return torch.tensor([(int(v), int(u)) in edges for u, v in edges_from(self)], dtype=torch.bool)
 
-    def remove_reciprocal_edges(self) -> "CircuitGraph":
+    def remove_reciprocal_edges(self) -> CircuitGraph:
         """Remove edges that participate in a reciprocal two-node motif."""
         keep = ~self.reciprocal_mask()
         return self._subset_edges(keep)
 
-    def remove_feedback_edges(self, rank: torch.Tensor | None = None) -> "CircuitGraph":
+    def remove_feedback_edges(self, rank: torch.Tensor | None = None) -> CircuitGraph:
         """Remove edges that go from an equal/higher rank to a lower rank.
 
         Rank can encode anatomical depth, sensory-to-motor ordering, or hand-defined layers.
@@ -73,7 +74,7 @@ class CircuitGraph:
         keep = rank[src] < rank[dst]
         return self._subset_edges(keep)
 
-    def degree_preserving_rewire(self, swaps: int, seed: int = 0) -> "CircuitGraph":
+    def degree_preserving_rewire(self, swaps: int, seed: int = 0) -> CircuitGraph:
         """Directed double-edge swaps preserving every node's in/out degree.
 
         Edge (a->b, c->d) becomes (a->d, c->b) when that introduces neither self loops
@@ -123,7 +124,7 @@ class CircuitGraph:
             node_rank=self.node_rank,
         )
 
-    def shuffle_edge_weights(self, seed: int = 0) -> "CircuitGraph":
+    def shuffle_edge_weights(self, seed: int = 0) -> CircuitGraph:
         """Keep adjacency fixed and randomly permute measured edge strengths."""
         if self.edge_weight is None:
             raise ValueError("shuffle_edge_weights requires edge_weight")
@@ -137,7 +138,7 @@ class CircuitGraph:
             node_rank=self.node_rank,
         )
 
-    def binary_edge_weights(self) -> "CircuitGraph":
+    def binary_edge_weights(self) -> CircuitGraph:
         """Keep adjacency fixed but replace measured strengths with unit weights."""
         return CircuitGraph(
             num_nodes=self.num_nodes,
@@ -147,7 +148,7 @@ class CircuitGraph:
             node_rank=self.node_rank,
         )
 
-    def _subset_edges(self, keep: torch.Tensor) -> "CircuitGraph":
+    def _subset_edges(self, keep: torch.Tensor) -> CircuitGraph:
         return CircuitGraph(
             num_nodes=self.num_nodes,
             edge_index=self.edge_index[:, keep],
