@@ -17,7 +17,7 @@ def edge_lesion(
         raise ValueError("fraction must be between 0 and 1")
     damaged = copy.deepcopy(model)
     rng = np.random.default_rng(seed)
-    count = int(round(fraction * damaged.graph.num_edges))
+    count = round(fraction * damaged.graph.num_edges)
     if count:
         idx = torch.as_tensor(rng.choice(damaged.graph.num_edges, size=count, replace=False))
         damaged.weight[idx] = 0.0
@@ -41,7 +41,7 @@ def node_lesion(
         raise ValueError("fraction must be between 0 and 1")
     protected = set(protected_nodes or [])
     candidates = [i for i in range(model.graph.num_nodes) if i not in protected]
-    count = min(len(candidates), int(round(fraction * len(candidates))))
+    count = min(len(candidates), round(fraction * len(candidates)))
     damaged = copy.deepcopy(model)
     if not count:
         return damaged
