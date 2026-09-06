@@ -13,7 +13,9 @@ from predcircuit.topology import layered_graph
 
 
 def train(seed: int, epochs: int) -> tuple[PredictiveCodingGraph, torch.Tensor, torch.Tensor]:
-    graph = layered_graph([2, 8, 1], recurrent_probability=0.2, feedback_probability=0.08, seed=seed)
+    graph = layered_graph(
+        [2, 8, 1], recurrent_probability=0.2, feedback_probability=0.08, seed=seed
+    )
     model = PredictiveCodingGraph(graph, seed=seed)
     x, y = linear_mapping_task()
     for _ in range(epochs):

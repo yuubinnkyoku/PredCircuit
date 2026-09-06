@@ -28,8 +28,10 @@ class BPTTGraphNetwork(torch.nn.Module):
         leak: float = 0.35,
     ) -> torch.Tensor:
         state = torch.zeros(
-            input_values.shape[0], self.graph.num_nodes,
-            device=input_values.device, dtype=input_values.dtype,
+            input_values.shape[0],
+            self.graph.num_nodes,
+            device=input_values.device,
+            dtype=input_values.dtype,
         )
         src, dst = self.graph.edge_index.to(input_values.device)
         for _ in range(steps):

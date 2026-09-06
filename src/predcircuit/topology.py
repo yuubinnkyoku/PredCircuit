@@ -54,7 +54,9 @@ class CircuitGraph:
 
     def reciprocal_mask(self) -> torch.Tensor:
         edges = set(map(tuple, self.edge_index.t().tolist()))
-        return torch.tensor([(int(v), int(u)) in edges for u, v in edges_from(self)], dtype=torch.bool)
+        return torch.tensor(
+            [(int(v), int(u)) in edges for u, v in edges_from(self)], dtype=torch.bool
+        )
 
     def remove_reciprocal_edges(self) -> CircuitGraph:
         """Remove edges that participate in a reciprocal two-node motif."""

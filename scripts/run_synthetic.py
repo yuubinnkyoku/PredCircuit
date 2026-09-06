@@ -12,7 +12,9 @@ from predcircuit.topology import erdos_renyi_matched, layered_graph
 
 
 def main() -> None:
-    p = argparse.ArgumentParser(description="Run topology-controlled predictive-coding sanity checks")
+    p = argparse.ArgumentParser(
+        description="Run topology-controlled predictive-coding sanity checks"
+    )
     p.add_argument("--seeds", type=int, default=5)
     p.add_argument("--epochs", type=int, default=800)
     p.add_argument("--pc-only", action="store_true", help="Skip the same-topology BPTT control")

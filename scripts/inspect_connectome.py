@@ -10,7 +10,9 @@ from predcircuit.metrics import graph_metrics
 
 
 def main() -> None:
-    p = argparse.ArgumentParser(description="Threshold/extract a connectome and report graph statistics")
+    p = argparse.ArgumentParser(
+        description="Threshold/extract a connectome and report graph statistics"
+    )
     p.add_argument("path", type=Path)
     p.add_argument("--min-weight", type=float, default=5.0)
     p.add_argument("--max-nodes", type=int, default=1000)
