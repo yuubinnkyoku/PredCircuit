@@ -13,7 +13,7 @@ jobs:
         with:
           enable-cache: true
       - run: uv python install 3.11
-      - run: uv sync
+      - run: uv sync --extra malecns
       - run: uv run pytest
       - run: uv run ty check src tests scripts
       - run: uv run ruff check src tests scripts
