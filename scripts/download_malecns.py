@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 from __future__ import annotations
 
 import argparse
@@ -25,7 +24,7 @@ def download(url: str, dst: Path) -> None:
         return
     tmp = dst.with_suffix(dst.suffix + ".part")
     print(f"downloading {url}\n       -> {dst}")
-    urllib.request.urlretrieve(url, tmp)  # noqa: S310 - fixed official Janelia URLs
+    urllib.request.urlretrieve(url, tmp)
     tmp.replace(dst)
 
 
