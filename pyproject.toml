@@ -19,7 +19,13 @@ dependencies = [
 
 [project.optional-dependencies]
 malecns = ["neuprint-python>=0.5"]
-dev = ["pytest>=8.3", "ruff>=0.8"]
+
+[dependency-groups]
+dev = [
+  "pytest>=8.3",
+  "ruff>=0.8",
+  "ty>=0.0.78",
+]
 
 [tool.setuptools.packages.find]
 where = ["src"]
