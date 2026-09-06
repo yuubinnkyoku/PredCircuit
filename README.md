@@ -21,19 +21,28 @@ The repository deliberately separates **learning rule**, **circuit topology**, a
 
 This is **not** yet evidence that a biological connectome improves predictive coding. Synthetic experiments only validate the machinery. Biological claims require prespecified MaleCNS/fly visual-system experiments and proper null models.
 
-## Install
+## Development stack
+
+PredCircuit uses **uv** for environments/dependencies, **ty** for type checking, **pytest** for tests, and **ruff** for linting/formatting.
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate  # Windows: .venv\\Scripts\\activate
-pip install -e '.[dev]'
-pytest
+uv sync
+uv run pytest
+uv run ty check src tests scripts
+uv run ruff check src tests scripts
+uv run ruff format --check src tests scripts
+```
+
+To apply formatting locally:
+
+```bash
+uv run ruff format src tests scripts
 ```
 
 Optional neuPrint support:
 
 ```bash
-pip install -e '.[malecns,dev]'
+uv sync --extra malecns
 ```
 
 ## MaleCNS v1.0
@@ -41,15 +50,16 @@ pip install -e '.[malecns,dev]'
 The official MaleCNS dataset is not vendored here. It is large and is licensed separately (CC-BY). Download only what an experiment needs:
 
 ```bash
-python scripts/download_malecns.py annotations
-python scripts/download_malecns.py connectivity  # about 1.1 GB
+uv run python scripts/download_malecns.py annotations
+uv run python scripts/download_malecns.py connectivity  # about 1.1 GB
 ```
 
 Or query a small neighborhood through neuPrint:
 
 ```bash
+uv sync --extra malecns
 export NEUPRINT_TOKEN='...'
-python scripts/neuprint_query.py --type DNge104
+uv run python scripts/neuprint_query.py --type DNge104
 ```
 
 Never commit a neuPrint token or raw MaleCNS dumps.
