@@ -9,10 +9,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: astral-sh/setup-uv@v10
         with:
-          python-version: "3.11"
-          cache: pip
-      - run: pip install -e '.[dev]'
-      - run: pytest
-      - run: ruff check src tests scripts
+          enable-cache: true
+      - run: uv python install 3.11
+      - run: uv sync
+      - run: uv run pytest
+      - run: uv run ty check src tests scripts
+      - run: uv run ruff check src tests scripts
+      - run: uv run ruff format --check src tests scripts
