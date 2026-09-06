@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Fetch a small MaleCNS subgraph via neuPrint without embedding credentials in the repo."""
 from __future__ import annotations
 
