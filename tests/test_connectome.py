@@ -1,6 +1,10 @@
 import pandas as pd
 
-from predcircuit.connectome import attach_node_rank, graph_from_connectivity, normalize_connectivity_table
+from predcircuit.connectome import (
+    attach_node_rank,
+    graph_from_connectivity,
+    normalize_connectivity_table,
+)
 
 
 def test_normalize_connectivity_and_extract() -> None:
