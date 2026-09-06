@@ -20,7 +20,7 @@ def main() -> None:
     try:
         from neuprint import Client, fetch_adjacencies
     except ImportError as exc:
-        raise SystemExit("Install with: pip install -e '.[malecns]'") from exc
+        raise SystemExit("Install with: uv sync --extra malecns") from exc
 
     Client("https://neuprint.janelia.org", dataset="male-cns:v1.0", token=token)
     outgoing, _ = fetch_adjacencies(args.type)
