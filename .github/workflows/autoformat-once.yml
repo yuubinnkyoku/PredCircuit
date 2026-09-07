@@ -33,4 +33,4 @@ jobs:
           git commit -m "Format research scripts"
           git push origin HEAD:main
 
-# Temporary one-shot helper; remove after research-script formatting is clean.
+# Temporary one-shot helper; rerun after adding research scripts that need formatting.
