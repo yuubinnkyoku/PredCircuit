@@ -91,7 +91,9 @@ def graph_from_flyvis_retinotopy(
     If ``pair_rotation_seed`` is set, every cell-type edge specification receives an
     independent random multiple-of-60-degree rotation of all its spatial offsets. This null
     preserves the internal receptive-field geometry and synapse values of each type pair while
-    scrambling the orientation alignment between different type pairs.
+    scrambling the orientation alignment between different type pairs. On finite crops it may
+    change a small number of boundary edges, so it is a secondary rather than degree-matched
+    null.
     """
     if extent < 0:
         raise ValueError("extent must be non-negative")
@@ -175,4 +177,77 @@ def graph_from_flyvis_retinotopy(
         node_types=tuple(node_types),
         node_u=torch.tensor(node_u, dtype=torch.long),
         node_v=torch.tensor(node_v, dtype=torch.long),
+    )
+
+
+def type_pair_preserving_rewire(
+    circuit: RetinotopicFlyVisCircuit,
+    *,
+    swaps: int,
+    seed: int = 0,
+) -> RetinotopicFlyVisCircuit:
+    """Rewire explicit edges while preserving type pairs and every node's degrees.
+
+    Directed double-edge swaps are restricted to edges with the same source and target cell
+    types. Therefore the null keeps the complete cell-type graph, exact edge count, each
+    neuron's in/out degree, and the measured weight attached to each edge slot, while destroying
+    fine retinotopic partner identity. It is the primary fine-wiring null for learned tasks.
+    """
+    if swaps < 0:
+        raise ValueError("swaps must be non-negative")
+    graph = circuit.graph
+    if graph.num_edges < 2 or swaps == 0:
+        return circuit
+
+    edges = [tuple(map(int, edge)) for edge in graph.edge_index.t().tolist()]
+    blocks: dict[tuple[str, str], list[int]] = {}
+    for index, (source, target) in enumerate(edges):
+        key = (circuit.node_types[source], circuit.node_types[target])
+        blocks.setdefault(key, []).append(index)
+    eligible = [indices for indices in blocks.values() if len(indices) >= 2]
+    if not eligible:
+        return circuit
+
+    rng = random.Random(seed)
+    edge_set = set(edges)
+    successful = 0
+    attempts = 0
+    max_attempts = max(100, swaps * 100)
+    while successful < swaps and attempts < max_attempts:
+        attempts += 1
+        indices = rng.choice(eligible)
+        i, j = rng.sample(indices, 2)
+        source_a, target_a = edges[i]
+        source_b, target_b = edges[j]
+        if source_a == source_b or target_a == target_b:
+            continue
+        edge_a = (source_a, target_b)
+        edge_b = (source_b, target_a)
+        if source_a == target_b or source_b == target_a:
+            continue
+        if edge_a in edge_set or edge_b in edge_set:
+            continue
+        edge_set.remove(edges[i])
+        edge_set.remove(edges[j])
+        edge_set.add(edge_a)
+        edge_set.add(edge_b)
+        edges[i] = edge_a
+        edges[j] = edge_b
+        successful += 1
+
+    rewired = torch.tensor(edges, dtype=torch.long).t().contiguous()
+    new_graph = CircuitGraph(
+        num_nodes=graph.num_nodes,
+        edge_index=rewired,
+        edge_weight=None if graph.edge_weight is None else graph.edge_weight.clone(),
+        node_ids=graph.node_ids,
+        node_rank=graph.node_rank,
+    )
+    return RetinotopicFlyVisCircuit(
+        graph=new_graph,
+        input_nodes=circuit.input_nodes,
+        output_nodes=circuit.output_nodes,
+        node_types=circuit.node_types,
+        node_u=circuit.node_u.clone(),
+        node_v=circuit.node_v.clone(),
     )
