@@ -1,0 +1,43 @@
+name: FlyVis temporal target alignment
+
+on:
+  push:
+    paths:
+      - .github/workflows/flyvis-temporal-target-alignment.yml
+      - scripts/run_flyvis_temporal_target_alignment.py
+      - scripts/run_flyvis_retinotopic_temporal_contrastive.py
+      - src/predcircuit/**
+  workflow_dispatch:
+
+jobs:
+  target-alignment:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shift: [0, 1, 2, 3]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          enable-cache: true
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Train with canonical or shifted T4 targets
+        run: >-
+          uv run python scripts/run_flyvis_temporal_target_alignment.py
+          --target-shift ${{ matrix.shift }}
+          --extent 1
+          --seeds 10
+          --epochs 100
+          --frames 7
+          --frame-steps 2
+          --step-size 0.015
+          --beta 0.3
+          --weight-lr 10.0
+          --test-repeats 8
+          --out results/generated/flyvis_temporal_target_alignment_${{ matrix.shift }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-temporal-target-alignment-${{ matrix.shift }}
+          path: results/generated/flyvis_temporal_target_alignment_${{ matrix.shift }}.csv
