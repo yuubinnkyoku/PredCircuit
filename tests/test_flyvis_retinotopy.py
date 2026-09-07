@@ -26,9 +26,7 @@ def tiny_retinotopic_spec() -> dict[str, object]:
 def test_hex_rotation_preserves_radius() -> None:
     points = [(1, 0), (1, -2), (-2, 1), (0, 0)]
     for point in points:
-        radii = {
-            axial_hex_radius(*rotate_axial(point[0], point[1], turns)) for turns in range(6)
-        }
+        radii = {axial_hex_radius(*rotate_axial(point[0], point[1], turns)) for turns in range(6)}
         assert radii == {axial_hex_radius(*point)}
         assert rotate_axial(point[0], point[1], 6) == point
 
