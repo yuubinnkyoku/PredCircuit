@@ -1,3 +1,5 @@
+import collections
+
 import torch
 
 from predcircuit.topology import erdos_renyi_matched, layered_graph
@@ -11,6 +13,29 @@ def test_degree_preserving_rewire_keeps_degree_sequence() -> None:
     assert torch.equal(before[0], after[0])
     assert torch.equal(before[1], after[1])
     assert graph.num_edges == rewired.num_edges
+
+
+def test_rank_pair_preserving_rewire_keeps_degrees_and_rank_pairs() -> None:
+    graph = layered_graph([3, 8, 3], recurrent_probability=0.45, feedback_probability=0.35, seed=7)
+    rewired = graph.rank_pair_preserving_rewire(200, seed=8)
+    before = graph.degrees()
+    after = rewired.degrees()
+    assert torch.equal(before[0], after[0])
+    assert torch.equal(before[1], after[1])
+    assert graph.num_edges == rewired.num_edges
+    assert rewired.node_rank is not None
+
+    def rank_pairs(edge_index: torch.Tensor) -> collections.Counter[tuple[int, int]]:
+        assert graph.node_rank is not None
+        src, dst = edge_index
+        return collections.Counter(
+            (int(graph.node_rank[u]), int(graph.node_rank[v]))
+            for u, v in zip(src.tolist(), dst.tolist(), strict=True)
+        )
+
+    assert rank_pairs(graph.edge_index) == rank_pairs(rewired.edge_index)
+    assert torch.all(rewired.edge_index[0] != rewired.edge_index[1])
+    assert len(set(map(tuple, rewired.edge_index.t().tolist()))) == rewired.num_edges
 
 
 def test_remove_feedback_obeys_rank() -> None:
