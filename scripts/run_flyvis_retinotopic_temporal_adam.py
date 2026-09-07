@@ -265,7 +265,9 @@ def main() -> None:
     args.out.parent.mkdir(parents=True, exist_ok=True)
     frame.to_csv(args.out, index=False)
     summary = (
-        frame.groupby("topology")[["mse_after", "accuracy_after", "margin_after", "mse_improvement"]]
+        frame.groupby("topology")[
+            ["mse_after", "accuracy_after", "margin_after", "mse_improvement"]
+        ]
         .agg(["mean", "median", "std"])
         .sort_index()
     )
