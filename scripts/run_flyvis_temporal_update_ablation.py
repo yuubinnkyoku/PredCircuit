@@ -69,10 +69,7 @@ def ablated_step(
         model.bias.add_((learning_rate / beta) * (nudged_bias - free_bias))
 
     output_shift = float(
-        (
-            nudged_state[:, output_nodes(circuit)]
-            - free_state[:, output_nodes(circuit)]
-        )
+        (nudged_state[:, output_nodes(circuit)] - free_state[:, output_nodes(circuit)])
         .abs()
         .mean()
     )
@@ -232,10 +229,7 @@ def main() -> None:
         .agg(["mean", "median", "std"])
         .sort_index()
     )
-    print(
-        f"Temporal local PC update ablation: lr={args.learning_rate:g}, "
-        f"seeds={args.seeds}"
-    )
+    print(f"Temporal local PC update ablation: lr={args.learning_rate:g}, seeds={args.seeds}")
     print(summary.to_string())
     print(f"\nSaved: {args.out}")
 
