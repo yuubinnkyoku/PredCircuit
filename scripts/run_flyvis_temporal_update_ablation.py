@@ -69,9 +69,7 @@ def ablated_step(
         model.bias.add_((learning_rate / beta) * (nudged_bias - free_bias))
 
     output_shift = float(
-        (nudged_state[:, output_nodes(circuit)] - free_state[:, output_nodes(circuit)])
-        .abs()
-        .mean()
+        (nudged_state[:, output_nodes(circuit)] - free_state[:, output_nodes(circuit)]).abs().mean()
     )
     return mean_update, output_shift
 
