@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import math
 from pathlib import Path
 
 import pandas as pd
@@ -178,7 +177,9 @@ def matched_endpoint_direction(
         steps=branch_steps,
         step_size=step_size,
     )
-    return (model.local_edge_statistics(nudged_state) - model.local_edge_statistics(free_state)) / beta
+    return (
+        model.local_edge_statistics(nudged_state) - model.local_edge_statistics(free_state)
+    ) / beta
 
 
 @torch.no_grad()
@@ -308,7 +309,9 @@ def run_one(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Compare local PC update directions with exact gradients")
+    parser = argparse.ArgumentParser(
+        description="Compare local PC update directions with exact gradients"
+    )
     parser.add_argument("--extent", type=int, default=1)
     parser.add_argument("--seeds", type=int, default=2)
     parser.add_argument("--frames", type=int, default=7)
