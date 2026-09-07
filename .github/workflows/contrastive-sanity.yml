@@ -1,0 +1,50 @@
+name: Contrastive PC sanity
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/contrastive-sanity.yml
+      - src/predcircuit/model.py
+      - scripts/run_contrastive_sanity.py
+
+jobs:
+  sanity:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: beta01-lr001
+            beta: 0.1
+            weight_lr: 0.001
+          - label: beta03-lr003
+            beta: 0.3
+            weight_lr: 0.003
+          - label: beta10-lr003
+            beta: 1.0
+            weight_lr: 0.003
+          - label: beta03-lr01
+            beta: 0.3
+            weight_lr: 0.01
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          enable-cache: true
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Run equilibrium contrastive sanity check
+        run: >-
+          uv run python scripts/run_contrastive_sanity.py
+          --seeds 5
+          --epochs 400
+          --beta ${{ matrix.beta }}
+          --weight-lr ${{ matrix.weight_lr }}
+          --out results/generated/contrastive_sanity_${{ matrix.label }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: contrastive-sanity-${{ matrix.label }}
+          path: results/generated/contrastive_sanity_${{ matrix.label }}.csv
+          if-no-files-found: error
