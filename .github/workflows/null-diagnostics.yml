@@ -1,0 +1,28 @@
+name: Synthetic null diagnostics
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/null-diagnostics.yml
+
+jobs:
+  task-paths:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          enable-cache: true
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Diagnose path shortcuts across 1000 graph seeds
+        run: >-
+          uv run python scripts/diagnose_synthetic_nulls.py
+          --seeds 1000
+          --out results/generated/synthetic_null_paths.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: synthetic-null-paths
+          path: results/generated/synthetic_null_paths.csv
+          if-no-files-found: error
