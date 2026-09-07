@@ -9,6 +9,10 @@ on:
 jobs:
   inference-pilot:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        step-size: [0.01, 0.02, 0.03, 0.05, 0.08]
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v10.0.1
@@ -22,10 +26,10 @@ jobs:
           --seeds 20
           --samples 64
           --steps 100
-          --step-size 0.03
-          --out results/generated/flyvis_type_inference.csv
+          --step-size ${{ matrix.step-size }}
+          --out results/generated/flyvis_type_inference_${{ matrix.step-size }}.csv
       - uses: actions/upload-artifact@v4
         with:
-          name: flyvis-type-inference
-          path: results/generated/flyvis_type_inference.csv
+          name: flyvis-type-inference-${{ matrix.step-size }}
+          path: results/generated/flyvis_type_inference_${{ matrix.step-size }}.csv
           if-no-files-found: error
