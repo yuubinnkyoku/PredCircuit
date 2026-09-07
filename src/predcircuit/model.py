@@ -71,6 +71,14 @@ class PredictiveCodingGraph(torch.nn.Module):
     def energy(self, state: torch.Tensor) -> torch.Tensor:
         return 0.5 * self.errors(state).square().sum(dim=1).mean()
 
+    def _internal_gradient(self, state: torch.Tensor) -> torch.Tensor:
+        """Return dE/dx using only edge-local prediction errors and outgoing messages."""
+        src, dst = self.graph.edge_index.to(state.device)
+        eps = self.errors(state)
+        downstream = torch.zeros_like(state)
+        downstream.index_add_(1, src, eps[:, dst] * self.weight.to(state.device))
+        return eps - self.activation_prime(state) * downstream
+
     @torch.no_grad()
     def infer(
         self,
@@ -85,23 +93,68 @@ class PredictiveCodingGraph(torch.nn.Module):
         state = initial_state.clone().float()
         clamp_mask = clamp_mask.to(device=state.device, dtype=torch.bool)
         clamp_values = clamp_values.to(state.device, dtype=state.dtype)
-        src, dst = self.graph.edge_index.to(state.device)
-        weight = self.weight.to(state.device)
         trace: list[float] = []
 
         state[:, clamp_mask] = clamp_values[:, clamp_mask]
         for _ in range(steps):
-            eps = self.errors(state)
-            downstream = torch.zeros_like(state)
-            # dE/dx_i = eps_i - tanh'(x_i) * sum_{i->k} w_ik eps_k
-            downstream.index_add_(1, src, eps[:, dst] * weight)
-            grad = eps - self.activation_prime(state) * downstream
+            grad = self._internal_gradient(state)
             grad[:, clamp_mask] = 0.0
             state -= step_size * grad
             state[:, clamp_mask] = clamp_values[:, clamp_mask]
             if record_trace:
                 trace.append(float(self.energy(state)))
         return state, InferenceTrace(trace) if record_trace else None
+
+    @torch.no_grad()
+    def infer_nudged(
+        self,
+        initial_state: torch.Tensor,
+        *,
+        clamp_mask: torch.Tensor,
+        clamp_values: torch.Tensor,
+        nudged_nodes: list[int],
+        nudged_values: torch.Tensor,
+        beta: float,
+        steps: int = 40,
+        step_size: float = 0.08,
+    ) -> torch.Tensor:
+        """Infer with a soft supervised nudge on selected nodes.
+
+        The state dynamics minimize the internal predictive-coding energy plus
+
+            beta / 2 * sum_k (x_k - y_k)^2
+
+        on ``nudged_nodes``. Inputs can remain hard-clamped while output teaching signals are
+        soft. This phase is useful for contrastive local learning: the label enters only through
+        local state forces and then propagates through the same recurrent prediction-error
+        messages as ordinary inference.
+        """
+        if beta <= 0.0:
+            raise ValueError("beta must be positive")
+        if steps < 0:
+            raise ValueError("steps must be non-negative")
+        state = initial_state.clone().float()
+        clamp_mask = clamp_mask.to(device=state.device, dtype=torch.bool)
+        clamp_values = clamp_values.to(state.device, dtype=state.dtype)
+        nudged_values = nudged_values.to(state.device, dtype=state.dtype)
+        if nudged_values.shape != (state.shape[0], len(nudged_nodes)):
+            raise ValueError("nudged_values must have shape [batch, len(nudged_nodes)]")
+
+        state[:, clamp_mask] = clamp_values[:, clamp_mask]
+        for _ in range(steps):
+            grad = self._internal_gradient(state)
+            grad[:, nudged_nodes] += beta * (state[:, nudged_nodes] - nudged_values)
+            grad[:, clamp_mask] = 0.0
+            state -= step_size * grad
+            state[:, clamp_mask] = clamp_values[:, clamp_mask]
+        return state
+
+    def local_edge_statistics(self, state: torch.Tensor) -> torch.Tensor:
+        """Return the edge-local statistic epsilon_post * tanh(x_pre)."""
+        src, dst = self.graph.edge_index.to(state.device)
+        eps = self.errors(state)
+        pre = self.activation(state[:, src])
+        return (eps[:, dst] * pre).mean(dim=0)
 
     @torch.no_grad()
     def local_weight_step(
@@ -113,16 +166,54 @@ class PredictiveCodingGraph(torch.nn.Module):
         clip: float | None = 5.0,
     ) -> torch.Tensor:
         """Apply one local Hebbian/prediction-error update and return delta weights."""
-        src, dst = self.graph.edge_index.to(state.device)
         eps = self.errors(state)
-        pre = self.activation(state[:, src])
-        delta = learning_rate * (eps[:, dst] * pre).mean(dim=0)
+        delta = learning_rate * self.local_edge_statistics(state)
         if weight_decay:
             delta -= learning_rate * weight_decay * self.weight
         if clip is not None:
             delta = delta.clamp(-clip, clip)
         self.weight.add_(delta.to(self.weight.device))
         self.bias.add_(learning_rate * eps.mean(dim=0).to(self.bias.device))
+        return delta.detach().cpu()
+
+    @torch.no_grad()
+    def contrastive_weight_step(
+        self,
+        free_state: torch.Tensor,
+        nudged_state: torch.Tensor,
+        *,
+        beta: float,
+        learning_rate: float = 1e-3,
+        weight_decay: float = 0.0,
+        clip: float | None = 5.0,
+    ) -> torch.Tensor:
+        """Apply a free-vs-nudged local update and return delta weights.
+
+        For each edge j->i the update uses only endpoint quantities from two phases:
+
+            Delta w_ji = eta/beta * [eps_i^+ phi(x_j^+) - eps_i^0 phi(x_j^0)].
+
+        This subtracts the unsupervised free-phase pressure that can dominate a one-phase
+        supervised update. It still avoids autograd/BPTT; the cost is retaining one local
+        statistic (or the two endpoint states) across the two phases.
+        """
+        if beta <= 0.0:
+            raise ValueError("beta must be positive")
+        if free_state.shape != nudged_state.shape:
+            raise ValueError("free_state and nudged_state must have the same shape")
+        free_stats = self.local_edge_statistics(free_state)
+        nudged_stats = self.local_edge_statistics(nudged_state)
+        delta = (learning_rate / beta) * (nudged_stats - free_stats)
+        if weight_decay:
+            delta -= learning_rate * weight_decay * self.weight
+        if clip is not None:
+            delta = delta.clamp(-clip, clip)
+        self.weight.add_(delta.to(self.weight.device))
+
+        free_bias = self.errors(free_state).mean(dim=0)
+        nudged_bias = self.errors(nudged_state).mean(dim=0)
+        bias_delta = (learning_rate / beta) * (nudged_bias - free_bias)
+        self.bias.add_(bias_delta.to(self.bias.device))
         return delta.detach().cpu()
 
     @torch.no_grad()
