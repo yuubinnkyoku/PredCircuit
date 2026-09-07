@@ -1,0 +1,56 @@
+name: FlyVis balanced local PC sweep
+
+on:
+  push:
+    paths:
+      - .github/workflows/flyvis-balanced-local.yml
+      - scripts/run_flyvis_retinotopic_balanced_local.py
+      - scripts/run_flyvis_retinotopic_temporal_adam.py
+      - src/predcircuit/**
+  workflow_dispatch:
+
+jobs:
+  balanced-local:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - optimizer: sgd
+            lr: "0.001"
+          - optimizer: sgd
+            lr: "0.01"
+          - optimizer: sgd
+            lr: "0.03"
+          - optimizer: adam
+            lr: "0.0001"
+          - optimizer: adam
+            lr: "0.0003"
+          - optimizer: adam
+            lr: "0.001"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          enable-cache: true
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Run balanced local PC
+        run: >-
+          uv run python scripts/run_flyvis_retinotopic_balanced_local.py
+          --extent 1
+          --seeds 3
+          --epochs 100
+          --frames 7
+          --frame-steps 2
+          --step-size 0.015
+          --beta 0.3
+          --learning-rate ${{ matrix.lr }}
+          --optimizer ${{ matrix.optimizer }}
+          --train-repeats 4
+          --test-repeats 8
+          --out results/generated/flyvis_balanced_local_${{ matrix.optimizer }}_${{ matrix.lr }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-balanced-local-${{ matrix.optimizer }}-${{ matrix.lr }}
+          path: results/generated/flyvis_balanced_local_${{ matrix.optimizer }}_${{ matrix.lr }}.csv
