@@ -1,0 +1,43 @@
+name: FlyVis retinotopy BPTT
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/flyvis-retinotopy-bptt.yml
+      - src/predcircuit/baselines.py
+      - src/predcircuit/flyvis_retinotopy.py
+      - scripts/run_flyvis_retinotopic_bptt.py
+
+jobs:
+  bptt-control:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        learning_rate: [0.0003, 0.001, 0.003]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          enable-cache: true
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Run BPTT motion control
+        run: >-
+          uv run python scripts/run_flyvis_retinotopic_bptt.py
+          --extent 1
+          --seeds 3
+          --epochs 100
+          --frames 7
+          --steps-per-frame 2
+          --learning-rate ${{ matrix.learning_rate }}
+          --train-repeats 4
+          --test-repeats 8
+          --out results/generated/flyvis_retinotopic_bptt_${{ matrix.learning_rate }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-retinotopic-bptt-${{ matrix.learning_rate }}
+          path: results/generated/flyvis_retinotopic_bptt_${{ matrix.learning_rate }}.csv
+          if-no-files-found: error
