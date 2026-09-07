@@ -32,9 +32,7 @@ def load_flyvis_spec(url: str = FLYVIS_CONNECTOME_URL) -> dict[str, Any]:
         return json.loads(response.read())
 
 
-def graph_from_flyvis_spec(
-    spec: dict[str, Any], *, signed: bool = True
-) -> FlyVisTypeCircuit:
+def graph_from_flyvis_spec(spec: dict[str, Any], *, signed: bool = True) -> FlyVisTypeCircuit:
     """Collapse FlyVis' retinotopic filters to a cell-type-level directed graph.
 
     Each type-to-type edge weight is the sum of the reported synapse counts over spatial
