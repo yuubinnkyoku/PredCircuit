@@ -1,0 +1,58 @@
+name: FlyVis exact PC SGD control
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/flyvis-exact-pc-sgd.yml
+      - scripts/run_flyvis_exact_pc_sgd.py
+      - scripts/run_flyvis_exact_pc_gradient.py
+      - scripts/run_flyvis_gradient_alignment.py
+      - src/predcircuit/model.py
+
+jobs:
+  exact-sgd:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: lr003-m0
+            learning_rate: 0.03
+            momentum: 0.0
+          - label: lr01-m0
+            learning_rate: 0.1
+            momentum: 0.0
+          - label: lr03-m0
+            learning_rate: 0.3
+            momentum: 0.0
+          - label: lr01-m09
+            learning_rate: 0.1
+            momentum: 0.9
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          enable-cache: true
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Train exact PC gradient with SGD
+        run: >-
+          uv run python scripts/run_flyvis_exact_pc_sgd.py
+          --extent 1
+          --seeds 3
+          --epochs 100
+          --frames 7
+          --frame-steps 2
+          --step-size 0.015
+          --learning-rate ${{ matrix.learning_rate }}
+          --momentum ${{ matrix.momentum }}
+          --train-repeats 4
+          --test-repeats 8
+          --out results/generated/flyvis_exact_pc_sgd_${{ matrix.label }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-exact-pc-sgd-${{ matrix.label }}
+          path: results/generated/flyvis_exact_pc_sgd_${{ matrix.label }}.csv
+          if-no-files-found: error
