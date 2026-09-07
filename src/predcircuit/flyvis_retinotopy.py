@@ -104,13 +104,16 @@ def graph_from_flyvis_retinotopy(
     node_u: list[int] = []
     node_v: list[int] = []
     lookup: dict[tuple[str, int, int], int] = {}
+    nodes_by_type: dict[str, list[tuple[int, int, int]]] = {}
     for node in nodes_raw:
         cell_type = str(node["name"])
         for u, v in _node_coordinates(node, extent):
             key = (cell_type, u, v)
             if key in lookup:
                 raise ValueError(f"duplicate FlyVis node: {key!r}")
-            lookup[key] = len(node_types)
+            index = len(node_types)
+            lookup[key] = index
+            nodes_by_type.setdefault(cell_type, []).append((index, u, v))
             node_types.append(cell_type)
             node_u.append(u)
             node_v.append(v)
@@ -125,11 +128,7 @@ def graph_from_flyvis_retinotopy(
             raise TypeError("FlyVis edge offsets must be a list")
         turns = rng.randrange(6) if pair_rotation_seed is not None else 0
         sign = float(edge.get("alpha", 1.0)) if signed else 1.0
-        source_nodes = [
-            (idx, u, v)
-            for (typ, u, v), idx in lookup.items()
-            if typ == source_type
-        ]
+        source_nodes = nodes_by_type.get(source_type, [])
         for offset in offsets:
             if not isinstance(offset, list) or len(offset) != 2:
                 raise TypeError("FlyVis offset entries must be [[du, dv], n_syn]")
@@ -159,7 +158,9 @@ def graph_from_flyvis_retinotopy(
     output_types = {str(name) for name in spec.get("output_units", [])}
     input_nodes = tuple(i for i, typ in enumerate(node_types) if typ in input_types)
     output_nodes = tuple(i for i, typ in enumerate(node_types) if typ in output_types)
-    node_ids = tuple(f"{typ}[{u},{v}]" for typ, u, v in zip(node_types, node_u, node_v, strict=True))
+    node_ids = tuple(
+        f"{typ}[{u},{v}]" for typ, u, v in zip(node_types, node_u, node_v, strict=True)
+    )
 
     graph = CircuitGraph(
         num_nodes=len(node_types),
