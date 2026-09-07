@@ -1,0 +1,64 @@
+name: FlyVis matched contrastive PC
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/flyvis-retinotopy-matched-contrastive.yml
+      - src/predcircuit/model.py
+      - src/predcircuit/flyvis_retinotopy.py
+      - scripts/run_flyvis_retinotopic_contrastive.py
+      - scripts/run_flyvis_retinotopic_matched_contrastive.py
+
+jobs:
+  matched:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: b03-lr003-k8
+            beta: 0.3
+            weight_lr: 0.003
+            branch_steps: 8
+          - label: b03-lr003-k32
+            beta: 0.3
+            weight_lr: 0.003
+            branch_steps: 32
+          - label: b10-lr003-k32
+            beta: 1.0
+            weight_lr: 0.003
+            branch_steps: 32
+          - label: b03-lr01-k32
+            beta: 0.3
+            weight_lr: 0.01
+            branch_steps: 32
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          enable-cache: true
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Run matched free/nudged sweep
+        run: >-
+          uv run python scripts/run_flyvis_retinotopic_matched_contrastive.py
+          --extent 1
+          --seeds 3
+          --epochs 100
+          --frames 7
+          --frame-steps 2
+          --common-steps 0
+          --branch-steps ${{ matrix.branch_steps }}
+          --step-size 0.015
+          --beta ${{ matrix.beta }}
+          --weight-lr ${{ matrix.weight_lr }}
+          --train-batch-size 1
+          --test-repeats 8
+          --out results/generated/flyvis_matched_${{ matrix.label }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-matched-${{ matrix.label }}
+          path: results/generated/flyvis_matched_${{ matrix.label }}.csv
+          if-no-files-found: error
