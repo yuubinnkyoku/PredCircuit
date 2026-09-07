@@ -1,0 +1,42 @@
+name: FlyVis temporal strength initialization
+
+on:
+  push:
+    paths:
+      - .github/workflows/flyvis-temporal-strength-init.yml
+      - scripts/run_flyvis_temporal_strength_init.py
+      - scripts/run_flyvis_retinotopic_temporal_contrastive.py
+      - src/predcircuit/**
+  workflow_dispatch:
+
+jobs:
+  strength-init:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        lr: ["1.0", "3.0", "10.0"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          enable-cache: true
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Compare random and connectome-strength initialization
+        run: >-
+          uv run python scripts/run_flyvis_temporal_strength_init.py
+          --extent 1
+          --seeds 10
+          --epochs 100
+          --frames 7
+          --frame-steps 2
+          --step-size 0.015
+          --beta 0.3
+          --weight-lr ${{ matrix.lr }}
+          --test-repeats 8
+          --out results/generated/flyvis_temporal_strength_init_${{ matrix.lr }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-temporal-strength-init-${{ matrix.lr }}
+          path: results/generated/flyvis_temporal_strength_init_${{ matrix.lr }}.csv
