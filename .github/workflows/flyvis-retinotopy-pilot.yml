@@ -1,0 +1,36 @@
+name: FlyVis retinotopy pilot
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/flyvis-retinotopy-pilot.yml
+      - src/predcircuit/flyvis_retinotopy.py
+      - scripts/run_flyvis_retinotopic_motion.py
+
+jobs:
+  motion-pilot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          enable-cache: true
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Run retinotopic moving-bar pilot
+        run: >-
+          uv run python scripts/run_flyvis_retinotopic_motion.py
+          --extent 2
+          --scramble-seeds 8
+          --frames 9
+          --inference-steps 5
+          --step-size 0.01
+          --init-scale 0.08
+          --out results/generated/flyvis_retinotopic_motion.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-retinotopic-motion
+          path: results/generated/flyvis_retinotopic_motion.csv
+          if-no-files-found: error
