@@ -1,0 +1,37 @@
+name: FlyVis exact PC gradient replicate
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/flyvis-exact-pc-gradient-replicate.yml
+
+jobs:
+  replicate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          enable-cache: true
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Run ten-seed exact-gradient replication
+        run: >-
+          uv run python scripts/run_flyvis_exact_pc_gradient.py
+          --extent 1
+          --seeds 10
+          --epochs 100
+          --frames 7
+          --frame-steps 2
+          --step-size 0.015
+          --learning-rate 0.01
+          --train-repeats 4
+          --test-repeats 8
+          --out results/generated/flyvis_exact_pc_gradient_10seed.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-exact-pc-gradient-10seed
+          path: results/generated/flyvis_exact_pc_gradient_10seed.csv
+          if-no-files-found: error
