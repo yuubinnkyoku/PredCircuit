@@ -1,0 +1,46 @@
+name: FlyVis temporal local Adam
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/flyvis-temporal-local-adam.yml
+      - src/predcircuit/model.py
+      - src/predcircuit/flyvis_retinotopy.py
+      - scripts/run_flyvis_retinotopic_contrastive.py
+      - scripts/run_flyvis_retinotopic_temporal_contrastive.py
+      - scripts/run_flyvis_retinotopic_temporal_adam.py
+
+jobs:
+  local-adam:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        learning_rate: [0.0001, 0.0003, 0.001, 0.003]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          enable-cache: true
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Train with temporal local direction and per-synapse Adam
+        run: >-
+          uv run python scripts/run_flyvis_retinotopic_temporal_adam.py
+          --extent 1
+          --seeds 3
+          --epochs 100
+          --frames 7
+          --frame-steps 2
+          --step-size 0.015
+          --beta 0.3
+          --learning-rate ${{ matrix.learning_rate }}
+          --test-repeats 8
+          --out results/generated/flyvis_temporal_local_adam_${{ matrix.learning_rate }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-temporal-local-adam-${{ matrix.learning_rate }}
+          path: results/generated/flyvis_temporal_local_adam_${{ matrix.learning_rate }}.csv
+          if-no-files-found: error
