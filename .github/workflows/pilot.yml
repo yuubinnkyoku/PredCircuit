@@ -1,0 +1,29 @@
+name: Synthetic pilot
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/pilot.yml
+
+jobs:
+  null-control-pilot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          enable-cache: true
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Run paired topology and learning-rule pilot
+        run: >-
+          uv run python scripts/run_synthetic.py
+          --seeds 10
+          --epochs 200
+          --out results/generated/synthetic_null_pilot.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: synthetic-null-pilot
+          path: results/generated/synthetic_null_pilot.csv
+          if-no-files-found: error
