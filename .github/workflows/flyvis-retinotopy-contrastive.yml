@@ -1,0 +1,59 @@
+name: FlyVis retinotopy contrastive PC
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/flyvis-retinotopy-contrastive.yml
+      - src/predcircuit/model.py
+      - src/predcircuit/flyvis_retinotopy.py
+      - scripts/run_flyvis_retinotopic_contrastive.py
+
+jobs:
+  contrastive-pilot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: beta01-lr003
+            beta: 0.1
+            weight_lr: 0.003
+          - label: beta03-lr003
+            beta: 0.3
+            weight_lr: 0.003
+          - label: beta10-lr003
+            beta: 1.0
+            weight_lr: 0.003
+          - label: beta03-lr01
+            beta: 0.3
+            weight_lr: 0.01
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          enable-cache: true
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Run contrastive local-PC motion sweep
+        run: >-
+          uv run python scripts/run_flyvis_retinotopic_contrastive.py
+          --extent 1
+          --seeds 3
+          --epochs 100
+          --frames 7
+          --frame-steps 2
+          --free-steps 0
+          --nudged-steps 32
+          --step-size 0.015
+          --beta ${{ matrix.beta }}
+          --weight-lr ${{ matrix.weight_lr }}
+          --train-batch-size 1
+          --test-repeats 8
+          --out results/generated/flyvis_retinotopic_contrastive_${{ matrix.label }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-retinotopic-contrastive-${{ matrix.label }}
+          path: results/generated/flyvis_retinotopic_contrastive_${{ matrix.label }}.csv
+          if-no-files-found: error
