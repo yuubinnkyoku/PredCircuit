@@ -7,14 +7,6 @@ from pathlib import Path
 
 import pandas as pd
 import torch
-
-from predcircuit.flyvis import load_flyvis_spec
-from predcircuit.flyvis_retinotopy import (
-    RetinotopicFlyVisCircuit,
-    graph_from_flyvis_retinotopy,
-    type_pair_preserving_rewire,
-)
-from predcircuit.model import PredictiveCodingGraph
 from run_flyvis_retinotopic_contrastive import (
     DIRECTIONS,
     evaluate,
@@ -23,6 +15,14 @@ from run_flyvis_retinotopic_contrastive import (
     render_motion_batch,
     targets_for,
 )
+
+from predcircuit.flyvis import load_flyvis_spec
+from predcircuit.flyvis_retinotopy import (
+    RetinotopicFlyVisCircuit,
+    graph_from_flyvis_retinotopy,
+    type_pair_preserving_rewire,
+)
+from predcircuit.model import PredictiveCodingGraph
 
 
 @torch.no_grad()
@@ -257,7 +257,9 @@ def main() -> None:
     args.out.parent.mkdir(parents=True, exist_ok=True)
     frame.to_csv(args.out, index=False)
     summary = (
-        frame.groupby("topology")[["mse_after", "accuracy_after", "margin_after", "mean_abs_update"]]
+        frame.groupby("topology")[
+            ["mse_after", "accuracy_after", "margin_after", "mean_abs_update"]
+        ]
         .agg(["mean", "median", "std"])
         .sort_index()
     )

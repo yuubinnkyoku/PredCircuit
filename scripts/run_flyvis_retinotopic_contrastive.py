@@ -201,9 +201,7 @@ def contrastive_local_step(
         clip=0.05,
     )
     output_shift = float(
-        (nudged_state[:, output_nodes(circuit)] - free_state[:, output_nodes(circuit)])
-        .abs()
-        .mean()
+        (nudged_state[:, output_nodes(circuit)] - free_state[:, output_nodes(circuit)]).abs().mean()
     )
     return (
         float(model.energy(free_state)),

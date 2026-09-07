@@ -26,7 +26,9 @@ def evaluate(model: PredictiveCodingGraph) -> float:
 
 
 @torch.no_grad()
-def run_one(*, seed: int, epochs: int, beta: float, weight_lr: float) -> dict[str, float | int | bool]:
+def run_one(
+    *, seed: int, epochs: int, beta: float, weight_lr: float
+) -> dict[str, float | int | bool]:
     graph = layered_graph(
         [2, 8, 1], recurrent_probability=0.2, feedback_probability=0.08, seed=seed
     )

@@ -66,9 +66,7 @@ def output_nodes(circuit: RetinotopicFlyVisCircuit) -> list[int]:
 
 def target_values(directions: list[float]) -> tuple[torch.Tensor, torch.Tensor]:
     """Zero-mean simplex-like targets so a constant output cannot improve MSE."""
-    targets = torch.full(
-        (len(directions), len(T4_TYPES)), TARGET_OTHER, dtype=torch.float32
-    )
+    targets = torch.full((len(directions), len(T4_TYPES)), TARGET_OTHER, dtype=torch.float32)
     classes = torch.empty(len(directions), dtype=torch.long)
     for sample, direction in enumerate(directions):
         target_type = DIRECTION_TO_T4[direction]

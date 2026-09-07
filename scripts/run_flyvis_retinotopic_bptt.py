@@ -53,8 +53,7 @@ def render_motion_batch(
         batch.append(
             torch.stack(
                 [
-                    amplitude
-                    * torch.exp(-0.5 * ((projection - center) / sample_width).square())
+                    amplitude * torch.exp(-0.5 * ((projection - center) / sample_width).square())
                     for center in centers
                 ]
             )
@@ -63,9 +62,7 @@ def render_motion_batch(
 
 
 def targets_for(directions: list[float]) -> tuple[torch.Tensor, torch.Tensor]:
-    targets = torch.full(
-        (len(directions), len(T4_TYPES)), TARGET_OTHER, dtype=torch.float32
-    )
+    targets = torch.full((len(directions), len(T4_TYPES)), TARGET_OTHER, dtype=torch.float32)
     classes = torch.empty(len(directions), dtype=torch.long)
     for sample, direction in enumerate(directions):
         class_index = T4_TYPES.index(DIRECTION_TO_T4[direction])
