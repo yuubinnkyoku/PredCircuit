@@ -1,0 +1,41 @@
+name: FlyVis temporal local high-LR sweep
+
+on:
+  push:
+    paths:
+      - .github/workflows/flyvis-temporal-local-high-lr.yml
+      - scripts/run_flyvis_retinotopic_temporal_contrastive.py
+      - src/predcircuit/**
+  workflow_dispatch:
+
+jobs:
+  temporal-local:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        lr: ["0.1", "0.3", "1.0", "3.0", "10.0"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          enable-cache: true
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Train online temporal local PC
+        run: >-
+          uv run python scripts/run_flyvis_retinotopic_temporal_contrastive.py
+          --extent 1
+          --seeds 3
+          --epochs 100
+          --frames 7
+          --frame-steps 2
+          --step-size 0.015
+          --beta 0.3
+          --weight-lr ${{ matrix.lr }}
+          --test-repeats 8
+          --out results/generated/flyvis_temporal_local_high_lr_${{ matrix.lr }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-temporal-local-high-lr-${{ matrix.lr }}
+          path: results/generated/flyvis_temporal_local_high_lr_${{ matrix.lr }}.csv
