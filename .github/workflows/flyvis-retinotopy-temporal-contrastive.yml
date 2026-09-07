@@ -1,0 +1,61 @@
+name: FlyVis temporal contrastive PC
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/flyvis-retinotopy-temporal-contrastive.yml
+      - src/predcircuit/model.py
+      - src/predcircuit/flyvis_retinotopy.py
+      - scripts/run_flyvis_retinotopic_contrastive.py
+      - scripts/run_flyvis_retinotopic_temporal_contrastive.py
+
+jobs:
+  temporal:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: b03-lr003-s2
+            beta: 0.3
+            weight_lr: 0.003
+            frame_steps: 2
+          - label: b03-lr01-s2
+            beta: 0.3
+            weight_lr: 0.01
+            frame_steps: 2
+          - label: b10-lr003-s2
+            beta: 1.0
+            weight_lr: 0.003
+            frame_steps: 2
+          - label: b03-lr003-s4
+            beta: 0.3
+            weight_lr: 0.003
+            frame_steps: 4
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          enable-cache: true
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Run temporal two-pass contrastive sweep
+        run: >-
+          uv run python scripts/run_flyvis_retinotopic_temporal_contrastive.py
+          --extent 1
+          --seeds 3
+          --epochs 100
+          --frames 7
+          --frame-steps ${{ matrix.frame_steps }}
+          --step-size 0.015
+          --beta ${{ matrix.beta }}
+          --weight-lr ${{ matrix.weight_lr }}
+          --test-repeats 8
+          --out results/generated/flyvis_temporal_${{ matrix.label }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-temporal-${{ matrix.label }}
+          path: results/generated/flyvis_temporal_${{ matrix.label }}.csv
+          if-no-files-found: error
