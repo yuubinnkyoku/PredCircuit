@@ -1,9 +1,12 @@
+from collections import Counter
+
 import torch
 
 from predcircuit.flyvis_retinotopy import (
     axial_hex_radius,
     graph_from_flyvis_retinotopy,
     rotate_axial,
+    type_pair_preserving_rewire,
 )
 
 
@@ -62,3 +65,25 @@ def test_pair_rotation_scramble_keeps_hex_radius_and_edge_count_on_symmetric_cro
         biological.graph.edge_weight.abs().sort().values,
         scrambled.graph.edge_weight.abs().sort().values,
     )
+
+
+def test_type_pair_rewire_preserves_degrees_edge_count_and_type_pairs() -> None:
+    circuit = graph_from_flyvis_retinotopy(tiny_retinotopic_spec(), extent=2)
+    rewired = type_pair_preserving_rewire(circuit, swaps=25, seed=3)
+    before_in, before_out = circuit.graph.degrees()
+    after_in, after_out = rewired.graph.degrees()
+    assert torch.equal(before_in, after_in)
+    assert torch.equal(before_out, after_out)
+    assert circuit.graph.num_edges == rewired.graph.num_edges
+    assert not torch.equal(circuit.graph.edge_index, rewired.graph.edge_index)
+    assert circuit.graph.edge_weight is not None
+    assert rewired.graph.edge_weight is not None
+    assert torch.equal(circuit.graph.edge_weight, rewired.graph.edge_weight)
+
+    def type_pairs(edge_index: torch.Tensor) -> Counter[tuple[str, str]]:
+        return Counter(
+            (circuit.node_types[int(source)], circuit.node_types[int(target)])
+            for source, target in edge_index.t().tolist()
+        )
+
+    assert type_pairs(circuit.graph.edge_index) == type_pairs(rewired.graph.edge_index)
