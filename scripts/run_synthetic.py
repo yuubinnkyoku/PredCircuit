@@ -28,8 +28,13 @@ def main() -> None:
         )
         variants = {
             "base": base,
+            # This deliberately destroys rank/layer structure and can introduce shortcut paths.
             "degree_preserving_rewire": base.degree_preserving_rewire(
                 max(base.num_edges * 3, 1), seed=10_000 + seed
+            ),
+            # Stronger null: preserve per-node degree and every source-rank/target-rank edge count.
+            "rank_pair_preserving_rewire": base.rank_pair_preserving_rewire(
+                max(base.num_edges * 3, 1), seed=15_000 + seed
             ),
             "er_matched": erdos_renyi_matched(base, seed=20_000 + seed),
             "no_feedback": base.remove_feedback_edges(),
@@ -51,7 +56,7 @@ def main() -> None:
     df.to_csv(args.out, index=False)
     summary = (
         df.groupby(["learning_rule", "topology"])["mse_after"]
-        .agg(["mean", "std", "min", "max"])
+        .agg(["mean", "median", "std", "min", "max"])
         .sort_index()
     )
     print(df.to_string(index=False))
