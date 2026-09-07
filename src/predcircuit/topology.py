@@ -192,8 +192,8 @@ class CircuitGraph:
         rewired = torch.tensor(edges, dtype=torch.long).t().contiguous()
         weight = self.edge_weight
         if weight is not None:
+            source_weight = weight.clone()
             weight = weight.clone()
-            source_weight = self.edge_weight
             for indices in blocks.values():
                 if len(indices) < 2:
                     continue
