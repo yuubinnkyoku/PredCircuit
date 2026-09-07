@@ -28,14 +28,14 @@ class FlyVisTypeCircuit:
 
 def load_flyvis_spec(url: str = FLYVIS_CONNECTOME_URL) -> dict[str, Any]:
     """Download the pinned FlyVis connectome specification."""
-    with urllib.request.urlopen(url) as response:  # noqa: S310 - pinned HTTPS research data
+    with urllib.request.urlopen(url) as response:
         return json.loads(response.read())
 
 
 def graph_from_flyvis_spec(
     spec: dict[str, Any], *, signed: bool = True
 ) -> FlyVisTypeCircuit:
-    """Collapse FlyVis' retinotopic filters to a 64-cell-type directed graph.
+    """Collapse FlyVis' retinotopic filters to a cell-type-level directed graph.
 
     Each type-to-type edge weight is the sum of the reported synapse counts over spatial
     offsets. When ``signed`` is true, FlyVis' ``alpha`` field (+1/-1) is applied.
@@ -46,7 +46,7 @@ def graph_from_flyvis_spec(
     nodes_raw = spec.get("nodes")
     edges_raw = spec.get("edges")
     if not isinstance(nodes_raw, list) or not isinstance(edges_raw, list):
-        raise ValueError("FlyVis spec must contain list-valued 'nodes' and 'edges'")
+        raise TypeError("FlyVis spec must contain list-valued 'nodes' and 'edges'")
 
     names = [str(node["name"]) for node in nodes_raw]
     index = {name: i for i, name in enumerate(names)}
@@ -61,7 +61,7 @@ def graph_from_flyvis_spec(
             raise ValueError(f"unknown FlyVis edge endpoint: {src_name!r}->{dst_name!r}")
         offsets = edge.get("offsets", [])
         if not isinstance(offsets, list):
-            raise ValueError("FlyVis edge offsets must be a list")
+            raise TypeError("FlyVis edge offsets must be a list")
         magnitude = sum(float(offset[1]) for offset in offsets)
         sign = float(edge.get("alpha", 1.0)) if signed else 1.0
         key = (index[src_name], index[dst_name])
