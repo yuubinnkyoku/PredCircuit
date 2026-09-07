@@ -1,0 +1,38 @@
+name: FlyVis temporal topology nulls
+
+on:
+  push:
+    paths:
+      - .github/workflows/flyvis-temporal-topology-nulls.yml
+      - scripts/run_flyvis_temporal_topology_nulls.py
+      - scripts/run_flyvis_retinotopic_temporal_contrastive.py
+      - src/predcircuit/**
+  workflow_dispatch:
+
+jobs:
+  nulls:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          enable-cache: true
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Compare biological, rotated-offset, and degree-matched nulls
+        run: >-
+          uv run python scripts/run_flyvis_temporal_topology_nulls.py
+          --extent 1
+          --seeds 10
+          --epochs 100
+          --frames 7
+          --frame-steps 2
+          --step-size 0.015
+          --beta 0.3
+          --weight-lr 10.0
+          --test-repeats 8
+          --out results/generated/flyvis_temporal_topology_nulls.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-temporal-topology-nulls
+          path: results/generated/flyvis_temporal_topology_nulls.csv
