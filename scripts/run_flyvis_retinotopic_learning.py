@@ -123,7 +123,7 @@ def supervised_local_step(
     target_steps: int,
     step_size: float,
     weight_lr: float,
-) -> float:
+) -> tuple[float, float, float]:
     state = infer_sequence(
         model,
         circuit,
@@ -145,13 +145,13 @@ def supervised_local_step(
         steps=target_steps,
         step_size=step_size,
     )
-    model.local_weight_step(
+    delta = model.local_weight_step(
         state,
         learning_rate=weight_lr,
         weight_decay=1e-5,
         clip=0.05,
     )
-    return float(model.energy(state))
+    return float(model.energy(state)), float(delta.abs().mean()), float(delta.abs().max())
 
 
 @torch.no_grad()
@@ -218,8 +218,11 @@ def run_one(
     target_steps: int,
     step_size: float,
     weight_lr: float,
+    train_batch_size: int,
     test_repeats: int,
 ) -> dict[str, float | int | str | bool]:
+    if train_batch_size <= 0 or train_batch_size > len(DIRECTIONS):
+        raise ValueError("train_batch_size must be between 1 and 4")
     model = PredictiveCodingGraph(circuit.graph, seed=seed, init_scale=0.08)
     mse_before, accuracy_before, margin_before = evaluate(
         model,
@@ -233,26 +236,35 @@ def run_one(
     )
 
     final_energy = float("nan")
+    update_sum = 0.0
+    max_abs_update = 0.0
+    update_count = 0
     for epoch in range(epochs):
         directions = list(DIRECTIONS)
-        stimulus = render_motion_batch(
-            circuit,
-            directions,
-            frames=frames,
-            width=width,
-            jitter_seed=100_000 * seed + epoch,
-        )
-        targets, _ = target_values(directions)
-        final_energy = supervised_local_step(
-            model,
-            circuit,
-            stimulus,
-            targets,
-            frame_steps=frame_steps,
-            target_steps=target_steps,
-            step_size=step_size,
-            weight_lr=weight_lr,
-        )
+        random.Random(500_000 * seed + epoch).shuffle(directions)
+        for batch_index, start in enumerate(range(0, len(directions), train_batch_size)):
+            batch_directions = directions[start : start + train_batch_size]
+            stimulus = render_motion_batch(
+                circuit,
+                batch_directions,
+                frames=frames,
+                width=width,
+                jitter_seed=100_000 * seed + 100 * epoch + batch_index,
+            )
+            targets, _ = target_values(batch_directions)
+            final_energy, mean_update, step_max_update = supervised_local_step(
+                model,
+                circuit,
+                stimulus,
+                targets,
+                frame_steps=frame_steps,
+                target_steps=target_steps,
+                step_size=step_size,
+                weight_lr=weight_lr,
+            )
+            update_sum += mean_update
+            max_abs_update = max(max_abs_update, step_max_update)
+            update_count += 1
 
     mse_after, accuracy_after, margin_after = evaluate(
         model,
@@ -265,10 +277,13 @@ def run_one(
         jitter_seed=900_000 + seed,
     )
     return {
+        "learning_rule": "predictive_coding_local",
         "topology": topology,
         "seed": seed,
         "epochs": epochs,
         "weight_lr": weight_lr,
+        "train_batch_size": train_batch_size,
+        "target_steps": target_steps,
         "mse_before": mse_before,
         "mse_after": mse_after,
         "mse_improvement": mse_before - mse_after,
@@ -278,6 +293,8 @@ def run_one(
         "margin_before": margin_before,
         "margin_after": margin_after,
         "final_clamped_energy": final_energy,
+        "mean_abs_update": update_sum / max(update_count, 1),
+        "max_abs_update": max_abs_update,
         "mean_abs_weight": float(model.weight.abs().mean()),
         "nodes": circuit.graph.num_nodes,
         "edges": circuit.graph.num_edges,
@@ -297,6 +314,7 @@ def main() -> None:
     parser.add_argument("--target-steps", type=int, default=8)
     parser.add_argument("--step-size", type=float, default=0.015)
     parser.add_argument("--weight-lr", type=float, default=1e-3)
+    parser.add_argument("--train-batch-size", type=int, default=4)
     parser.add_argument("--test-repeats", type=int, default=4)
     parser.add_argument(
         "--out", type=Path, default=Path("results/generated/flyvis_retinotopic_learning.csv")
@@ -328,6 +346,7 @@ def main() -> None:
                     target_steps=args.target_steps,
                     step_size=args.step_size,
                     weight_lr=args.weight_lr,
+                    train_batch_size=args.train_batch_size,
                     test_repeats=args.test_repeats,
                 )
             )
@@ -337,7 +356,13 @@ def main() -> None:
     frame.to_csv(args.out, index=False)
     summary = (
         frame.groupby("topology")[
-            ["mse_after", "accuracy_after", "margin_after", "mse_improvement"]
+            [
+                "mse_after",
+                "accuracy_after",
+                "margin_after",
+                "mse_improvement",
+                "mean_abs_update",
+            ]
         ]
         .agg(["mean", "median", "std"])
         .sort_index()
@@ -346,6 +371,7 @@ def main() -> None:
     print(
         f"Learning crop: extent={args.extent}, {base.graph.num_nodes} nodes, "
         f"{base.graph.num_edges} edges, weight_lr={args.weight_lr:g}, "
+        f"batch={args.train_batch_size}, target_steps={args.target_steps}, "
         f"zero-output MSE={chance_mse:.6f}"
     )
     print(summary.to_string())
@@ -360,6 +386,8 @@ def main() -> None:
                 "accuracy_before",
                 "accuracy_after",
                 "margin_after",
+                "mean_abs_update",
+                "max_abs_update",
                 "finite",
             ]
         ].to_string(index=False)
