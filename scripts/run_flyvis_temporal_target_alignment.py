@@ -28,12 +28,12 @@ from predcircuit.model import PredictiveCodingGraph
 CANONICAL_CLASSES = (1, 2, 0, 3)
 
 
-def shifted_classes(shift: int) -> tuple[int, int, int, int]:
+def shifted_classes(shift: int) -> tuple[int, ...]:
     return tuple((class_index + shift) % 4 for class_index in CANONICAL_CLASSES)
 
 
 def targets_for_mapping(
-    directions: list[float], class_map: tuple[int, int, int, int]
+    directions: list[float], class_map: tuple[int, ...]
 ) -> tuple[torch.Tensor, torch.Tensor]:
     targets = torch.full((len(directions), 4), TARGET_OTHER, dtype=torch.float32)
     classes = torch.empty(len(directions), dtype=torch.long)
@@ -50,7 +50,7 @@ def evaluate_mapping(
     model: PredictiveCodingGraph,
     circuit: RetinotopicFlyVisCircuit,
     *,
-    class_map: tuple[int, int, int, int],
+    class_map: tuple[int, ...],
     repeats: int,
     frames: int,
     width: float,
@@ -227,7 +227,9 @@ def main() -> None:
     args.out.parent.mkdir(parents=True, exist_ok=True)
     frame.to_csv(args.out, index=False)
     summary = (
-        frame.groupby("topology")[["mse_after", "mse_improvement", "accuracy_after", "margin_after"]]
+        frame.groupby("topology")[
+            ["mse_after", "mse_improvement", "accuracy_after", "margin_after"]
+        ]
         .agg(["mean", "median", "std"])
         .sort_index()
     )
