@@ -32,3 +32,5 @@ jobs:
           git add src tests scripts
           git commit -m "Format research scripts"
           git push origin HEAD:main
+
+# Temporary one-shot helper; remove after research-script formatting is clean.
