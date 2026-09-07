@@ -1,0 +1,35 @@
+name: FlyVis training locality cost
+
+on:
+  push:
+    paths:
+      - .github/workflows/flyvis-training-locality.yml
+      - scripts/estimate_flyvis_training_locality.py
+      - src/predcircuit/locality_cost.py
+      - src/predcircuit/flyvis_retinotopy.py
+      - src/predcircuit/flyvis.py
+  workflow_dispatch:
+
+jobs:
+  estimate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          enable-cache: true
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Estimate temporary storage
+        run: >-
+          uv run python scripts/estimate_flyvis_training_locality.py
+          --extents 1,2,3
+          --frames 5,7,9
+          --frame-steps 1,2,3,4
+          --batch-size 1
+          --bits 16
+          --out results/generated/flyvis_training_locality.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-training-locality
+          path: results/generated/flyvis_training_locality.csv
