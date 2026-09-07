@@ -81,6 +81,10 @@ class CircuitGraph:
 
         Edge (a->b, c->d) becomes (a->d, c->b) when that introduces neither self loops
         nor duplicate edges. Biological edge strengths are shuffled across rewired edges.
+
+        This null intentionally destroys rank/layer structure. For a stricter control that
+        keeps the count of feedforward, lateral, and feedback edges between every rank pair,
+        use :meth:`rank_pair_preserving_rewire`.
         """
         rng = np.random.default_rng(seed)
         edges = [tuple(map(int, e)) for e in self.edge_index.t().tolist()]
@@ -118,6 +122,86 @@ class CircuitGraph:
         if weight is not None:
             perm = torch.as_tensor(rng.permutation(self.num_edges), dtype=torch.long)
             weight = weight[perm]
+        return CircuitGraph(
+            num_nodes=self.num_nodes,
+            edge_index=rewired,
+            edge_weight=weight,
+            node_ids=self.node_ids,
+            node_rank=self.node_rank,
+        )
+
+    def rank_pair_preserving_rewire(self, swaps: int, seed: int = 0) -> CircuitGraph:
+        """Rewire only within source-rank/target-rank blocks.
+
+        The directed double-edge swap is restricted to pairs of edges whose source nodes have
+        the same rank and whose target nodes have the same rank. This preserves, exactly:
+
+        - every node's in-degree and out-degree;
+        - the number of edges for every (source rank, target rank) pair;
+        - therefore the global feedforward/lateral/feedback edge counts.
+
+        If biological edge strengths are present, they are shuffled only within the same rank
+        pair so each block also keeps its weight distribution. Fully connected blocks may have
+        no valid swaps, which is expected rather than silently changing the null model.
+        """
+        if self.node_rank is None:
+            raise ValueError("rank-pair-preserving rewiring requires node_rank")
+        if swaps < 0:
+            raise ValueError("swaps must be non-negative")
+
+        rng = np.random.default_rng(seed)
+        edges = [tuple(map(int, e)) for e in self.edge_index.t().tolist()]
+        if len(edges) < 2 or swaps == 0:
+            return self
+
+        ranks = self.node_rank.tolist()
+        blocks: dict[tuple[float, float], list[int]] = {}
+        for i, (u, v) in enumerate(edges):
+            key = (float(ranks[u]), float(ranks[v]))
+            blocks.setdefault(key, []).append(i)
+        eligible = [indices for indices in blocks.values() if len(indices) >= 2]
+        if not eligible:
+            return self
+
+        edge_set = set(edges)
+        successful = 0
+        attempts = 0
+        max_attempts = max(100, swaps * 100)
+        while successful < swaps and attempts < max_attempts:
+            attempts += 1
+            indices = eligible[int(rng.integers(len(eligible)))]
+            i, j = rng.choice(indices, size=2, replace=False)
+            a, b = edges[int(i)]
+            c, d = edges[int(j)]
+            if a == c or b == d:
+                continue
+            e1 = (a, d)
+            e2 = (c, b)
+            if a == d or c == b:
+                continue
+            if e1 in edge_set or e2 in edge_set:
+                continue
+            edge_set.remove(edges[int(i)])
+            edge_set.remove(edges[int(j)])
+            edge_set.add(e1)
+            edge_set.add(e2)
+            edges[int(i)] = e1
+            edges[int(j)] = e2
+            successful += 1
+
+        rewired = torch.tensor(edges, dtype=torch.long).t().contiguous()
+        weight = self.edge_weight
+        if weight is not None:
+            weight = weight.clone()
+            source_weight = self.edge_weight
+            for indices in blocks.values():
+                if len(indices) < 2:
+                    continue
+                idx = np.asarray(indices, dtype=np.int64)
+                permuted = idx[rng.permutation(len(idx))]
+                idx_t = torch.as_tensor(idx, dtype=torch.long)
+                perm_t = torch.as_tensor(permuted, dtype=torch.long)
+                weight[idx_t] = source_weight[perm_t]
         return CircuitGraph(
             num_nodes=self.num_nodes,
             edge_index=rewired,
