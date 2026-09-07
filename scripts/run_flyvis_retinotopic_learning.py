@@ -20,6 +20,8 @@ from predcircuit.model import PredictiveCodingGraph
 DIRECTIONS = (0.0, 90.0, 180.0, 270.0)
 T4_TYPES = ("T4a", "T4b", "T4c", "T4d")
 DIRECTION_TO_T4 = {180.0: "T4a", 0.0: "T4b", 90.0: "T4c", 270.0: "T4d"}
+TARGET_CORRECT = 0.5
+TARGET_OTHER = -TARGET_CORRECT / (len(T4_TYPES) - 1)
 
 
 def _input_xy(circuit: RetinotopicFlyVisCircuit) -> torch.Tensor:
@@ -63,12 +65,15 @@ def output_nodes(circuit: RetinotopicFlyVisCircuit) -> list[int]:
 
 
 def target_values(directions: list[float]) -> tuple[torch.Tensor, torch.Tensor]:
-    targets = torch.full((len(directions), len(T4_TYPES)), -0.5, dtype=torch.float32)
+    """Zero-mean simplex-like targets so a constant output cannot improve MSE."""
+    targets = torch.full(
+        (len(directions), len(T4_TYPES)), TARGET_OTHER, dtype=torch.float32
+    )
     classes = torch.empty(len(directions), dtype=torch.long)
     for sample, direction in enumerate(directions):
         target_type = DIRECTION_TO_T4[direction]
         class_index = T4_TYPES.index(target_type)
-        targets[sample, class_index] = 0.5
+        targets[sample, class_index] = TARGET_CORRECT
         classes[sample] = class_index
     return targets, classes
 
@@ -331,13 +336,17 @@ def main() -> None:
     args.out.parent.mkdir(parents=True, exist_ok=True)
     frame.to_csv(args.out, index=False)
     summary = (
-        frame.groupby("topology")[["mse_after", "accuracy_after", "margin_after", "mse_improvement"]]
+        frame.groupby("topology")[
+            ["mse_after", "accuracy_after", "margin_after", "mse_improvement"]
+        ]
         .agg(["mean", "median", "std"])
         .sort_index()
     )
+    chance_mse = (TARGET_CORRECT**2 + (len(T4_TYPES) - 1) * TARGET_OTHER**2) / len(T4_TYPES)
     print(
         f"Learning crop: extent={args.extent}, {base.graph.num_nodes} nodes, "
-        f"{base.graph.num_edges} edges, weight_lr={args.weight_lr:g}"
+        f"{base.graph.num_edges} edges, weight_lr={args.weight_lr:g}, "
+        f"zero-output MSE={chance_mse:.6f}"
     )
     print(summary.to_string())
     print("\nPer-seed results:")
