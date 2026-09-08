@@ -1,0 +1,48 @@
+name: FlyVis exact CE gradient
+
+on:
+  push:
+    paths:
+      - .github/workflows/flyvis-exact-ce-gradient.yml
+      - scripts/run_flyvis_exact_ce_gradient.py
+      - scripts/run_flyvis_exact_pc_gradient.py
+      - scripts/run_flyvis_credit_residual_scaling.py
+      - scripts/run_flyvis_retinotopic_contrastive.py
+      - scripts/run_flyvis_gradient_alignment.py
+      - src/predcircuit/**
+  workflow_dispatch:
+
+jobs:
+  exact-ce:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        topology: [biological, type_pair_rewire, pair_rotation]
+        learning_rate: [0.001, 0.003, 0.01]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          enable-cache: true
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Train exact CE on ${{ matrix.topology }} at LR ${{ matrix.learning_rate }}
+        run: >-
+          uv run python scripts/run_flyvis_exact_ce_gradient.py
+          --topology ${{ matrix.topology }}
+          --extent 2
+          --seeds 10
+          --epochs 100
+          --frames 7
+          --frame-steps 2
+          --step-size 0.015
+          --learning-rate ${{ matrix.learning_rate }}
+          --train-repeats 4
+          --test-repeats 8
+          --out results/generated/flyvis_exact_ce_${{ matrix.topology }}_lr_${{ matrix.learning_rate }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-exact-ce-${{ matrix.topology }}-lr-${{ matrix.learning_rate }}
+          path: results/generated/flyvis_exact_ce_${{ matrix.topology }}_lr_${{ matrix.learning_rate }}.csv
