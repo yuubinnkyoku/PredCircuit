@@ -1,0 +1,42 @@
+name: FlyVis extent-2 local PC scale sweep
+
+on:
+  push:
+    paths:
+      - .github/workflows/flyvis-temporal-extent2-scale-sweep.yml
+      - scripts/run_flyvis_retinotopic_temporal_contrastive.py
+      - src/predcircuit/**
+  workflow_dispatch:
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        weight_lr: [10.0, 30.0, 100.0]
+        frame_steps: [2, 4]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          enable-cache: true
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Sweep extent-2 local PC scale
+        run: >-
+          uv run python scripts/run_flyvis_retinotopic_temporal_contrastive.py
+          --extent 2
+          --seeds 5
+          --epochs 100
+          --frames 7
+          --frame-steps ${{ matrix.frame_steps }}
+          --step-size 0.015
+          --beta 0.3
+          --weight-lr ${{ matrix.weight_lr }}
+          --test-repeats 8
+          --out results/generated/flyvis_extent2_lr${{ matrix.weight_lr }}_steps${{ matrix.frame_steps }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-extent2-lr${{ matrix.weight_lr }}-steps${{ matrix.frame_steps }}
+          path: results/generated/flyvis_extent2_lr${{ matrix.weight_lr }}_steps${{ matrix.frame_steps }}.csv
