@@ -1,0 +1,52 @@
+name: FlyVis local credit coherence gate
+
+on:
+  push:
+    paths:
+      - .github/workflows/flyvis-local-coherence-gate.yml
+      - scripts/run_flyvis_temporal_coherence_gate.py
+      - scripts/run_flyvis_credit_residual_scaling.py
+      - scripts/run_flyvis_retinotopic_temporal_adam.py
+      - scripts/run_flyvis_retinotopic_contrastive.py
+      - src/predcircuit/**
+  workflow_dispatch:
+
+jobs:
+  coherence-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        learning_rate: [10, 30]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          enable-cache: true
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Sweep local coherence power at LR ${{ matrix.learning_rate }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for power in 0 0.5 1 2; do
+            uv run python scripts/run_flyvis_temporal_coherence_gate.py \
+              --extent 2 \
+              --seeds 5 \
+              --coherence-power "$power" \
+              --epochs 100 \
+              --frames 7 \
+              --frame-steps 2 \
+              --step-size 0.015 \
+              --beta 0.03 \
+              --learning-rate ${{ matrix.learning_rate }} \
+              --weight-decay 1e-5 \
+              --max-update 0.05 \
+              --test-repeats 8 \
+              --out "results/generated/flyvis_coherence_power_${power}_lr_${{ matrix.learning_rate }}.csv"
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-local-coherence-lr-${{ matrix.learning_rate }}
+          path: results/generated/flyvis_coherence_power_*_lr_${{ matrix.learning_rate }}.csv
