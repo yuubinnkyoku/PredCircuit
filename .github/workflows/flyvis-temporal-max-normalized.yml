@@ -1,0 +1,45 @@
+name: FlyVis temporal max-normalized local PC
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/flyvis-temporal-max-normalized.yml
+      - scripts/run_flyvis_temporal_max_normalized.py
+      - scripts/run_flyvis_retinotopic_temporal_adam.py
+      - scripts/run_flyvis_retinotopic_temporal_contrastive.py
+      - scripts/run_flyvis_retinotopic_contrastive.py
+      - src/predcircuit/**
+      - pyproject.toml
+
+jobs:
+  max-normalized:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target_max: [0.003, 0.01, 0.03, 0.05]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          enable-cache: true
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Train extent-2 circuit with max-controlled global scaling
+        run: >-
+          uv run python scripts/run_flyvis_temporal_max_normalized.py
+          --extent 2
+          --seeds 5
+          --epochs 100
+          --frames 7
+          --frame-steps 2
+          --step-size 0.015
+          --beta 0.3
+          --target-max-edge-update ${{ matrix.target_max }}
+          --test-repeats 8
+          --out results/generated/flyvis_temporal_max_normalized_${{ matrix.target_max }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-temporal-max-normalized-${{ matrix.target_max }}
+          path: results/generated/flyvis_temporal_max_normalized_${{ matrix.target_max }}.csv
