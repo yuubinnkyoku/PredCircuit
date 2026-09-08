@@ -1,0 +1,41 @@
+name: FlyVis local-gradient alignment scaling
+
+on:
+  push:
+    paths:
+      - .github/workflows/flyvis-gradient-alignment-scaling.yml
+      - scripts/run_flyvis_gradient_alignment.py
+      - scripts/run_flyvis_retinotopic_contrastive.py
+      - scripts/run_flyvis_retinotopic_temporal_contrastive.py
+      - src/predcircuit/**
+  workflow_dispatch:
+
+jobs:
+  alignment:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        extent: [1, 2]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          enable-cache: true
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Compare local and exact update directions
+        run: >-
+          uv run python scripts/run_flyvis_gradient_alignment.py
+          --extent ${{ matrix.extent }}
+          --seeds 5
+          --frames 7
+          --frame-steps 2
+          --branch-steps 32
+          --step-size 0.015
+          --beta 0.3
+          --out results/generated/flyvis_gradient_alignment_extent${{ matrix.extent }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-gradient-alignment-extent${{ matrix.extent }}
+          path: results/generated/flyvis_gradient_alignment_extent${{ matrix.extent }}.csv
