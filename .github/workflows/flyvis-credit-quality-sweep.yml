@@ -1,0 +1,83 @@
+name: FlyVis credit quality scaling sweep
+
+on:
+  push:
+    paths:
+      - .github/workflows/flyvis-credit-quality-sweep.yml
+      - scripts/run_flyvis_temporal_oracle_interpolation.py
+      - scripts/diagnose_local_gradient_trajectory.py
+      - scripts/run_flyvis_retinotopic_temporal_adam.py
+      - src/predcircuit/**
+  workflow_dispatch:
+
+jobs:
+  alpha-sweep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        alpha: [0.0, 0.1, 0.25, 0.5, 1.0]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          enable-cache: true
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Measure credit-quality interpolation with 10 seeds
+        run: >-
+          uv run python scripts/run_flyvis_temporal_oracle_interpolation.py
+          --extent 2
+          --seeds 10
+          --alpha ${{ matrix.alpha }}
+          --epochs 100
+          --frames 7
+          --frame-steps 2
+          --step-size 0.015
+          --beta 0.03
+          --learning-rate 10.0
+          --weight-decay 1e-5
+          --max-update 0.05
+          --test-repeats 8
+          --out results/generated/flyvis_credit_quality_alpha_${{ matrix.alpha }}_n10.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-credit-quality-alpha-${{ matrix.alpha }}-n10
+          path: results/generated/flyvis_credit_quality_alpha_${{ matrix.alpha }}_n10.csv
+
+  lr-sweep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        alpha: [0.25, 1.0]
+        learning_rate: [1.0, 3.0, 10.0, 30.0]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          enable-cache: true
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Check whether credit-quality effect survives LR tuning
+        run: >-
+          uv run python scripts/run_flyvis_temporal_oracle_interpolation.py
+          --extent 2
+          --seeds 5
+          --alpha ${{ matrix.alpha }}
+          --epochs 100
+          --frames 7
+          --frame-steps 2
+          --step-size 0.015
+          --beta 0.03
+          --learning-rate ${{ matrix.learning_rate }}
+          --weight-decay 1e-5
+          --max-update 0.05
+          --test-repeats 8
+          --out results/generated/flyvis_credit_quality_alpha_${{ matrix.alpha }}_lr_${{ matrix.learning_rate }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-credit-quality-alpha-${{ matrix.alpha }}-lr-${{ matrix.learning_rate }}
+          path: results/generated/flyvis_credit_quality_alpha_${{ matrix.alpha }}_lr_${{ matrix.learning_rate }}.csv
