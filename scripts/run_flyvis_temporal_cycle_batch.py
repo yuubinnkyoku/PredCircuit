@@ -10,6 +10,7 @@ import torch
 from run_flyvis_retinotopic_contrastive import (
     DIRECTIONS,
     evaluate,
+    output_nodes,
     render_motion_batch,
     targets_for,
 )
@@ -40,6 +41,7 @@ def cycle_batch_step(
 ) -> tuple[float, float, float]:
     directions = list(DIRECTIONS)
     random.Random(700_000 * seed + epoch).shuffle(directions)
+    outs = output_nodes(circuit)
 
     edge_update = torch.zeros_like(model.weight)
     bias_update = torch.zeros_like(model.bias)
@@ -88,12 +90,7 @@ def cycle_batch_step(
         mean_abs_sum += float(sample_edge_update.abs().mean())
         max_abs = max(max_abs, float(sample_edge_update.abs().max()))
         output_shift_sum += float(
-            (
-                nudged_state[:, list(circuit.output_nodes)]
-                - free_state[:, list(circuit.output_nodes)]
-            )
-            .abs()
-            .mean()
+            (nudged_state[:, outs] - free_state[:, outs]).abs().mean()
         )
 
     model.weight.add_(edge_update)
