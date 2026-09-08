@@ -61,7 +61,9 @@ def choose_credit(
     if mode == "projected":
         return parallel
     if mode == "projected_equal_norm":
-        scale = torch.linalg.vector_norm(local) / torch.linalg.vector_norm(parallel).clamp_min(1e-30)
+        scale = torch.linalg.vector_norm(local) / torch.linalg.vector_norm(parallel).clamp_min(
+            1e-30
+        )
         return parallel * scale
     if mode == "residual":
         return residual
@@ -274,9 +276,7 @@ def main() -> None:
     frame = pd.DataFrame(rows)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     frame.to_csv(args.out, index=False)
-    summary = frame[["mse_after", "accuracy_after", "margin_after"]].agg(
-        ["mean", "median", "std"]
-    )
+    summary = frame[["mse_after", "accuracy_after", "margin_after"]].agg(["mean", "median", "std"])
     print(
         f"Credit projection: mode={args.mode}, residual_scale={args.residual_scale:g}, "
         f"extent={args.extent}, beta={args.beta:g}, lr={args.learning_rate:g}"
