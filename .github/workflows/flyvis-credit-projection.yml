@@ -1,0 +1,83 @@
+name: FlyVis local credit projection diagnostic
+
+on:
+  push:
+    paths:
+      - .github/workflows/flyvis-credit-projection.yml
+      - scripts/run_flyvis_temporal_credit_projection.py
+      - scripts/run_flyvis_temporal_oracle_interpolation.py
+      - scripts/diagnose_local_gradient_trajectory.py
+      - src/predcircuit/**
+  workflow_dispatch:
+
+jobs:
+  component:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [local, projected, projected_equal_norm, residual, oracle]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          enable-cache: true
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Train with ${{ matrix.mode }} credit component
+        run: >-
+          uv run python scripts/run_flyvis_temporal_credit_projection.py
+          --extent 2
+          --seeds 5
+          --mode ${{ matrix.mode }}
+          --epochs 100
+          --frames 7
+          --frame-steps 2
+          --step-size 0.015
+          --beta 0.03
+          --learning-rate 10.0
+          --weight-decay 1e-5
+          --max-update 0.05
+          --test-repeats 8
+          --out results/generated/flyvis_credit_projection_${{ matrix.mode }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-credit-projection-${{ matrix.mode }}
+          path: results/generated/flyvis_credit_projection_${{ matrix.mode }}.csv
+
+  residual-attenuation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        residual_scale: [0.25, 0.5, 0.75]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          enable-cache: true
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Train with residual scale ${{ matrix.residual_scale }}
+        run: >-
+          uv run python scripts/run_flyvis_temporal_credit_projection.py
+          --extent 2
+          --seeds 5
+          --mode attenuated_residual
+          --residual-scale ${{ matrix.residual_scale }}
+          --epochs 100
+          --frames 7
+          --frame-steps 2
+          --step-size 0.015
+          --beta 0.03
+          --learning-rate 10.0
+          --weight-decay 1e-5
+          --max-update 0.05
+          --test-repeats 8
+          --out results/generated/flyvis_credit_projection_residual_${{ matrix.residual_scale }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-credit-projection-residual-${{ matrix.residual_scale }}
+          path: results/generated/flyvis_credit_projection_residual_${{ matrix.residual_scale }}.csv
