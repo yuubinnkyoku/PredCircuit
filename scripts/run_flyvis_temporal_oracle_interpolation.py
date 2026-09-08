@@ -265,9 +265,7 @@ def main() -> None:
     frame = pd.DataFrame(rows)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     frame.to_csv(args.out, index=False)
-    summary = frame[["mse_after", "accuracy_after", "margin_after"]].agg(
-        ["mean", "median", "std"]
-    )
+    summary = frame[["mse_after", "accuracy_after", "margin_after"]].agg(["mean", "median", "std"])
     print(
         f"Local/oracle interpolation: extent={args.extent}, alpha={args.alpha:g}, "
         f"beta={args.beta:g}, lr={args.learning_rate:g}"
