@@ -1,0 +1,54 @@
+name: FlyVis coherence norm control
+
+on:
+  push:
+    paths:
+      - .github/workflows/flyvis-coherence-norm-control.yml
+      - scripts/run_flyvis_temporal_coherence_norm_control.py
+      - scripts/run_flyvis_temporal_coherence_gate.py
+      - scripts/run_flyvis_retinotopic_temporal_adam.py
+      - scripts/run_flyvis_retinotopic_temporal_contrastive.py
+      - scripts/run_flyvis_retinotopic_contrastive.py
+      - scripts/run_flyvis_credit_residual_scaling.py
+      - src/predcircuit/**
+  workflow_dispatch:
+
+jobs:
+  norm-control:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        learning_rate: [30, 40]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          enable-cache: true
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Sweep norm-matched coherence at LR ${{ matrix.learning_rate }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for power in 0 0.5 0.75 1; do
+            uv run python scripts/run_flyvis_temporal_coherence_norm_control.py \
+              --extent 2 \
+              --seeds 10 \
+              --coherence-power "$power" \
+              --epochs 100 \
+              --frames 7 \
+              --frame-steps 2 \
+              --step-size 0.015 \
+              --beta 0.03 \
+              --learning-rate ${{ matrix.learning_rate }} \
+              --weight-decay 1e-5 \
+              --max-update 0.05 \
+              --test-repeats 8 \
+              --out "results/generated/flyvis_coherence_norm_power_${power}_lr_${{ matrix.learning_rate }}.csv"
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-coherence-norm-lr-${{ matrix.learning_rate }}
+          path: results/generated/flyvis_coherence_norm_power_*_lr_${{ matrix.learning_rate }}.csv
