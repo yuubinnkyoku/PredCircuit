@@ -14,11 +14,11 @@ on:
 jobs:
   coherence-gate:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
-        learning_rate: [10, 30]
+        learning_rate: [20, 30, 40]
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v10.0.1
@@ -30,10 +30,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          for power in 0 0.5 1 2; do
+          for power in 0 0.25 0.5 0.75 1; do
             uv run python scripts/run_flyvis_temporal_coherence_gate.py \
               --extent 2 \
-              --seeds 5 \
+              --seeds 10 \
               --coherence-power "$power" \
               --epochs 100 \
               --frames 7 \
