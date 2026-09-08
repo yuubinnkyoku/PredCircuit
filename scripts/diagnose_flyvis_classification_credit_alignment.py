@@ -152,9 +152,21 @@ def measure(
     for name, edge, bias, oracle_edge, oracle_bias in (
         ("mse_local_vs_ce_oracle", mse_local_edge, mse_local_bias, ce_oracle_edge, ce_oracle_bias),
         ("ce_local_vs_ce_oracle", ce_local_edge, ce_local_bias, ce_oracle_edge, ce_oracle_bias),
-        ("mse_local_vs_mse_oracle", mse_local_edge, mse_local_bias, mse_oracle_edge, mse_oracle_bias),
+        (
+            "mse_local_vs_mse_oracle",
+            mse_local_edge,
+            mse_local_bias,
+            mse_oracle_edge,
+            mse_oracle_bias,
+        ),
         ("ce_local_vs_mse_oracle", ce_local_edge, ce_local_bias, mse_oracle_edge, mse_oracle_bias),
-        ("mse_oracle_vs_ce_oracle", mse_oracle_edge, mse_oracle_bias, ce_oracle_edge, ce_oracle_bias),
+        (
+            "mse_oracle_vs_ce_oracle",
+            mse_oracle_edge,
+            mse_oracle_bias,
+            ce_oracle_edge,
+            ce_oracle_bias,
+        ),
     ):
         cosine, residual_fraction, parallel_fraction = geometry(
             edge,
