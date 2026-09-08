@@ -1,0 +1,44 @@
+name: FlyVis cancellation beta sweep
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/flyvis-cancellation-beta-sweep.yml
+      - scripts/diagnose_direction_cancellation.py
+      - scripts/diagnose_local_gradient_trajectory.py
+      - scripts/run_flyvis_retinotopic_temporal_adam.py
+      - scripts/run_flyvis_retinotopic_temporal_contrastive.py
+      - scripts/run_flyvis_retinotopic_contrastive.py
+      - src/predcircuit/**
+      - pyproject.toml
+
+jobs:
+  beta-sweep:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        extent: [1, 2]
+        beta: [0.03, 0.1, 0.3, 1.0]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          enable-cache: true
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Measure cancellation versus nudging strength
+        run: >-
+          uv run python scripts/diagnose_direction_cancellation.py
+          --extent ${{ matrix.extent }}
+          --seeds 10
+          --frames 7
+          --frame-steps 2
+          --step-size 0.015
+          --beta ${{ matrix.beta }}
+          --out results/generated/flyvis_direction_cancellation_e${{ matrix.extent }}_b${{ matrix.beta }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-direction-cancellation-e${{ matrix.extent }}-b${{ matrix.beta }}
+          path: results/generated/flyvis_direction_cancellation_e${{ matrix.extent }}_b${{ matrix.beta }}.csv
