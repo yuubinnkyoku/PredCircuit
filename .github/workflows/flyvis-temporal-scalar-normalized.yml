@@ -1,0 +1,45 @@
+name: FlyVis temporal scalar-normalized local PC
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/flyvis-temporal-scalar-normalized.yml
+      - scripts/run_flyvis_temporal_scalar_normalized.py
+      - scripts/run_flyvis_retinotopic_temporal_adam.py
+      - scripts/run_flyvis_retinotopic_temporal_contrastive.py
+      - scripts/run_flyvis_retinotopic_contrastive.py
+      - src/predcircuit/**
+      - pyproject.toml
+
+jobs:
+  scalar-normalized:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target_update: [0.00003, 0.0001, 0.0003]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          enable-cache: true
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Train extent-2 circuit with direction-preserving scalar normalization
+        run: >-
+          uv run python scripts/run_flyvis_temporal_scalar_normalized.py
+          --extent 2
+          --seeds 5
+          --epochs 100
+          --frames 7
+          --frame-steps 2
+          --step-size 0.015
+          --beta 0.3
+          --target-edge-mean-abs-update ${{ matrix.target_update }}
+          --test-repeats 8
+          --out results/generated/flyvis_temporal_scalar_normalized_${{ matrix.target_update }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-temporal-scalar-normalized-${{ matrix.target_update }}
+          path: results/generated/flyvis_temporal_scalar_normalized_${{ matrix.target_update }}.csv
