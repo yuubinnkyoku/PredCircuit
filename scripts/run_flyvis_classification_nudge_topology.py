@@ -78,21 +78,23 @@ def main() -> None:
             extent=args.extent,
             seed=seed,
         )
-        row = run_one(
-            circuit,
-            seed=seed,
-            epochs=args.epochs,
-            frames=args.frames,
-            width=args.bar_width,
-            frame_steps=args.frame_steps,
-            step_size=args.step_size,
-            beta=args.beta,
-            learning_rate=args.learning_rate,
-            weight_decay=args.weight_decay,
-            max_update=args.max_update,
-            test_repeats=args.test_repeats,
-        )
-        row["topology"] = args.topology
+        row = {
+            **run_one(
+                circuit,
+                seed=seed,
+                epochs=args.epochs,
+                frames=args.frames,
+                width=args.bar_width,
+                frame_steps=args.frame_steps,
+                step_size=args.step_size,
+                beta=args.beta,
+                learning_rate=args.learning_rate,
+                weight_decay=args.weight_decay,
+                max_update=args.max_update,
+                test_repeats=args.test_repeats,
+            ),
+            "topology": args.topology,
+        }
         rows.append(row)
 
     frame = pd.DataFrame(rows)
