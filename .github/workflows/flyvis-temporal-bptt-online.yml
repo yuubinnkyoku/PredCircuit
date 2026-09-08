@@ -1,0 +1,45 @@
+name: FlyVis temporal online BPTT target alignment
+
+on:
+  push:
+    paths:
+      - .github/workflows/flyvis-temporal-bptt-online.yml
+      - scripts/run_flyvis_temporal_bptt_online.py
+      - scripts/run_flyvis_exact_pc_gradient.py
+      - scripts/run_flyvis_temporal_target_alignment.py
+      - scripts/run_flyvis_retinotopic_contrastive.py
+      - scripts/run_flyvis_gradient_alignment.py
+      - src/predcircuit/**
+  workflow_dispatch:
+
+jobs:
+  bptt:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target_shift: [0, 1, 2, 3]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          enable-cache: true
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Run online exact-gradient control
+        run: >-
+          uv run python scripts/run_flyvis_temporal_bptt_online.py
+          --target-shift ${{ matrix.target_shift }}
+          --extent 1
+          --seeds 10
+          --epochs 100
+          --frames 7
+          --frame-steps 2
+          --step-size 0.015
+          --learning-rate 0.01
+          --test-repeats 8
+          --out results/generated/flyvis_temporal_bptt_online_shift${{ matrix.target_shift }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-temporal-bptt-online-shift${{ matrix.target_shift }}
+          path: results/generated/flyvis_temporal_bptt_online_shift${{ matrix.target_shift }}.csv
