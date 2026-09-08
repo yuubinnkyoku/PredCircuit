@@ -1,0 +1,45 @@
+name: FlyVis classification credit alignment
+
+on:
+  push:
+    paths:
+      - .github/workflows/flyvis-classification-credit-alignment.yml
+      - scripts/diagnose_flyvis_classification_credit_alignment.py
+      - scripts/run_flyvis_temporal_classification_nudge.py
+      - scripts/run_flyvis_temporal_oracle_interpolation.py
+      - scripts/run_flyvis_exact_pc_gradient.py
+      - scripts/run_flyvis_temporal_credit_projection.py
+      - scripts/run_flyvis_retinotopic_contrastive.py
+      - src/predcircuit/**
+  workflow_dispatch:
+
+jobs:
+  alignment:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        extent: [1, 2]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          enable-cache: true
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Compare local credit to exact task gradients
+        run: >-
+          uv run python scripts/diagnose_flyvis_classification_credit_alignment.py
+          --extent ${{ matrix.extent }}
+          --seeds 20
+          --repeats 1
+          --frames 7
+          --frame-steps 2
+          --step-size 0.015
+          --beta 0.03
+          --out results/generated/flyvis_classification_credit_alignment_extent_${{ matrix.extent }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-classification-credit-alignment-extent-${{ matrix.extent }}
+          path: results/generated/flyvis_classification_credit_alignment_extent_${{ matrix.extent }}.csv
