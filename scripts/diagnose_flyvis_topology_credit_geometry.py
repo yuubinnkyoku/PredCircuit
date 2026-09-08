@@ -169,8 +169,7 @@ def main() -> None:
     print("\nPaired biological - null deltas across seeds:")
     for null in ("type_pair_rewire", "pair_rotation", "degree_rewire"):
         cosine_delta = (
-            paired[("local_oracle_cosine", "biological")]
-            - paired[("local_oracle_cosine", null)]
+            paired[("local_oracle_cosine", "biological")] - paired[("local_oracle_cosine", null)]
         )
         residual_delta = (
             paired[("residual_norm_fraction", "biological")]
