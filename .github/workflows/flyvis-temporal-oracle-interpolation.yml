@@ -1,0 +1,47 @@
+name: FlyVis temporal local-to-oracle credit interpolation
+
+on:
+  push:
+    paths:
+      - .github/workflows/flyvis-temporal-oracle-interpolation.yml
+      - scripts/run_flyvis_temporal_oracle_interpolation.py
+      - scripts/diagnose_local_gradient_trajectory.py
+      - scripts/run_flyvis_retinotopic_temporal_adam.py
+      - src/predcircuit/**
+  workflow_dispatch:
+
+jobs:
+  interpolation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        alpha: [0.0, 0.1, 0.25, 0.5, 1.0]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          enable-cache: true
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Train extent-2 circuit with mixed local/exact credit
+        run: >-
+          uv run python scripts/run_flyvis_temporal_oracle_interpolation.py
+          --extent 2
+          --seeds 3
+          --alpha ${{ matrix.alpha }}
+          --epochs 100
+          --frames 7
+          --frame-steps 2
+          --step-size 0.015
+          --beta 0.03
+          --learning-rate 10.0
+          --weight-decay 1e-5
+          --max-update 0.05
+          --test-repeats 8
+          --out results/generated/flyvis_temporal_oracle_interpolation_${{ matrix.alpha }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-temporal-oracle-interpolation-${{ matrix.alpha }}
+          path: results/generated/flyvis_temporal_oracle_interpolation_${{ matrix.alpha }}.csv
