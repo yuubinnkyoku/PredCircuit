@@ -115,17 +115,17 @@ def main() -> None:
     frame = pd.DataFrame(rows)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     frame.to_csv(args.out, index=False)
-    summary = frame.groupby("topology")[[
-        "local_oracle_cosine",
-        "parallel_norm_fraction",
-        "residual_norm_fraction",
-        "local_norm",
-        "oracle_norm",
-    ]].agg(["mean", "median", "std"])
-    per_seed = (
-        frame.groupby(["topology", "seed"])[
-            ["local_oracle_cosine", "residual_norm_fraction"]
+    summary = frame.groupby("topology")[
+        [
+            "local_oracle_cosine",
+            "parallel_norm_fraction",
+            "residual_norm_fraction",
+            "local_norm",
+            "oracle_norm",
         ]
+    ].agg(["mean", "median", "std"])
+    per_seed = (
+        frame.groupby(["topology", "seed"])[["local_oracle_cosine", "residual_norm_fraction"]]
         .mean()
         .reset_index()
     )
