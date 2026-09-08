@@ -20,7 +20,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        learning_rate: [30, 40]
+        learning_rate: [20, 30]
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v10.0.1
@@ -28,7 +28,7 @@ jobs:
           enable-cache: true
       - run: uv python install 3.11
       - run: uv sync
-      - name: Sweep norm-matched coherence at LR ${{ matrix.learning_rate }}
+      - name: Sweep unclipped norm-matched coherence at LR ${{ matrix.learning_rate }}
         shell: bash
         run: |
           set -euo pipefail
@@ -44,11 +44,11 @@ jobs:
               --beta 0.03 \
               --learning-rate ${{ matrix.learning_rate }} \
               --weight-decay 1e-5 \
-              --max-update 0.05 \
+              --max-update 0 \
               --test-repeats 8 \
-              --out "results/generated/flyvis_coherence_norm_power_${power}_lr_${{ matrix.learning_rate }}.csv"
+              --out "results/generated/flyvis_coherence_norm_unclipped_power_${power}_lr_${{ matrix.learning_rate }}.csv"
           done
       - uses: actions/upload-artifact@v4
         with:
-          name: flyvis-coherence-norm-lr-${{ matrix.learning_rate }}
-          path: results/generated/flyvis_coherence_norm_power_*_lr_${{ matrix.learning_rate }}.csv
+          name: flyvis-coherence-norm-unclipped-lr-${{ matrix.learning_rate }}
+          path: results/generated/flyvis_coherence_norm_unclipped_power_*_lr_${{ matrix.learning_rate }}.csv
