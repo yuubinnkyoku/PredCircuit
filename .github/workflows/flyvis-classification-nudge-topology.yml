@@ -1,0 +1,50 @@
+name: FlyVis classification nudge topology
+
+on:
+  push:
+    paths:
+      - .github/workflows/flyvis-classification-nudge-topology.yml
+      - scripts/run_flyvis_classification_nudge_topology.py
+      - scripts/run_flyvis_temporal_classification_nudge.py
+      - scripts/run_flyvis_temporal_coherence_gate.py
+      - scripts/run_flyvis_credit_residual_scaling.py
+      - scripts/run_flyvis_retinotopic_contrastive.py
+      - src/predcircuit/**
+  workflow_dispatch:
+
+jobs:
+  topology:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        topology: [biological, type_pair_rewire, pair_rotation]
+        learning_rate: [30, 40]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          enable-cache: true
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Train classification local PC on ${{ matrix.topology }} at LR ${{ matrix.learning_rate }}
+        run: >-
+          uv run python scripts/run_flyvis_classification_nudge_topology.py
+          --topology ${{ matrix.topology }}
+          --extent 2
+          --seeds 10
+          --epochs 100
+          --frames 7
+          --frame-steps 2
+          --step-size 0.015
+          --beta 0.03
+          --learning-rate ${{ matrix.learning_rate }}
+          --weight-decay 1e-5
+          --max-update 0.05
+          --test-repeats 8
+          --out results/generated/flyvis_classification_${{ matrix.topology }}_lr_${{ matrix.learning_rate }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-classification-${{ matrix.topology }}-lr-${{ matrix.learning_rate }}
+          path: results/generated/flyvis_classification_${{ matrix.topology }}_lr_${{ matrix.learning_rate }}.csv
