@@ -1,0 +1,47 @@
+name: FlyVis classification nudge
+
+on:
+  push:
+    paths:
+      - .github/workflows/flyvis-classification-nudge.yml
+      - scripts/run_flyvis_temporal_classification_nudge.py
+      - scripts/run_flyvis_temporal_coherence_gate.py
+      - scripts/run_flyvis_credit_residual_scaling.py
+      - scripts/run_flyvis_retinotopic_contrastive.py
+      - src/predcircuit/**
+  workflow_dispatch:
+
+jobs:
+  classification-nudge:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        learning_rate: [20, 30, 40]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          enable-cache: true
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Train with output cross-entropy nudge at LR ${{ matrix.learning_rate }}
+        run: |
+          uv run python scripts/run_flyvis_temporal_classification_nudge.py \
+            --extent 2 \
+            --seeds 10 \
+            --epochs 100 \
+            --frames 7 \
+            --frame-steps 2 \
+            --step-size 0.015 \
+            --beta 0.03 \
+            --learning-rate ${{ matrix.learning_rate }} \
+            --weight-decay 1e-5 \
+            --max-update 0.05 \
+            --test-repeats 8 \
+            --out "results/generated/flyvis_classification_nudge_lr_${{ matrix.learning_rate }}.csv"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-classification-nudge-lr-${{ matrix.learning_rate }}
+          path: results/generated/flyvis_classification_nudge_lr_${{ matrix.learning_rate }}.csv
