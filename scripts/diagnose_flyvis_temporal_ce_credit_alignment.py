@@ -146,9 +146,7 @@ def geometry(
         "residual_fraction": float(torch.linalg.vector_norm(residual) / candidate_norm),
         "parallel_fraction": float(torch.linalg.vector_norm(parallel) / candidate_norm),
         "candidate_norm": float(candidate_norm),
-        "oracle_norm": float(
-            torch.linalg.vector_norm(flatten_credit(oracle_edge, oracle_bias))
-        ),
+        "oracle_norm": float(torch.linalg.vector_norm(flatten_credit(oracle_edge, oracle_bias))),
     }
 
 
@@ -265,10 +263,7 @@ def main() -> None:
     print(summary.to_string())
 
     per_seed = frame.groupby(["comparison", "seed"])["cosine"].mean().unstack("comparison")
-    delta = (
-        per_seed["ce_local_vs_temporal_ce_oracle"]
-        - per_seed["mse_local_vs_temporal_ce_oracle"]
-    )
+    delta = per_seed["ce_local_vs_temporal_ce_oracle"] - per_seed["mse_local_vs_temporal_ce_oracle"]
     print("\nCE-local minus MSE-local cosine against temporal CE oracle:")
     print(f"mean={delta.mean():.6f}, median={delta.median():.6f}")
     print(f"\nSaved: {args.out}")
