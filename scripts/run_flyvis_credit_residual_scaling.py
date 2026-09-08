@@ -14,11 +14,7 @@ from run_flyvis_retinotopic_contrastive import (
     render_motion_batch,
     targets_for,
 )
-from run_flyvis_temporal_credit_projection import (
-    apply_credit,
-    flatten_credit,
-    projection_decomposition,
-)
+from run_flyvis_temporal_credit_projection import apply_credit, projection_decomposition
 from run_flyvis_temporal_oracle_interpolation import cycle_directions
 
 from predcircuit.flyvis import load_flyvis_spec
@@ -142,7 +138,6 @@ def run_one(
         jitter_seed=900_000 + seed,
     )
     count = max(epochs, 1)
-    oracle_vector = flatten_credit(oracle_edge, oracle_bias)
     return {
         "seed": seed,
         "residual_scale": residual_scale,
@@ -162,7 +157,6 @@ def run_one(
         "mean_residual_norm_fraction": residual_fraction_sum / count,
         "mean_abs_update": mean_update_sum / count,
         "max_abs_update": max_abs_update,
-        "final_oracle_norm": float(torch.linalg.vector_norm(oracle_vector)),
         "nodes": circuit.graph.num_nodes,
         "edges": circuit.graph.num_edges,
         "finite": bool(torch.isfinite(model.weight).all()) and math.isfinite(after["mse"]),
