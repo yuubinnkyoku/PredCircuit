@@ -89,9 +89,7 @@ def cycle_batch_step(
         bias_update += sample_bias_update
         mean_abs_sum += float(sample_edge_update.abs().mean())
         max_abs = max(max_abs, float(sample_edge_update.abs().max()))
-        output_shift_sum += float(
-            (nudged_state[:, outs] - free_state[:, outs]).abs().mean()
-        )
+        output_shift_sum += float((nudged_state[:, outs] - free_state[:, outs]).abs().mean())
 
     model.weight.add_(edge_update)
     model.bias.add_(bias_update)
