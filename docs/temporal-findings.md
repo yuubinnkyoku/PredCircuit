@@ -6,7 +6,7 @@ This note collects the current retinotopic/temporal results in one place. They a
 
 The task uses a finite retinotopic crop of the published FlyVis circuit. Moving Gaussian bars are presented as short sequences. The central T4a/T4b/T4c/T4d cells are evaluated as a four-way direction readout.
 
-The main extent-1 crop contains 443 nodes and 7,698 directed edges. Unless stated otherwise, trainable edge weights are randomly initialized and the graph supplies wiring structure rather than physiological synaptic efficacy.
+The main extent-1 crop contains 443 nodes and 7,698 directed edges. Extent 2 contains 1,203 nodes and 26,636 edges. Unless stated otherwise, trainable edge weights are randomly initialized and the graph supplies wiring structure rather than physiological synaptic efficacy.
 
 The local learning protocol is a two-phase online predictive-coding update. A free trajectory and a softly nudged trajectory are run through the same recurrent predictive-coding dynamics; every edge is updated from the difference of endpoint-local prediction-error statistics. No autograd graph or BPTT is used for that update.
 
@@ -44,41 +44,68 @@ Biological wiring beat `pair_rotation` in MSE in 10/10 seeds. The paired MSE dif
 
 This narrows the structural hypothesis: the result cannot be explained only by cell-type adjacency, edge count, node degree, or the existence of local receptive fields. The remaining candidate is the *alignment of those receptive-field geometries across cell types*.
 
-## 3. The local-PC advantage is strongly target-alignment dependent
+## 3. The local-PC topology advantage is strongly target-alignment dependent
 
-The canonical direction-to-T4 class assignment is `(1, 2, 0, 3)` for directions `(0, 90, 180, 270)` degrees. We cyclically shifted the target classes while keeping stimuli, graph, optimizer budget, and local rule fixed.
+The canonical direction-to-T4 class assignment is `(1, 2, 0, 3)` for directions `(0, 90, 180, 270)` degrees. We cyclically shifted the target classes while keeping stimuli, graph, training budget, and local rule fixed.
 
 | Target shift | Biological MSE | Rewire MSE | Biological accuracy | Rewire accuracy |
 |---:|---:|---:|---:|---:|
 | 0, canonical | **0.076989** | 0.083307 | **0.4500** | 0.2438 |
-| 1 | 0.082131 | 0.083898 | 0.2375 | 0.2594 |
-| 2 | 0.086132 | **0.085871** | 0.1438 | **0.2563** |
-| 3 | 0.082908 | 0.083781 | 0.2031 | 0.2281 |
+| 1 | 0.083555 | **0.082749** | 0.1750 | **0.2813** |
+| 2 | 0.083542 | **0.083440** | 0.1375 | **0.3063** |
+| 3 | **0.083476** | 0.084800 | 0.2344 | **0.2938** |
 
-For canonical targets, the paired MSE advantage `rewire - biological` was +0.006318 and biological wiring won in 9/10 seeds (Wilcoxon p = 0.00391). For shifts 1, 2, and 3, the corresponding paired tests were not significant.
+For canonical targets, the paired MSE advantage `rewire - biological` was +0.006317 and biological wiring won in 9/10 seeds (Wilcoxon p = 0.00586). For shifts 1, 2, and 3 the mean MSE advantages were -0.000805, -0.000102, and +0.001324 respectively; none gave a comparable reliable biological advantage.
 
-The interaction contrast
+The within-seed interaction
 
 `canonical topology advantage - mean(noncanonical topology advantages)`
 
-was +0.005525 in MSE advantage, positive in 9/10 seeds, with Wilcoxon p = 0.00977, exact sign-flip p = 0.00195, and bootstrap 95% interval approximately [0.00212, 0.00979]. The corresponding accuracy interaction was +25.94 percentage points, positive in 10/10 seeds, with p = 0.00195 and bootstrap interval approximately [18.44, 33.28] percentage points.
+was +0.006178 in MSE, positive in 10/10 seeds, with Wilcoxon p = 0.00195. The analogous accuracy interaction was +31.77 percentage points, positive in 9/10 seeds, p = 0.00586.
 
-This is currently one of the most informative controls. It says the extent-1 biological advantage is not a generic preference for any arbitrary four-way target mapping. However, it does **not** yet prove a local-credit-specific effect, because the biological topology may simply encode a task prior that helps any optimizer on the canonical mapping. A matched online exact-gradient/BPTT target-shift experiment is therefore required.
+Thus the extent-1 local-PC topology effect is strongly tied to the canonical T4 target organization rather than being a generic advantage for arbitrary permutations of the four outputs.
 
-## 4. Exact gradients show that topology is also a generic task prior
+## 4. Matched online exact gradients remove the target-specific interaction
 
-Using the same predictive-coding state dynamics but differentiating the supervised loss exactly through the unrolled recurrent inference, Adam at learning rate 0.01 solves the extent-1 task over 10 paired seeds:
+A decisive control uses the **same predictive-coding state dynamics, one-sample online schedule, stimulus jitter schedule, target shifts, and graph pair**, but computes exact gradients through the unrolled recurrent dynamics and updates weights/biases with Adam at learning rate 0.01.
+
+Over 10 paired seeds for every target shift:
+
+| Target shift | Biological MSE | Rewire MSE | Biological accuracy | Rewire accuracy |
+|---:|---:|---:|---:|---:|
+| 0 | **0.020227** | 0.041275 | 1.000 | 1.000 |
+| 1 | **0.020038** | 0.041904 | 1.000 | 1.000 |
+| 2 | **0.019510** | 0.040863 | 1.000 | 1.000 |
+| 3 | **0.021507** | 0.041553 | 1.000 | 1.000 |
+
+Biological wiring improves exact-gradient MSE for **every** target permutation: mean `rewire - biological` advantage is +0.02105, +0.02187, +0.02135, and +0.02005 for shifts 0 through 3, with biological lower in 10/10 seeds in every condition (Wilcoxon p = 0.00195 for each shift).
+
+Crucially, exact-gradient learning does **not** show the canonical-specific interaction seen under local PC. Its interaction
+
+`shift-0 topology advantage - mean(shifts-1..3 topology advantages)`
+
+is -0.000041, positive in only 6/10 seeds, Wilcoxon p = 0.922. In contrast, the same interaction under local PC is +0.006178. Taking the paired difference between the local-PC and exact-gradient interactions gives +0.006219, Wilcoxon p = 0.00586.
+
+This is the strongest current evidence for a **local-credit-specific topology interaction**. The biological graph is a generic task prior under exact gradients, but only the approximate local predictive-coding update depends strongly on the biological T4 target alignment.
+
+The correct claim is therefore narrower than “biological wiring learns better”:
+
+> Fine FlyVis retinotopic wiring appears to make the local predictive-coding credit signal selectively effective when the supervised objective is aligned with the circuit's biological T4 organization, while exact gradients can exploit the same wiring for arbitrary output permutations.
+
+This remains a model result on a synthetic moving-bar task, not evidence that the fly itself implements this exact learning rule.
+
+## 5. Exact gradients establish learnability and a generic topology prior
+
+A separate balanced-batch exact-gradient control at extent 1 also solves the task. With Adam at learning rate 0.01 for 100 epochs over 10 paired seeds:
 
 | Topology | Mean final MSE | Mean accuracy | Mean margin |
 |---|---:|---:|---:|
 | biological | **0.023788** | **1.000** | **0.295149** |
 | type-pair rewire | 0.038318 | **1.000** | 0.184927 |
 
-Thus the task is learnable and the biological topology helps exact-gradient optimization as well. The scientifically stronger question is no longer “does biological wiring help?” but rather “does fine biological wiring help the *local approximation to credit assignment* more than it helps exact-gradient learning?”
+A gradient-alignment diagnostic gives another useful clue. For a single motion example at extent 1, the temporal two-phase local edge update is well aligned with the exact same-PC gradient: cosine similarity is about 0.885 on biological wiring and 0.929 on the rewire. Balanced batches reduce combined alignment to roughly 0.25-0.36 because exact gradients from opposing directions cancel more strongly than residual error in the local approximation. This motivated online/stochastic local updates.
 
-A useful diagnostic supports the plausibility of the local rule: for a single motion example, local-vs-exact edge-gradient cosine similarity is about 0.885 on biological wiring and 0.929 on the rewire. Balanced batches reduce combined alignment to roughly 0.25-0.36 because exact gradients from opposing directions cancel more strongly than the residual error of the local approximation. This motivated online/stochastic local updates.
-
-## 5. Plasticity ablation
+## 6. Plasticity ablation
 
 At learning rate 10 over 10 seeds:
 
@@ -93,52 +120,43 @@ At learning rate 10 over 10 seeds:
 
 On biological wiring, edge plasticity clearly matters: edge-only versus bias-only MSE gives p = 0.00195, and accuracy gives p = 0.0156. Adding bias plasticity to edge plasticity further improves MSE (full versus edge-only p = 0.00977). The same cooperative effect is not seen on the rewired graph.
 
-## 6. Connectome-strength initialization is not a simple win
+## 7. Connectome-strength initialization is not a simple win
 
 The graph contains signed synapse-count-derived edge strengths. We compared random trainable initialization with initialization proportional to those measured structural strengths.
 
-At learning rate 1, neither initialization learns appreciably.
+At learning rate 1, neither initialization learns appreciably. At learning rate 3, structural-strength initialization improves descriptive performance across biological and control topologies, so the benefit is not specific to biological fine wiring.
 
-At learning rate 3, structural-strength initialization improves descriptive performance across biological and control topologies. For example:
+At learning rate 10, structural-strength initialization degrades the biological and pair-rotation conditions relative to random initialization: biological random reaches MSE 0.076989 / accuracy 0.4500, whereas biological structural-strength initialization reaches MSE 0.084385 / accuracy 0.2625.
 
-| Topology / init | Mean final MSE | Mean accuracy |
-|---|---:|---:|
-| biological / structural strength | **0.082882** | **0.3969** |
-| biological / random | 0.083017 | 0.3406 |
-| pair rotation / structural strength | 0.082887 | 0.3906 |
-| pair rotation / random | 0.083335 | 0.2500 |
-| rewire / structural strength | 0.083043 | 0.3625 |
-| rewire / random | 0.083302 | 0.2594 |
+This should not be interpreted as evidence that biological synaptic strengths are poor. Synapse count is only a structural proxy for physiological efficacy, and changing initial weight magnitudes changes recurrent conditioning and the appropriate update scale.
 
-The benefit is therefore not specific to biological fine wiring.
+## 8. Local-PC learning currently fails to scale to extent 2, but exact gradients do not
 
-At learning rate 10, the picture reverses strongly on biological wiring:
+At extent 2 (1,203 nodes, 26,636 edges), simply reusing the successful extent-1 local-PC settings (`weight_lr=10`, two recurrent inference steps per frame) gives chance-level biological accuracy and essentially no MSE improvement.
 
-| Topology / init | Mean final MSE | Mean accuracy |
-|---|---:|---:|
-| biological / random | **0.076989** | **0.4500** |
-| biological / structural strength | 0.084385 | 0.2625 |
-| pair rotation / random | **0.083482** | 0.2531 |
-| pair rotation / structural strength | 0.087068 | 0.2219 |
-| rewire / random | 0.083307 | 0.2438 |
-| rewire / structural strength | **0.082714** | 0.2688 |
+An exploratory 5-seed scale sweep tested learning rates 10, 30, and 100 with two or four inference steps per frame:
 
-This should not be interpreted as evidence that biological synaptic strengths are poor. Synapse count is only a structural proxy for physiological efficacy, and the same local learning-rate scale changes the recurrent state conditioning when initial weight magnitudes change. The result instead shows that initialization scale and state dynamics must be normalized before measured-strength claims are meaningful.
+| Local LR | Steps/frame | Biological MSE | Biological accuracy | Rewire MSE | Rewire accuracy |
+|---:|---:|---:|---:|---:|---:|
+| 10 | 2 | 0.083390 | 0.2500 | **0.082700** | 0.1250 |
+| 10 | 4 | 0.083280 | 0.2500 | **0.082313** | 0.2813 |
+| 30 | 2 | 0.083923 | 0.2500 | **0.083352** | 0.2500 |
+| 30 | 4 | **0.090098** | 0.2500 | 0.092125 | 0.2500 |
+| 100 | 2 | **0.088947** | 0.2500 | 0.090468 | 0.2500 |
+| 100 | 4 | 0.177699 | 0.2500 | **0.137062** | 0.2500 |
 
-## 7. Fixed hyperparameters do not scale from extent 1 to extent 2
+At learning rate 100 with four steps, some runs became non-finite. Increasing update scale or inference depth therefore does not rescue the extent-2 local rule; large scale eventually destabilizes it.
 
-The extent-2 crop contains 1,203 nodes and 26,636 edges. Reusing the extent-1 settings unchanged (`weight_lr=10`, two recurrent inference steps per frame) gave:
+This is **not** a representational-capacity or task-learnability failure. Exact unrolled gradients at extent 2, with the same PC dynamics and two steps per frame, solve the task in all five seeds:
 
-| Topology | Mean final MSE | Mean accuracy | Mean absolute edge update |
+| Topology | Mean final MSE | Mean accuracy | Mean margin |
 |---|---:|---:|---:|
-| biological | 0.083378 | 0.2500 | 0.000032 |
-| type-pair rewire | **0.083046** | 0.1969 | 0.000033 |
+| biological | **0.011321** | **1.000** | **0.421842** |
+| type-pair rewire | 0.024163 | **1.000** | 0.289366 |
 
-The biological circuit remains at chance rather than reproducing the extent-1 learning effect. Its mean edge update is about four times smaller than the extent-1 learning-rate-10 run (~0.000125).
+The extent-2 exact-gradient result is particularly useful: the larger circuit has ample capacity and can propagate useful exact credit, while the present local approximation does not. The next scaling question is therefore about **local-gradient quality / normalization**, not about whether the circuit can solve the task.
 
-This is an important negative result. The current local-PC advantage does **not** automatically scale with circuit size under fixed hyperparameters. Possible explanations include update dilution with degree/edge count, insufficient recurrent inference depth, changed conditioning, and longer effective credit paths. These possibilities must be separated experimentally rather than hidden by retuning only the successful condition.
-
-## 8. Training-state locality has a temporal-depth crossover
+## 9. Training-state locality has a temporal-depth crossover
 
 For a streaming two-phase local-PC implementation, a simple temporary-state model stores the current node state plus one free-phase edge statistic and one free-phase node/bias statistic. For BPTT, the comparison uses only recurrent node-state history, deliberately excluding activation/intermediate/autodiff bookkeeping. BPTT numbers are therefore lower bounds.
 
@@ -156,16 +174,12 @@ Therefore local predictive learning should not be advertised as automatically me
 
 ## Current interpretation
 
-The current extent-1 evidence supports a narrow hypothesis:
+The strongest current result is now a **learning-rule × topology × target-alignment interaction** rather than a simple topology effect.
 
-> Fine cross-type retinotopic alignment in the FlyVis wiring is associated with more effective online two-phase predictive-coding learning on the biologically aligned T4 motion task.
+At extent 1, local predictive coding gains a large biological-wiring advantage only for the canonical T4 target assignment. Exact-gradient learning, under a matched online schedule, reaches 100% accuracy for every target permutation and retains almost the same biological-vs-rewire MSE advantage across all four permutations. The canonical-specific topology interaction is present under local PC and absent under exact gradients; the paired difference between those interactions is significant in this 10-seed pilot (p = 0.00586).
 
-Three qualifications are essential.
+That is consistent with the hypothesis that biological fine wiring can make a particular **local credit-assignment signal** more useful when the task matches the circuit's native organization. It does not prove that biological learning uses the implemented two-phase PC rule, and it does not yet generalize beyond this task/crop.
 
-First, the exact-gradient control shows that biological wiring is also a useful generic task prior, so a topology advantage by itself is not evidence about local credit assignment.
+The major negative result is equally important: the current local rule does not scale automatically to extent 2. Neither larger learning rates nor doubling recurrent inference depth rescues it, while exact gradients solve extent 2 easily. The next mechanistic experiment should therefore compare local-vs-exact gradient direction and norm across extents and identify whether signal quality, degree normalization, path length, or recurrent conditioning causes the scaling breakdown.
 
-Second, the target-shift interaction is strongly suggestive but must be compared with the *same target shifts under exact-gradient/BPTT learning*. If exact gradients solve all shifts similarly while local learning loses the biological advantage off the canonical mapping, the local-credit interpretation becomes substantially stronger. If exact gradients show the same target-specific interaction, the result is better described as task/topology alignment.
-
-Third, extent 2 currently fails under the extent-1 hyperparameters. A credible scaling claim requires either a principled size-normalized local rule or a prespecified scale sweep showing why inference/update magnitudes change.
-
-The next decisive controls are therefore: matched online BPTT across all four target shifts; extent-2 exact-gradient learnability; and an extent-2 sweep over local update scale and inference depth. Multiple stimulus families and eventually a prediction task that does not bake the T4 class labels directly into the readout are also needed before stronger biological claims.
+Before a stronger claim, the result should also survive additional stimulus families and a genuinely predictive objective (for example next-frame or sensory-cancellation prediction) that does not define success directly through the canonical T4 class labels.
