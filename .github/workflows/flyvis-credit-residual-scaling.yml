@@ -1,0 +1,53 @@
+name: FlyVis credit residual scaling
+
+on:
+  push:
+    paths:
+      - .github/workflows/flyvis-credit-residual-scaling.yml
+      - scripts/run_flyvis_credit_residual_scaling.py
+      - scripts/run_flyvis_temporal_credit_projection.py
+      - scripts/run_flyvis_temporal_oracle_interpolation.py
+      - scripts/run_flyvis_retinotopic_contrastive.py
+      - scripts/diagnose_local_gradient_trajectory.py
+      - src/predcircuit/**
+  workflow_dispatch:
+
+jobs:
+  residual-scaling:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        extent: [1, 2]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          enable-cache: true
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Sweep orthogonal residual at extent ${{ matrix.extent }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for residual_scale in 0 0.25 0.5 0.75 1; do
+            uv run python scripts/run_flyvis_credit_residual_scaling.py \
+              --extent ${{ matrix.extent }} \
+              --residual-scale "$residual_scale" \
+              --seeds 10 \
+              --epochs 100 \
+              --frames 7 \
+              --frame-steps 2 \
+              --step-size 0.015 \
+              --beta 0.03 \
+              --learning-rate 10.0 \
+              --weight-decay 1e-5 \
+              --max-update 0.05 \
+              --test-repeats 8 \
+              --out "results/generated/flyvis_credit_residual_extent_${{ matrix.extent }}_scale_${residual_scale}.csv"
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-credit-residual-extent-${{ matrix.extent }}
+          path: results/generated/flyvis_credit_residual_extent_${{ matrix.extent }}_scale_*.csv
