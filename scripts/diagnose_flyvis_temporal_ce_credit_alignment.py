@@ -7,7 +7,7 @@ from pathlib import Path
 import pandas as pd
 import torch
 import torch.nn.functional as F
-from run_flyvis_gradient_alignment import _differentiable_infer
+from run_flyvis_gradient_alignment import _differentiable_infer, vector_metrics
 from run_flyvis_retinotopic_contrastive import (
     DIRECTIONS,
     output_nodes,
@@ -65,7 +65,7 @@ def differentiable_frame_states(
     return states
 
 
-def temporal_ce_oracle_descent(
+def ce_oracle_descents(
     model: PredictiveCodingGraph,
     circuit: RetinotopicFlyVisCircuit,
     stimulus: torch.Tensor,
@@ -73,7 +73,8 @@ def temporal_ce_oracle_descent(
     *,
     frame_steps: int,
     step_size: float,
-) -> tuple[torch.Tensor, torch.Tensor]:
+) -> dict[str, tuple[torch.Tensor, torch.Tensor]]:
+    """Return exact CE descent for temporal-average and final-frame objectives."""
     weight = model.weight.detach().clone().requires_grad_(True)
     bias = model.bias.detach().clone().requires_grad_(True)
     states = differentiable_frame_states(
@@ -86,12 +87,22 @@ def temporal_ce_oracle_descent(
     )
     outs = output_nodes(circuit)
     losses = [F.cross_entropy(state[:, outs], classes) for state in states]
-    loss = torch.stack(losses).mean()
-    edge_grad, bias_grad = torch.autograd.grad(loss, (weight, bias))
-    return -edge_grad.detach(), -bias_grad.detach()
+    temporal_loss = torch.stack(losses).mean()
+    final_loss = losses[-1]
+
+    temporal_edge_grad, temporal_bias_grad = torch.autograd.grad(
+        temporal_loss,
+        (weight, bias),
+        retain_graph=True,
+    )
+    final_edge_grad, final_bias_grad = torch.autograd.grad(final_loss, (weight, bias))
+    return {
+        "temporal_ce_oracle": (-temporal_edge_grad.detach(), -temporal_bias_grad.detach()),
+        "final_ce_oracle": (-final_edge_grad.detach(), -final_bias_grad.detach()),
+    }
 
 
-def cycle_temporal_ce_oracle(
+def cycle_ce_oracles(
     model: PredictiveCodingGraph,
     circuit: RetinotopicFlyVisCircuit,
     *,
@@ -101,9 +112,11 @@ def cycle_temporal_ce_oracle(
     width: float,
     frame_steps: int,
     step_size: float,
-) -> tuple[torch.Tensor, torch.Tensor]:
-    edge_sum = torch.zeros_like(model.weight)
-    bias_sum = torch.zeros_like(model.bias)
+) -> dict[str, tuple[torch.Tensor, torch.Tensor]]:
+    sums = {
+        "temporal_ce_oracle": (torch.zeros_like(model.weight), torch.zeros_like(model.bias)),
+        "final_ce_oracle": (torch.zeros_like(model.weight), torch.zeros_like(model.bias)),
+    }
     directions = list(DIRECTIONS)
     random.Random(700_000 * seed + epoch).shuffle(directions)
     for sample_index, direction in enumerate(directions):
@@ -115,7 +128,7 @@ def cycle_temporal_ce_oracle(
             jitter_seed=100_000 * seed + 100 * epoch + sample_index,
         )
         _, classes = targets_for([direction])
-        edge, bias = temporal_ce_oracle_descent(
+        descents = ce_oracle_descents(
             model,
             circuit,
             stimulus,
@@ -123,9 +136,10 @@ def cycle_temporal_ce_oracle(
             frame_steps=frame_steps,
             step_size=step_size,
         )
-        edge_sum += edge
-        bias_sum += bias
-    return edge_sum, bias_sum
+        for oracle_name, (edge, bias) in descents.items():
+            edge_sum, bias_sum = sums[oracle_name]
+            sums[oracle_name] = (edge_sum + edge, bias_sum + bias)
+    return sums
 
 
 def geometry(
@@ -134,19 +148,25 @@ def geometry(
     oracle_edge: torch.Tensor,
     oracle_bias: torch.Tensor,
 ) -> dict[str, float]:
-    candidate, parallel, residual, _, cosine = projection_decomposition(
+    candidate, parallel, residual, coefficient, cosine = projection_decomposition(
         candidate_edge,
         candidate_bias,
         oracle_edge,
         oracle_bias,
     )
+    oracle = flatten_credit(oracle_edge, oracle_bias)
     candidate_norm = torch.linalg.vector_norm(candidate).clamp_min(1e-30)
+    oracle_norm = torch.linalg.vector_norm(oracle).clamp_min(1e-30)
+    _, norm_ratio, sign_agreement = vector_metrics(candidate, oracle)
     return {
         "cosine": cosine,
+        "sign_agreement": sign_agreement,
+        "projection_coefficient": coefficient,
         "residual_fraction": float(torch.linalg.vector_norm(residual) / candidate_norm),
         "parallel_fraction": float(torch.linalg.vector_norm(parallel) / candidate_norm),
         "candidate_norm": float(candidate_norm),
-        "oracle_norm": float(torch.linalg.vector_norm(flatten_credit(oracle_edge, oracle_bias))),
+        "oracle_norm": float(oracle_norm),
+        "norm_ratio": norm_ratio,
     }
 
 
@@ -184,7 +204,7 @@ def measure(
         frame_steps=frame_steps,
         step_size=step_size,
     )
-    oracle_edge, oracle_bias = cycle_temporal_ce_oracle(
+    oracles = cycle_ce_oracles(
         model,
         circuit,
         seed=seed,
@@ -195,27 +215,31 @@ def measure(
         step_size=step_size,
     )
 
+    local_credits = {
+        "mse_local": (mse_local_edge, mse_local_bias),
+        "ce_local": (ce_local_edge, ce_local_bias),
+    }
     rows: list[dict[str, float | int | str]] = []
-    for comparison, edge, bias in (
-        ("mse_local_vs_temporal_ce_oracle", mse_local_edge, mse_local_bias),
-        ("ce_local_vs_temporal_ce_oracle", ce_local_edge, ce_local_bias),
-    ):
-        rows.append(
-            {
-                "comparison": comparison,
-                "seed": seed,
-                "repeat": repeat,
-                **geometry(edge, bias, oracle_edge, oracle_bias),
-            }
-        )
+    for local_name, (edge, bias) in local_credits.items():
+        for oracle_name, (oracle_edge, oracle_bias) in oracles.items():
+            rows.append(
+                {
+                    "comparison": f"{local_name}_vs_{oracle_name}",
+                    "local_rule": local_name,
+                    "oracle_objective": oracle_name,
+                    "seed": seed,
+                    "repeat": repeat,
+                    **geometry(edge, bias, oracle_edge, oracle_bias),
+                }
+            )
     return rows
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
         description=(
-            "Compare MSE and classification local PC credit against an exact CE objective "
-            "averaged over the same temporal frames"
+            "Compare MSE and classification local PC credit against exact CE gradients for "
+            "both temporal-average and final-frame objectives"
         )
     )
     parser.add_argument("--extent", type=int, required=True)
@@ -253,19 +277,21 @@ def main() -> None:
     frame = pd.DataFrame(rows)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     frame.to_csv(args.out, index=False)
-    summary = frame.groupby("comparison")[["cosine", "residual_fraction"]].agg(
-        ["mean", "median", "std"]
-    )
+    summary = frame.groupby("comparison")[
+        ["cosine", "sign_agreement", "norm_ratio", "projection_coefficient", "residual_fraction"]
+    ].agg(["mean", "median", "std"])
     print(
-        f"Temporal CE alignment: extent={args.extent}, seeds={args.seeds}, "
+        f"CE objective alignment: extent={args.extent}, seeds={args.seeds}, "
         f"repeats={args.repeats}, {circuit.graph.num_nodes} nodes, {circuit.graph.num_edges} edges"
     )
     print(summary.to_string())
 
-    per_seed = frame.groupby(["comparison", "seed"])["cosine"].mean().unstack("comparison")
-    delta = per_seed["ce_local_vs_temporal_ce_oracle"] - per_seed["mse_local_vs_temporal_ce_oracle"]
-    print("\nCE-local minus MSE-local cosine against temporal CE oracle:")
-    print(f"mean={delta.mean():.6f}, median={delta.median():.6f}")
+    per_seed = frame.groupby(["oracle_objective", "local_rule", "seed"])["cosine"].mean()
+    for oracle_name in ("temporal_ce_oracle", "final_ce_oracle"):
+        oracle_rows = per_seed.loc[oracle_name].unstack("local_rule")
+        delta = oracle_rows["ce_local"] - oracle_rows["mse_local"]
+        print(f"\nCE-local minus MSE-local cosine against {oracle_name}:")
+        print(f"mean={delta.mean():.6f}, median={delta.median():.6f}")
     print(f"\nSaved: {args.out}")
 
 
