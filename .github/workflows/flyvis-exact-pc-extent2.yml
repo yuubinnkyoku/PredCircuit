@@ -1,0 +1,39 @@
+name: FlyVis exact PC gradient extent-2 control
+
+on:
+  push:
+    paths:
+      - .github/workflows/flyvis-exact-pc-extent2.yml
+      - scripts/run_flyvis_exact_pc_gradient.py
+      - scripts/run_flyvis_gradient_alignment.py
+      - scripts/run_flyvis_retinotopic_contrastive.py
+      - src/predcircuit/**
+  workflow_dispatch:
+
+jobs:
+  exact-gradient:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          enable-cache: true
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Train extent-2 circuit with exact unrolled gradients
+        run: >-
+          uv run python scripts/run_flyvis_exact_pc_gradient.py
+          --extent 2
+          --seeds 5
+          --epochs 100
+          --frames 7
+          --frame-steps 2
+          --step-size 0.015
+          --learning-rate 0.01
+          --train-repeats 4
+          --test-repeats 8
+          --out results/generated/flyvis_exact_pc_gradient_extent2.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-exact-pc-gradient-extent2
+          path: results/generated/flyvis_exact_pc_gradient_extent2.csv
