@@ -219,14 +219,16 @@ def main() -> None:
     frame = pd.DataFrame(rows)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     frame.to_csv(args.out, index=False)
-    summary = frame.groupby("epoch")[[
-        "cross_entropy",
-        "accuracy",
-        "raw_cosine",
-        "raw_projection_coefficient",
-        "applied_cosine",
-        "applied_projection_coefficient",
-    ]].mean()
+    summary = frame.groupby("epoch")[
+        [
+            "cross_entropy",
+            "accuracy",
+            "raw_cosine",
+            "raw_projection_coefficient",
+            "applied_cosine",
+            "applied_projection_coefficient",
+        ]
+    ].mean()
     print(f"Training trajectory: nudge_steps={args.nudge_steps}, seeds={args.seeds}")
     print(summary.to_string())
     print(f"\nSaved: {args.out}")
