@@ -13,7 +13,12 @@ from diagnose_flyvis_temporal_ce_credit_alignment import (
     differentiable_frame_states,
     geometry,
 )
-from run_flyvis_retinotopic_contrastive import DIRECTIONS, output_nodes, render_motion_batch, targets_for
+from run_flyvis_retinotopic_contrastive import (
+    DIRECTIONS,
+    output_nodes,
+    render_motion_batch,
+    targets_for,
+)
 from run_flyvis_strict_residual_controls import (
     bias_blocks,
     edge_blocks,
