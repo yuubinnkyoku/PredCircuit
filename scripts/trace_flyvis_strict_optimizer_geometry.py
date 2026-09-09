@@ -208,9 +208,7 @@ def run_seed(
                 "mean_abs_edge_delta": float(edge_delta.abs().mean()),
                 "mean_abs_bias_delta": float(bias_delta.abs().mean()),
                 "accuracy": float(task["accuracy"]) if task is not None else float("nan"),
-                "cross_entropy": float(task["cross_entropy"])
-                if task is not None
-                else float("nan"),
+                "cross_entropy": float(task["cross_entropy"]) if task is not None else float("nan"),
                 "margin": float(task["margin"]) if task is not None else float("nan"),
                 "finite": bool(torch.isfinite(model.weight).all())
                 and bool(torch.isfinite(model.bias).all()),
