@@ -1,0 +1,42 @@
+name: FlyVis branched direction balance
+
+on:
+  push:
+    paths:
+      - .github/workflows/flyvis-branched-direction-balance.yml
+      - scripts/diagnose_flyvis_branched_direction_balance.py
+      - scripts/diagnose_flyvis_branch_nudge_alignment.py
+      - scripts/diagnose_flyvis_temporal_ce_credit_alignment.py
+      - scripts/diagnose_flyvis_topology_credit_geometry.py
+      - src/predcircuit/**
+  workflow_dispatch:
+
+jobs:
+  balance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          enable-cache: true
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Measure direction-wise branched credit balance
+        run: >-
+          uv run python scripts/diagnose_flyvis_branched_direction_balance.py
+          --extent 2
+          --seeds 20
+          --frames 7
+          --frame-steps 2
+          --nudge-steps 2
+          --step-size 0.015
+          --beta 0.03
+          --summary-out results/generated/flyvis_branched_direction_balance.csv
+          --direction-out results/generated/flyvis_branched_direction_components.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-branched-direction-balance
+          path: |
+            results/generated/flyvis_branched_direction_balance.csv
+            results/generated/flyvis_branched_direction_components.csv
