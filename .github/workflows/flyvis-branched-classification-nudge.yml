@@ -1,6 +1,6 @@
 name: FlyVis branched classification nudge
 
-# Screening sweep for the per-frame branched local credit rule.
+# Learning-rate sweep for the best-aligned short per-frame branch rule.
 on:
   push:
     paths:
@@ -21,15 +21,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - nudge_steps: 1
-            learning_rate: 150
-          - nudge_steps: 2
-            learning_rate: 80
-          - nudge_steps: 4
-            learning_rate: 40
-          - nudge_steps: 8
-            learning_rate: 20
+        learning_rate: [20, 40, 80, 160, 320, 640]
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v10.0.1
@@ -45,15 +37,15 @@ jobs:
           --epochs 100
           --frames 7
           --frame-steps 2
-          --nudge-steps ${{ matrix.nudge_steps }}
+          --nudge-steps 2
           --step-size 0.015
           --beta 0.03
           --learning-rate ${{ matrix.learning_rate }}
           --weight-decay 1e-5
           --max-update 0.05
           --test-repeats 8
-          --out results/generated/flyvis_branched_classification_nudge_steps_${{ matrix.nudge_steps }}_lr_${{ matrix.learning_rate }}.csv
+          --out results/generated/flyvis_branched_classification_nudge_steps_2_lr_${{ matrix.learning_rate }}.csv
       - uses: actions/upload-artifact@v4
         with:
-          name: flyvis-branched-classification-nudge-steps-${{ matrix.nudge_steps }}-lr-${{ matrix.learning_rate }}
-          path: results/generated/flyvis_branched_classification_nudge_steps_${{ matrix.nudge_steps }}_lr_${{ matrix.learning_rate }}.csv
+          name: flyvis-branched-classification-nudge-steps-2-lr-${{ matrix.learning_rate }}
+          path: results/generated/flyvis_branched_classification_nudge_steps_2_lr_${{ matrix.learning_rate }}.csv
