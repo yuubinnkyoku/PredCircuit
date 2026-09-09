@@ -19,7 +19,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        learning_rate: [0.00001, 0.00003, 0.0001, 0.0003, 0.001]
+        learning_rate: [0.001, 0.003, 0.01, 0.03]
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v10.0.1
