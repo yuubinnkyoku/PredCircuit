@@ -1,0 +1,36 @@
+name: FlyVis branched bias LR sweep
+
+on:
+  push:
+    paths:
+      - "scripts/run_flyvis_branched_bias_lr_sweep.py"
+      - ".github/workflows/flyvis-branched-bias-lr-sweep.yml"
+  workflow_dispatch:
+
+jobs:
+  sweep:
+    strategy:
+      fail-fast: false
+      matrix:
+        bias_lr_factor: [0.0, 0.03, 0.1, 0.3, 1.0]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Train with bias LR factor ${{ matrix.bias_lr_factor }}
+        run: >-
+          uv run python scripts/run_flyvis_branched_bias_lr_sweep.py
+          --bias-lr-factor ${{ matrix.bias_lr_factor }}
+          --seeds 5
+          --epochs 100
+          --edge-learning-rate 160
+          --nudge-steps 2
+          --max-update 0.05
+          --test-repeats 8
+          --out results/generated/flyvis_branched_bias_lr_${{ matrix.bias_lr_factor }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-branched-bias-lr-${{ matrix.bias_lr_factor }}
+          path: results/generated/flyvis_branched_bias_lr_${{ matrix.bias_lr_factor }}.csv
