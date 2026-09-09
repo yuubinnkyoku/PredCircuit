@@ -1,0 +1,39 @@
+name: FlyVis delayed type-pair filter
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/flyvis-delayed-type-pair-filter.yml"
+
+jobs:
+  validate:
+    strategy:
+      fail-fast: false
+      matrix:
+        rule: [t4_mi9, top4, all_type_pair]
+        seed: [5, 6, 7, 8, 9]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          enable-cache: true
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Validate delayed ${{ matrix.rule }} on held-out seed ${{ matrix.seed }}
+        run: >-
+          uv run python scripts/run_flyvis_targeted_type_pair_filter.py
+          --rule ${{ matrix.rule }}
+          --seed ${{ matrix.seed }}
+          --epochs 100
+          --start-epoch 50
+          --nudge-steps 2
+          --learning-rate 160
+          --max-update 0.05
+          --test-repeats 8
+          --out results/generated/flyvis_delayed_${{ matrix.rule }}_seed${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-delayed-${{ matrix.rule }}-seed${{ matrix.seed }}
+          path: results/generated/flyvis_delayed_${{ matrix.rule }}_seed${{ matrix.seed }}.csv
