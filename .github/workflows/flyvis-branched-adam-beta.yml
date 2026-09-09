@@ -1,0 +1,50 @@
+name: FlyVis branched Adam beta
+
+on:
+  push:
+    paths:
+      - .github/workflows/flyvis-branched-adam-beta.yml
+      - scripts/run_flyvis_branched_classification_adam.py
+      - scripts/diagnose_flyvis_branch_nudge_alignment.py
+      - scripts/run_flyvis_retinotopic_temporal_adam.py
+      - scripts/run_flyvis_credit_residual_scaling.py
+      - scripts/run_flyvis_retinotopic_contrastive.py
+      - src/predcircuit/**
+  workflow_dispatch:
+
+jobs:
+  train:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        beta: [0.3, 0.1, 0.03, 0.01, 0.003, 0.001]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          enable-cache: true
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Train biological topology at beta ${{ matrix.beta }}
+        run: >-
+          uv run python scripts/run_flyvis_branched_classification_adam.py
+          --extent 2
+          --seeds 10
+          --epochs 100
+          --frames 7
+          --frame-steps 2
+          --nudge-steps 2
+          --step-size 0.015
+          --beta ${{ matrix.beta }}
+          --learning-rate 0.01
+          --beta1 0.9
+          --beta2 0.999
+          --adam-epsilon 1e-8
+          --test-repeats 8
+          --out results/generated/flyvis_branched_adam_beta_${{ matrix.beta }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-branched-adam-beta-${{ matrix.beta }}
+          path: results/generated/flyvis_branched_adam_beta_${{ matrix.beta }}.csv
