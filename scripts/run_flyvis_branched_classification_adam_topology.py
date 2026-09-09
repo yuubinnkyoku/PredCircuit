@@ -4,7 +4,7 @@ import argparse
 from pathlib import Path
 
 import pandas as pd
-from run_flyvis_branched_classification_adam import run_one
+from run_flyvis_branched_classification_adam import run_circuit
 from run_flyvis_classification_nudge_topology import circuit_for
 
 from predcircuit.flyvis import load_flyvis_spec
@@ -53,8 +53,8 @@ def main() -> None:
             seed=seed,
         )
         row = {
-            **run_one(
-                extent=args.extent,
+            **run_circuit(
+                circuit,
                 seed=seed,
                 epochs=args.epochs,
                 frames=args.frames,
