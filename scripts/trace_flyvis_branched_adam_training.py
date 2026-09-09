@@ -346,14 +346,16 @@ def main() -> None:
     frame = pd.DataFrame(rows)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     frame.to_csv(args.out, index=False)
-    summary = frame.groupby("epoch")[[
-        "raw_final_cosine",
-        "adam_final_cosine",
-        "raw_temporal_cosine",
-        "adam_temporal_cosine",
-        "weight_norm",
-        "mean_abs_update_since_previous",
-    ]].agg(["mean", "median", "std"])
+    summary = frame.groupby("epoch")[
+        [
+            "raw_final_cosine",
+            "adam_final_cosine",
+            "raw_temporal_cosine",
+            "adam_temporal_cosine",
+            "weight_norm",
+            "mean_abs_update_since_previous",
+        ]
+    ].agg(["mean", "median", "std"])
     print(
         f"Branched Adam trace: lr={args.learning_rate:g}, seeds={args.seeds}, "
         f"checkpoints={checkpoints}"
