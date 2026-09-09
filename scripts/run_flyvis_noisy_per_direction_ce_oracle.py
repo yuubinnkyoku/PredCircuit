@@ -150,7 +150,9 @@ def run_one(
         aggregate_cosine_sum += float(torch.dot(exact, noisy) / (exact_norm * noisy_norm))
         relative_noise_sum += float(torch.linalg.vector_norm(noisy - exact) / exact_norm)
         individual_norm_sum = sum(float(torch.linalg.vector_norm(part)) for part in exact_parts)
-        exact_cancellation_sum += float(exact_norm) * len(exact_parts) / max(individual_norm_sum, 1e-30)
+        exact_cancellation_sum += (
+            float(exact_norm) * len(exact_parts) / max(individual_norm_sum, 1e-30)
+        )
 
         edge_grad, bias_grad = split_pair(noisy, weight.numel())
         optimizer.zero_grad(set_to_none=True)
@@ -240,8 +242,7 @@ def main() -> None:
         "mean_exact_cancellation_ratio",
     ]
     print(
-        f"Noisy per-direction CE oracle: target cosine={args.target_cosine:g}, "
-        f"seeds={args.seeds}"
+        f"Noisy per-direction CE oracle: target cosine={args.target_cosine:g}, seeds={args.seeds}"
     )
     print(frame[metrics].agg(["mean", "median", "std"]).to_string())
     print(f"\nSaved: {args.out}")
