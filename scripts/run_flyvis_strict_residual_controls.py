@@ -323,7 +323,8 @@ def main() -> None:
     frame = pd.DataFrame(rows)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     frame.to_csv(args.out, index=False)
-    print(frame.agg(["mean", "median", "std"], numeric_only=True).to_string())
+    numeric = frame.select_dtypes(include="number")
+    print(numeric.agg(["mean", "median", "std"]).to_string())
     print(f"\nSaved: {args.out}")
 
 
