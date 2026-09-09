@@ -218,7 +218,8 @@ def run_one(
         "mean_direction_cosine": cosine_sum / count,
         "mean_direction_norm_ratio": norm_ratio_sum / count,
         "mean_abs_applied_update": applied_update_sum / count,
-        "finite": bool(torch.isfinite(model.weight).all()) and math.isfinite(after["cross_entropy"]),
+        "finite": bool(torch.isfinite(model.weight).all())
+        and math.isfinite(after["cross_entropy"]),
     }
 
 
