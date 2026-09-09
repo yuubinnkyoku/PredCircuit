@@ -19,7 +19,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        rule: [local, parallel_only, random_residual, permuted_residual]
+        rule:
+          - local
+          - permuted_residual
+          - group_permuted_residual
+          - edge_permuted_residual
+          - bias_permuted_residual
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v10.0.1
