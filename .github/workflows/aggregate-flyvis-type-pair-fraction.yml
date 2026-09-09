@@ -1,0 +1,88 @@
+name: Aggregate FlyVis type-pair fraction artifacts
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/aggregate-flyvis-type-pair-fraction.yml"
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  aggregate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: 34415996911
+          pattern: flyvis-fraction-*
+          path: fraction-artifacts
+          merge-multiple: true
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Aggregate CSVs and statistics
+        run: |
+          uv run python - <<'PY'
+          from pathlib import Path
+          import json
+          import pandas as pd
+          from scipy import stats
+
+          files = sorted(Path("fraction-artifacts").glob("*.csv"))
+          frames = [pd.read_csv(path) for path in files]
+          frame = pd.concat(frames, ignore_index=True)
+          frame.to_csv("results/generated/flyvis_type_pair_fraction_aggregate.csv", index=False)
+
+          local = frame[frame["fraction"] == 0.0].set_index("seed")["cross_entropy_improvement"]
+          rows = []
+          for (fraction, salt), group in frame.groupby(["fraction", "salt"]):
+              values = group.set_index("seed")["cross_entropy_improvement"]
+              common = local.index.intersection(values.index)
+              diff = values.loc[common] - local.loc[common]
+              rows.append({
+                  "fraction": float(fraction),
+                  "salt": salt,
+                  "n": int(len(diff)),
+                  "ce_improvement_mean": float(values.mean()),
+                  "diff_vs_local_mean": float(diff.mean()),
+                  "diff_vs_local_std": float(diff.std(ddof=1)) if len(diff) > 1 else float("nan"),
+                  "improved_seed_count": int((diff > 0).sum()),
+                  "paired_t_p": float(stats.ttest_rel(values.loc[common], local.loc[common]).pvalue) if len(diff) > 1 else float("nan"),
+                  "wilcoxon_p": float(stats.wilcoxon(diff).pvalue) if len(diff) > 0 and (diff != 0).any() else float("nan"),
+                  "selected_pair_count_mean": float(group["selected_pair_count"].mean()),
+                  "selected_edge_fraction_mean": float(group["selected_edge_fraction"].mean()),
+                  "cosine_error_mean": float(group["mean_abs_cosine_geometry_error"].mean()),
+                  "norm_error_mean": float(group["mean_abs_norm_ratio_geometry_error"].mean()),
+                  "projection_error_mean": float(group["mean_abs_projection_geometry_error"].mean()),
+                  "direction_change_mean": float(group["mean_relative_edge_direction_change"].mean()),
+              })
+          summary = pd.DataFrame(rows).sort_values(["salt", "fraction"])
+          summary.to_csv("results/generated/flyvis_type_pair_fraction_summary.csv", index=False)
+
+          trend = {}
+          for salt in ["A", "B"]:
+              subset = summary[(summary["salt"] == salt) & (summary["fraction"].between(0.25, 0.75))].copy()
+              endpoints = summary[summary["fraction"].isin([0.0, 1.0])].drop_duplicates("fraction")
+              curve = pd.concat([endpoints, subset], ignore_index=True).sort_values("fraction")
+              trend[salt] = {
+                  "fractions": curve["fraction"].tolist(),
+                  "diff_means": curve["diff_vs_local_mean"].tolist(),
+                  "spearman_fraction_diff": float(stats.spearmanr(curve["fraction"], curve["diff_vs_local_mean"]).statistic),
+                  "pearson_fraction_diff": float(stats.pearsonr(curve["fraction"], curve["diff_vs_local_mean"]).statistic),
+              }
+          Path("results/generated/flyvis_type_pair_fraction_trend.json").write_text(json.dumps(trend, indent=2))
+          print(summary.to_string(index=False))
+          print(json.dumps(trend, indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-type-pair-fraction-aggregate
+          path: |
+            results/generated/flyvis_type_pair_fraction_aggregate.csv
+            results/generated/flyvis_type_pair_fraction_summary.csv
+            results/generated/flyvis_type_pair_fraction_trend.json
