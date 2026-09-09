@@ -1,0 +1,37 @@
+name: FlyVis type-pair credit curvature
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "scripts/diagnose_flyvis_type_pair_credit_curvature.py"
+      - ".github/workflows/flyvis-type-pair-credit-curvature.yml"
+
+jobs:
+  diagnose:
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [0, 1, 2, 3, 4]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          enable-cache: true
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Diagnose type-pair credit curvature for seed ${{ matrix.seed }}
+        run: >-
+          uv run python scripts/diagnose_flyvis_type_pair_credit_curvature.py
+          --seed ${{ matrix.seed }}
+          --train-nudge-steps 2
+          --eval-nudge-steps 1
+          --learning-rate 160
+          --max-update 0.05
+          --test-repeats 8
+          --out results/generated/flyvis_type_pair_credit_curvature_seed${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-type-pair-credit-curvature-seed${{ matrix.seed }}
+          path: results/generated/flyvis_type_pair_credit_curvature_seed${{ matrix.seed }}.csv
