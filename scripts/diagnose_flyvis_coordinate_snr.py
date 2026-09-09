@@ -91,6 +91,10 @@ def measure(
 
     adam_local = first_adam_direction(local, adam_epsilon)
     adam_oracle = first_adam_direction(oracle, adam_epsilon)
+    adam_oracle_norm_sq = torch.dot(adam_oracle, adam_oracle).clamp_min(1e-30)
+    adam_alpha = torch.dot(adam_local, adam_oracle) / adam_oracle_norm_sq
+    adam_parallel = adam_alpha * adam_oracle
+    adam_residual = adam_local - adam_parallel
     adam_noise = adam_local - adam_oracle
 
     residual_dominates = residual.abs() > parallel.abs()
@@ -116,13 +120,18 @@ def measure(
         "coordinate_residual_dominates_fraction": float(residual_dominates.float().mean()),
         "oracle_weighted_residual_dominates_fraction": weighted_residual_dominates,
         "oracle_weighted_sign_agreement": weighted_sign_agreement(local, oracle),
-        "top10_oracle_weighted_sign_agreement": weighted_sign_agreement(
-            local, oracle, mask=top10
-        ),
-        "top50_oracle_weighted_sign_agreement": weighted_sign_agreement(
-            local, oracle, mask=top50
-        ),
+        "top10_oracle_weighted_sign_agreement": weighted_sign_agreement(local, oracle, mask=top10),
+        "top50_oracle_weighted_sign_agreement": weighted_sign_agreement(local, oracle, mask=top50),
         "adam_local_vs_adam_oracle_cosine": cosine(adam_local, adam_oracle),
+        "adam_projection_coefficient": float(adam_alpha),
+        "adam_residual_to_parallel_norm": float(
+            torch.linalg.vector_norm(adam_residual)
+            / torch.linalg.vector_norm(adam_parallel).clamp_min(1e-30)
+        ),
+        "adam_local_to_oracle_norm_ratio": float(
+            torch.linalg.vector_norm(adam_local)
+            / torch.linalg.vector_norm(adam_oracle).clamp_min(1e-30)
+        ),
         "adam_local_vs_raw_oracle_cosine": cosine(adam_local, oracle),
         "adam_oracle_vs_raw_oracle_cosine": cosine(adam_oracle, oracle),
         "adam_noise_to_oracle_adam_norm": float(
@@ -185,14 +194,12 @@ def main() -> None:
         "oracle_weighted_sign_agreement",
         "top10_oracle_weighted_sign_agreement",
         "adam_local_vs_adam_oracle_cosine",
-        "adam_local_vs_raw_oracle_cosine",
+        "adam_projection_coefficient",
+        "adam_residual_to_parallel_norm",
         "adam_noise_to_oracle_adam_norm",
         "local_below_10epsilon_fraction",
     ]
-    print(
-        f"Coordinate SNR: nudge_steps={args.nudge_steps}, beta={args.beta:g}, "
-        f"seeds={args.seeds}"
-    )
+    print(f"Coordinate SNR: nudge_steps={args.nudge_steps}, beta={args.beta:g}, seeds={args.seeds}")
     print(frame[metrics].agg(["mean", "median", "std"]).to_string())
     print(f"\nSaved: {args.out}")
 
