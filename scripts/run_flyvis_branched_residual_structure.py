@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import math
+from collections import defaultdict
 from pathlib import Path
 
 import pandas as pd
@@ -13,7 +14,7 @@ from run_flyvis_retinotopic_temporal_adam import local_adam_step
 from run_flyvis_temporal_credit_projection import flatten_credit
 
 from predcircuit.flyvis import load_flyvis_spec
-from predcircuit.flyvis_retinotopy import graph_from_flyvis_retinotopy
+from predcircuit.flyvis_retinotopy import RetinotopicFlyVisCircuit, graph_from_flyvis_retinotopy
 from predcircuit.model import PredictiveCodingGraph
 
 
@@ -57,6 +58,34 @@ def permute_residual_groups(
     return torch.cat((edge, bias))
 
 
+def permutation_within_edge_type_pairs(
+    circuit: RetinotopicFlyVisCircuit,
+    generator: torch.Generator,
+) -> torch.Tensor:
+    permutation = torch.arange(circuit.graph.num_edges)
+    blocks: dict[tuple[str, str], list[int]] = defaultdict(list)
+    for index, (source, target) in enumerate(circuit.graph.edge_index.t().tolist()):
+        blocks[(circuit.node_types[source], circuit.node_types[target])].append(index)
+    for indices in blocks.values():
+        block = torch.tensor(indices, dtype=torch.long)
+        permutation[block] = block[torch.randperm(len(indices), generator=generator)]
+    return permutation
+
+
+def permutation_within_node_types(
+    circuit: RetinotopicFlyVisCircuit,
+    generator: torch.Generator,
+) -> torch.Tensor:
+    permutation = torch.arange(circuit.graph.num_nodes)
+    blocks: dict[str, list[int]] = defaultdict(list)
+    for index, cell_type in enumerate(circuit.node_types):
+        blocks[cell_type].append(index)
+    for indices in blocks.values():
+        block = torch.tensor(indices, dtype=torch.long)
+        permutation[block] = block[torch.randperm(len(indices), generator=generator)]
+    return permutation
+
+
 def synthetic_direction(
     local: torch.Tensor,
     oracle: torch.Tensor,
@@ -67,6 +96,8 @@ def synthetic_direction(
     edge_size: int,
     edge_permutation: torch.Tensor,
     bias_permutation: torch.Tensor,
+    type_pair_edge_permutation: torch.Tensor,
+    node_type_bias_permutation: torch.Tensor,
 ) -> tuple[torch.Tensor, float, float]:
     oracle_norm_sq = torch.dot(oracle, oracle).clamp_min(1e-30)
     alpha = torch.dot(local, oracle) / oracle_norm_sq
@@ -102,6 +133,24 @@ def synthetic_direction(
             bias_permutation=bias_permutation,
             permute_edge=rule != "bias_permuted_residual",
             permute_bias=rule != "edge_permuted_residual",
+        )
+        matched = orthogonalize_and_match(grouped, oracle, residual_norm)
+        direction = parallel + matched
+    elif rule == "type_pair_edge_permuted_residual":
+        grouped = torch.cat(
+            (
+                residual[:edge_size][type_pair_edge_permutation],
+                residual[edge_size:],
+            )
+        )
+        matched = orthogonalize_and_match(grouped, oracle, residual_norm)
+        direction = parallel + matched
+    elif rule == "node_type_bias_permuted_residual":
+        grouped = torch.cat(
+            (
+                residual[:edge_size],
+                residual[edge_size:][node_type_bias_permutation],
+            )
         )
         matched = orthogonalize_and_match(grouped, oracle, residual_norm)
         direction = parallel + matched
@@ -147,6 +196,8 @@ def run_one(
     permutation = torch.randperm(edge_size + bias_size, generator=generator)
     edge_permutation = torch.randperm(edge_size, generator=generator)
     bias_permutation = torch.randperm(bias_size, generator=generator)
+    type_pair_edge_permutation = permutation_within_edge_type_pairs(circuit, generator)
+    node_type_bias_permutation = permutation_within_node_types(circuit, generator)
 
     before = evaluate_metrics(
         model,
@@ -197,6 +248,8 @@ def run_one(
             edge_size=edge_size,
             edge_permutation=edge_permutation,
             bias_permutation=bias_permutation,
+            type_pair_edge_permutation=type_pair_edge_permutation,
+            node_type_bias_permutation=node_type_bias_permutation,
         )
         edge_direction, bias_direction = split_credit(
             direction,
@@ -280,6 +333,8 @@ def main() -> None:
             "group_permuted_residual",
             "edge_permuted_residual",
             "bias_permuted_residual",
+            "type_pair_edge_permuted_residual",
+            "node_type_bias_permuted_residual",
         ),
         required=True,
     )
