@@ -1,5 +1,6 @@
 name: FlyVis branched classification nudge
 
+# Screening sweep for the per-frame branched local credit rule.
 on:
   push:
     paths:
