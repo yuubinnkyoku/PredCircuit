@@ -1,0 +1,63 @@
+name: FlyVis oracle-free type-pair consensus
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "scripts/run_flyvis_type_pair_consensus.py"
+      - ".github/workflows/flyvis-type-pair-consensus.yml"
+
+jobs:
+  validate:
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [15, 16, 17, 18, 19]
+        condition: [local, g075_early, g050_early, g025_early, g000_early, g075_late, g050_late, g025_late, g000_late]
+        include:
+          - condition: local
+            gamma: 1.0
+            start_epoch: 0
+          - condition: g075_early
+            gamma: 0.75
+            start_epoch: 0
+          - condition: g050_early
+            gamma: 0.5
+            start_epoch: 0
+          - condition: g025_early
+            gamma: 0.25
+            start_epoch: 0
+          - condition: g000_early
+            gamma: 0.0
+            start_epoch: 0
+          - condition: g075_late
+            gamma: 0.75
+            start_epoch: 50
+          - condition: g050_late
+            gamma: 0.5
+            start_epoch: 50
+          - condition: g025_late
+            gamma: 0.25
+            start_epoch: 50
+          - condition: g000_late
+            gamma: 0.0
+            start_epoch: 50
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          enable-cache: true
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Validate ${{ matrix.condition }} on seed ${{ matrix.seed }}
+        run: >-
+          uv run python scripts/run_flyvis_type_pair_consensus.py
+          --seed ${{ matrix.seed }}
+          --gamma ${{ matrix.gamma }}
+          --start-epoch ${{ matrix.start_epoch }}
+          --out results/generated/flyvis_consensus_${{ matrix.condition }}_seed${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-consensus-${{ matrix.condition }}-seed${{ matrix.seed }}
+          path: results/generated/flyvis_consensus_${{ matrix.condition }}_seed${{ matrix.seed }}.csv
