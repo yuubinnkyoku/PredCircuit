@@ -1,0 +1,47 @@
+name: FlyVis shared parameter training
+
+on:
+  push:
+    paths:
+      - "scripts/run_flyvis_shared_parameter_training.py"
+      - ".github/workflows/flyvis-shared-parameter-training.yml"
+  workflow_dispatch:
+
+jobs:
+  train:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: local_n2
+            mode: local
+            nudge_steps: 2
+            learning_rate: 0.01
+          - label: local_n16
+            mode: local
+            nudge_steps: 16
+            learning_rate: 0.01
+          - label: exact
+            mode: exact
+            nudge_steps: 16
+            learning_rate: 0.01
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Train shared parameters ${{ matrix.label }}
+        run: >-
+          uv run python scripts/run_flyvis_shared_parameter_training.py
+          --mode ${{ matrix.mode }}
+          --seeds 3
+          --epochs 100
+          --nudge-steps ${{ matrix.nudge_steps }}
+          --learning-rate ${{ matrix.learning_rate }}
+          --test-repeats 8
+          --out results/generated/flyvis_shared_parameter_${{ matrix.label }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-shared-parameter-${{ matrix.label }}
+          path: results/generated/flyvis_shared_parameter_${{ matrix.label }}.csv
