@@ -29,7 +29,7 @@ jobs:
           enable-cache: true
       - run: uv python install 3.11
       - run: uv sync
-      - name: Trace learning and credit alignment
+      - name: Trace learning and credit alignment without decay
         run: >-
           uv run python scripts/trace_flyvis_branched_training.py
           --extent 2
@@ -41,11 +41,11 @@ jobs:
           --step-size 0.015
           --beta 0.03
           --learning-rate ${{ matrix.learning_rate }}
-          --weight-decay 1e-5
+          --weight-decay 0
           --max-update 0.05
           --test-repeats 8
-          --out results/generated/flyvis_branched_training_trace_lr_${{ matrix.learning_rate }}.csv
+          --out results/generated/flyvis_branched_training_trace_no_decay_lr_${{ matrix.learning_rate }}.csv
       - uses: actions/upload-artifact@v4
         with:
-          name: flyvis-branched-training-trace-lr-${{ matrix.learning_rate }}
-          path: results/generated/flyvis_branched_training_trace_lr_${{ matrix.learning_rate }}.csv
+          name: flyvis-branched-training-trace-no-decay-lr-${{ matrix.learning_rate }}
+          path: results/generated/flyvis_branched_training_trace_no_decay_lr_${{ matrix.learning_rate }}.csv
