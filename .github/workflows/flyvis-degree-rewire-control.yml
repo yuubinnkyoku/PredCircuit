@@ -1,0 +1,61 @@
+name: FlyVis degree rewire control
+
+on:
+  push:
+    paths:
+      - .github/workflows/flyvis-degree-rewire-control.yml
+      - scripts/run_flyvis_degree_rewire_control.py
+      - scripts/diagnose_flyvis_topology_credit_geometry.py
+      - scripts/run_flyvis_branched_classification_adam.py
+      - scripts/run_flyvis_exact_ce_gradient.py
+      - src/predcircuit/**
+  workflow_dispatch:
+
+jobs:
+  control:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - rule: exact_ce
+            learning_rate: 0.001
+          - rule: exact_ce
+            learning_rate: 0.003
+          - rule: exact_ce
+            learning_rate: 0.01
+          - rule: branched_adam
+            learning_rate: 0.001
+          - rule: branched_adam
+            learning_rate: 0.01
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          enable-cache: true
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Run degree-rewire control
+        run: >-
+          uv run python scripts/run_flyvis_degree_rewire_control.py
+          --rule ${{ matrix.rule }}
+          --extent 2
+          --seeds 10
+          --epochs 100
+          --frames 7
+          --frame-steps 2
+          --nudge-steps 2
+          --step-size 0.015
+          --beta 0.03
+          --learning-rate ${{ matrix.learning_rate }}
+          --beta1 0.9
+          --beta2 0.999
+          --adam-epsilon 1e-8
+          --train-repeats 4
+          --test-repeats 8
+          --out results/generated/flyvis_degree_rewire_${{ matrix.rule }}_lr_${{ matrix.learning_rate }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-degree-rewire-${{ matrix.rule }}-lr-${{ matrix.learning_rate }}
+          path: results/generated/flyvis_degree_rewire_${{ matrix.rule }}_lr_${{ matrix.learning_rate }}.csv
