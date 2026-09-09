@@ -21,10 +21,8 @@ jobs:
       matrix:
         rule:
           - local
-          - permuted_residual
-          - group_permuted_residual
-          - edge_permuted_residual
-          - bias_permuted_residual
+          - type_pair_edge_permuted_residual
+          - node_type_bias_permuted_residual
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v10.0.1
