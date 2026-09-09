@@ -8,7 +8,6 @@ import pandas as pd
 import torch
 from diagnose_flyvis_branch_nudge_alignment import cycle_branched_credit
 from diagnose_flyvis_temporal_ce_credit_alignment import cycle_ce_oracles
-from run_flyvis_branched_classification_adam import run_circuit
 from run_flyvis_credit_residual_scaling import evaluate_metrics
 from run_flyvis_retinotopic_temporal_adam import local_adam_step
 from run_flyvis_temporal_credit_projection import flatten_credit
@@ -79,7 +78,9 @@ def synthetic_direction(
         torch.linalg.vector_norm(direction) * torch.linalg.vector_norm(oracle)
     ).clamp_min(1e-30)
     cosine = float(torch.dot(direction, oracle) / denominator)
-    norm_ratio = float(torch.linalg.vector_norm(direction) / torch.linalg.vector_norm(oracle).clamp_min(1e-30))
+    norm_ratio = float(
+        torch.linalg.vector_norm(direction) / torch.linalg.vector_norm(oracle).clamp_min(1e-30)
+    )
     return direction, cosine, norm_ratio
 
 
