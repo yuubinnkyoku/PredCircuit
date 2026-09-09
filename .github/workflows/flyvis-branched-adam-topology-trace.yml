@@ -1,0 +1,53 @@
+name: FlyVis branched Adam topology trace
+
+on:
+  push:
+    paths:
+      - .github/workflows/flyvis-branched-adam-topology-trace.yml
+      - scripts/trace_flyvis_branched_adam_topology.py
+      - scripts/trace_flyvis_branched_adam_training.py
+      - scripts/run_flyvis_classification_nudge_topology.py
+      - scripts/diagnose_flyvis_branch_nudge_alignment.py
+      - scripts/diagnose_flyvis_temporal_ce_credit_alignment.py
+      - scripts/run_flyvis_retinotopic_temporal_adam.py
+      - src/predcircuit/**
+  workflow_dispatch:
+
+jobs:
+  trace:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        topology: [biological, type_pair_rewire, pair_rotation]
+        learning_rate: [0.001, 0.01]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          enable-cache: true
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Trace topology-specific branched Adam dynamics
+        run: >-
+          uv run python scripts/trace_flyvis_branched_adam_topology.py
+          --topology ${{ matrix.topology }}
+          --extent 2
+          --seeds 5
+          --checkpoints 0,10,25,50,100
+          --frames 7
+          --frame-steps 2
+          --nudge-steps 2
+          --step-size 0.015
+          --beta 0.03
+          --learning-rate ${{ matrix.learning_rate }}
+          --beta1 0.9
+          --beta2 0.999
+          --adam-epsilon 1e-8
+          --test-repeats 8
+          --out results/generated/flyvis_branched_adam_${{ matrix.topology }}_trace_lr_${{ matrix.learning_rate }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-branched-adam-${{ matrix.topology }}-trace-lr-${{ matrix.learning_rate }}
+          path: results/generated/flyvis_branched_adam_${{ matrix.topology }}_trace_lr_${{ matrix.learning_rate }}.csv
