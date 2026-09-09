@@ -128,7 +128,8 @@ def run_one(
         "mean_abs_weight": float(model.weight.abs().mean()),
         "nodes": circuit.graph.num_nodes,
         "edges": circuit.graph.num_edges,
-        "finite": bool(torch.isfinite(model.weight).all()) and math.isfinite(after["cross_entropy"]),
+        "finite": bool(torch.isfinite(model.weight).all())
+        and math.isfinite(after["cross_entropy"]),
     }
 
 
