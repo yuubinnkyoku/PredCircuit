@@ -98,9 +98,7 @@ def match_projection_and_norm(
             return parallel
         candidate_orthogonal = target_orthogonal
         candidate_orthogonal_norm = target_orthogonal_norm
-    return parallel + candidate_orthogonal * (
-        desired_orthogonal_norm / candidate_orthogonal_norm
-    )
+    return parallel + candidate_orthogonal * (desired_orthogonal_norm / candidate_orthogonal_norm)
 
 
 def strict_direction(
