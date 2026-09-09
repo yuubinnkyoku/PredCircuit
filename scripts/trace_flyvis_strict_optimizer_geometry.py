@@ -9,13 +9,13 @@ from diagnose_flyvis_branch_nudge_alignment import cycle_branched_credit
 from diagnose_flyvis_temporal_ce_credit_alignment import cycle_ce_oracles, geometry
 from run_flyvis_credit_residual_scaling import evaluate_metrics
 from run_flyvis_retinotopic_temporal_adam import local_adam_step
+from run_flyvis_strict_residual_filters import filtered_direction
 from run_flyvis_strict_residual_controls import (
     bias_blocks,
     edge_blocks,
     permutation_from_blocks,
     strict_direction,
 )
-from run_flyvis_strict_residual_filters import filtered_direction
 
 from predcircuit.flyvis import load_flyvis_spec
 from predcircuit.flyvis_retinotopy import graph_from_flyvis_retinotopy
