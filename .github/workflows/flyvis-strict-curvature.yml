@@ -1,0 +1,38 @@
+name: FlyVis strict residual curvature
+
+on:
+  push:
+    paths:
+      - "scripts/diagnose_flyvis_strict_curvature.py"
+      - ".github/workflows/flyvis-strict-curvature.yml"
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        rule:
+          - local
+          - type_pair_edge_permuted
+          - source_position_edge_permuted
+          - bias_permuted
+          - type_pair_mean
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Diagnose curvature ${{ matrix.rule }}
+        run: >-
+          uv run python scripts/diagnose_flyvis_strict_curvature.py
+          --rule ${{ matrix.rule }}
+          --seeds 10
+          --nudge-steps 16
+          --learning-rate 20
+          --out results/generated/flyvis_strict_curvature_${{ matrix.rule }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-strict-curvature-${{ matrix.rule }}
+          path: results/generated/flyvis_strict_curvature_${{ matrix.rule }}.csv
