@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import random
 from pathlib import Path
 
 import pandas as pd
@@ -20,7 +19,9 @@ from predcircuit.flyvis_retinotopy import graph_from_flyvis_retinotopy
 from predcircuit.model import PredictiveCodingGraph
 
 
-def run_one(*, seed: int, rule: str, nudge_steps: int) -> dict[str, float | int | str | bool]:
+def run_one(
+    *, seed: int, rule: str, nudge_steps: int
+) -> dict[str, float | int | str | bool]:
     circuit = graph_from_flyvis_retinotopy(load_flyvis_spec(), extent=2)
     model = PredictiveCodingGraph(circuit.graph, seed=seed, init_scale=0.08)
     generator = torch.Generator().manual_seed(12_000_000 + seed)
@@ -182,7 +183,10 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    rows = [run_one(seed=seed, rule=args.rule, nudge_steps=args.nudge_steps) for seed in range(args.seeds)]
+    rows = [
+        run_one(seed=seed, rule=args.rule, nudge_steps=args.nudge_steps)
+        for seed in range(args.seeds)
+    ]
     frame = pd.DataFrame(rows)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     frame.to_csv(args.out, index=False)
