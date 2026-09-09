@@ -98,10 +98,7 @@ def main() -> None:
         "margin_after",
         "mse_after",
     ]
-    print(
-        f"Degree rewire control: rule={args.rule}, lr={args.learning_rate:g}, "
-        f"seeds={args.seeds}"
-    )
+    print(f"Degree rewire control: rule={args.rule}, lr={args.learning_rate:g}, seeds={args.seeds}")
     print(frame[metrics].agg(["mean", "median", "std"]).to_string())
     print(f"\nSaved: {args.out}")
 
