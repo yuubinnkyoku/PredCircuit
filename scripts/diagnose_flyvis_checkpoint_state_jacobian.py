@@ -93,13 +93,9 @@ def jacobian_metrics(
         "energy": energy,
         "mean_activation_prime": float(activation_prime.mean()),
         "saturation_fraction": float(saturation.mean()),
+        **{f"output_spread_{step}": sum(values) / len(values) for step, values in spread.items()},
         **{
-            f"output_spread_{step}": sum(values) / len(values)
-            for step, values in spread.items()
-        },
-        **{
-            f"output_total_gain_{step}": sum(values) / len(values)
-            for step, values in total.items()
+            f"output_total_gain_{step}": sum(values) / len(values) for step, values in total.items()
         },
     }
 
