@@ -79,10 +79,17 @@ def branched_local_direction(
     outs = output_nodes(circuit)
 
     for index in indices:
-        free_state = states[index]
+        branch_state = states[index]
+        continued_free_state, _ = model.infer(
+            branch_state,
+            clamp_mask=clamp_mask,
+            clamp_values=clamps[index],
+            steps=nudge_steps,
+            step_size=step_size,
+        )
         nudged_state = infer_classification_nudged(
             model,
-            free_state,
+            branch_state,
             clamp_mask=clamp_mask,
             clamp_values=clamps[index],
             nudged_nodes=outs,
@@ -91,9 +98,9 @@ def branched_local_direction(
             steps=nudge_steps,
             step_size=step_size,
         )
-        free_edge = model.local_edge_statistics(free_state)
+        free_edge = model.local_edge_statistics(continued_free_state)
         nudged_edge = model.local_edge_statistics(nudged_state)
-        free_bias = model.errors(free_state).mean(dim=0)
+        free_bias = model.errors(continued_free_state).mean(dim=0)
         nudged_bias = model.errors(nudged_state).mean(dim=0)
         edge_sum += (nudged_edge - free_edge) / beta
         bias_sum += (nudged_bias - free_bias) / beta
