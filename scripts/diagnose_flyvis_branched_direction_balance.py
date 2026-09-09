@@ -115,9 +115,7 @@ def measure(
     ).sum(dim=0)
 
     local_cv = float(local_norms.std(unbiased=False) / mean_local_norm.clamp_min(1e-30))
-    oracle_cv = float(
-        oracle_norms.std(unbiased=False) / oracle_norms.mean().clamp_min(1e-30)
-    )
+    oracle_cv = float(oracle_norms.std(unbiased=False) / oracle_norms.mean().clamp_min(1e-30))
     individual_cosines = [float(row["cosine"]) for row in direction_rows]
     summary = {
         "topology": topology,
