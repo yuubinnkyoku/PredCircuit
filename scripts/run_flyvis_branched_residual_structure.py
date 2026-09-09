@@ -58,32 +58,67 @@ def permute_residual_groups(
     return torch.cat((edge, bias))
 
 
-def permutation_within_edge_type_pairs(
-    circuit: RetinotopicFlyVisCircuit,
+def _permutation_from_blocks(
+    size: int,
+    blocks: dict[object, list[int]],
     generator: torch.Generator,
 ) -> torch.Tensor:
-    permutation = torch.arange(circuit.graph.num_edges)
-    blocks: dict[tuple[str, str], list[int]] = defaultdict(list)
-    for index, (source, target) in enumerate(circuit.graph.edge_index.t().tolist()):
-        blocks[(circuit.node_types[source], circuit.node_types[target])].append(index)
+    permutation = torch.arange(size)
     for indices in blocks.values():
         block = torch.tensor(indices, dtype=torch.long)
         permutation[block] = block[torch.randperm(len(indices), generator=generator)]
     return permutation
+
+
+def permutation_within_edge_type_pairs(
+    circuit: RetinotopicFlyVisCircuit,
+    generator: torch.Generator,
+) -> torch.Tensor:
+    blocks: dict[tuple[str, str], list[int]] = defaultdict(list)
+    for index, (source, target) in enumerate(circuit.graph.edge_index.t().tolist()):
+        blocks[(circuit.node_types[source], circuit.node_types[target])].append(index)
+    return _permutation_from_blocks(circuit.graph.num_edges, blocks, generator)
+
+
+def permutation_within_edge_offsets(
+    circuit: RetinotopicFlyVisCircuit,
+    generator: torch.Generator,
+) -> torch.Tensor:
+    """Shuffle translations while preserving type pair and relative retinotopic offset."""
+    blocks: dict[tuple[str, str, int, int], list[int]] = defaultdict(list)
+    for index, (source, target) in enumerate(circuit.graph.edge_index.t().tolist()):
+        du = int(circuit.node_u[target] - circuit.node_u[source])
+        dv = int(circuit.node_v[target] - circuit.node_v[source])
+        key = (circuit.node_types[source], circuit.node_types[target], du, dv)
+        blocks[key].append(index)
+    return _permutation_from_blocks(circuit.graph.num_edges, blocks, generator)
+
+
+def permutation_within_source_positions(
+    circuit: RetinotopicFlyVisCircuit,
+    generator: torch.Generator,
+) -> torch.Tensor:
+    """Shuffle offsets while preserving type pair and the absolute source location."""
+    blocks: dict[tuple[str, str, int, int], list[int]] = defaultdict(list)
+    for index, (source, target) in enumerate(circuit.graph.edge_index.t().tolist()):
+        key = (
+            circuit.node_types[source],
+            circuit.node_types[target],
+            int(circuit.node_u[source]),
+            int(circuit.node_v[source]),
+        )
+        blocks[key].append(index)
+    return _permutation_from_blocks(circuit.graph.num_edges, blocks, generator)
 
 
 def permutation_within_node_types(
     circuit: RetinotopicFlyVisCircuit,
     generator: torch.Generator,
 ) -> torch.Tensor:
-    permutation = torch.arange(circuit.graph.num_nodes)
     blocks: dict[str, list[int]] = defaultdict(list)
     for index, cell_type in enumerate(circuit.node_types):
         blocks[cell_type].append(index)
-    for indices in blocks.values():
-        block = torch.tensor(indices, dtype=torch.long)
-        permutation[block] = block[torch.randperm(len(indices), generator=generator)]
-    return permutation
+    return _permutation_from_blocks(circuit.graph.num_nodes, blocks, generator)
 
 
 def synthetic_direction(
@@ -97,6 +132,8 @@ def synthetic_direction(
     edge_permutation: torch.Tensor,
     bias_permutation: torch.Tensor,
     type_pair_edge_permutation: torch.Tensor,
+    offset_edge_permutation: torch.Tensor,
+    source_position_edge_permutation: torch.Tensor,
     node_type_bias_permutation: torch.Tensor,
 ) -> tuple[torch.Tensor, float, float]:
     oracle_norm_sq = torch.dot(oracle, oracle).clamp_min(1e-30)
@@ -136,10 +173,20 @@ def synthetic_direction(
         )
         matched = orthogonalize_and_match(grouped, oracle, residual_norm)
         direction = parallel + matched
-    elif rule == "type_pair_edge_permuted_residual":
+    elif rule in {
+        "type_pair_edge_permuted_residual",
+        "offset_edge_permuted_residual",
+        "source_position_edge_permuted_residual",
+    }:
+        if rule == "type_pair_edge_permuted_residual":
+            spatial_permutation = type_pair_edge_permutation
+        elif rule == "offset_edge_permuted_residual":
+            spatial_permutation = offset_edge_permutation
+        else:
+            spatial_permutation = source_position_edge_permutation
         grouped = torch.cat(
             (
-                residual[:edge_size][type_pair_edge_permutation],
+                residual[:edge_size][spatial_permutation],
                 residual[edge_size:],
             )
         )
@@ -197,6 +244,8 @@ def run_one(
     edge_permutation = torch.randperm(edge_size, generator=generator)
     bias_permutation = torch.randperm(bias_size, generator=generator)
     type_pair_edge_permutation = permutation_within_edge_type_pairs(circuit, generator)
+    offset_edge_permutation = permutation_within_edge_offsets(circuit, generator)
+    source_position_edge_permutation = permutation_within_source_positions(circuit, generator)
     node_type_bias_permutation = permutation_within_node_types(circuit, generator)
 
     before = evaluate_metrics(
@@ -249,6 +298,8 @@ def run_one(
             edge_permutation=edge_permutation,
             bias_permutation=bias_permutation,
             type_pair_edge_permutation=type_pair_edge_permutation,
+            offset_edge_permutation=offset_edge_permutation,
+            source_position_edge_permutation=source_position_edge_permutation,
             node_type_bias_permutation=node_type_bias_permutation,
         )
         edge_direction, bias_direction = split_credit(
@@ -334,6 +385,8 @@ def main() -> None:
             "edge_permuted_residual",
             "bias_permuted_residual",
             "type_pair_edge_permuted_residual",
+            "offset_edge_permuted_residual",
+            "source_position_edge_permuted_residual",
             "node_type_bias_permuted_residual",
         ),
         required=True,
