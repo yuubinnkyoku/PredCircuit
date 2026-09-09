@@ -1,0 +1,41 @@
+name: FlyVis strict optimizer geometry
+
+on:
+  push:
+    paths:
+      - "scripts/trace_flyvis_strict_optimizer_geometry.py"
+      - ".github/workflows/flyvis-strict-optimizer-geometry.yml"
+  workflow_dispatch:
+
+jobs:
+  trace:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        rule:
+          - local
+          - type_pair_edge_permuted
+          - source_position_edge_permuted
+          - bias_permuted
+          - type_pair_mean
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Trace optimizer geometry ${{ matrix.rule }}
+        run: >-
+          uv run python scripts/trace_flyvis_strict_optimizer_geometry.py
+          --rule ${{ matrix.rule }}
+          --seeds 3
+          --epochs 100
+          --checkpoint-every 20
+          --nudge-steps 16
+          --learning-rate 0.01
+          --test-repeats 4
+          --out results/generated/flyvis_strict_optimizer_geometry_${{ matrix.rule }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-strict-optimizer-geometry-${{ matrix.rule }}
+          path: results/generated/flyvis_strict_optimizer_geometry_${{ matrix.rule }}.csv
