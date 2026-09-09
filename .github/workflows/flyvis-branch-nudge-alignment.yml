@@ -13,6 +13,7 @@ on:
       - src/predcircuit/**
   workflow_dispatch:
 
+# Re-run on the current corrected branched-credit implementation for cancellation diagnostics.
 jobs:
   branch-nudge:
     runs-on: ubuntu-latest
