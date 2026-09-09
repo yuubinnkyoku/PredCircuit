@@ -27,7 +27,7 @@ jobs:
       - run: uv sync
       - name: Aggregate CSVs and statistics
         run: |
-          uv run python - <<'PY'
+          uv run --with scipy python - <<'PY'
           from pathlib import Path
           import json
           import pandas as pd
