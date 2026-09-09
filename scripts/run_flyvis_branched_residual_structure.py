@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import math
 from collections import defaultdict
+from collections.abc import Iterable
 from pathlib import Path
 
 import pandas as pd
@@ -60,11 +61,11 @@ def permute_residual_groups(
 
 def _permutation_from_blocks(
     size: int,
-    blocks: dict[object, list[int]],
+    blocks: Iterable[list[int]],
     generator: torch.Generator,
 ) -> torch.Tensor:
     permutation = torch.arange(size)
-    for indices in blocks.values():
+    for indices in blocks:
         block = torch.tensor(indices, dtype=torch.long)
         permutation[block] = block[torch.randperm(len(indices), generator=generator)]
     return permutation
@@ -77,7 +78,7 @@ def permutation_within_edge_type_pairs(
     blocks: dict[tuple[str, str], list[int]] = defaultdict(list)
     for index, (source, target) in enumerate(circuit.graph.edge_index.t().tolist()):
         blocks[(circuit.node_types[source], circuit.node_types[target])].append(index)
-    return _permutation_from_blocks(circuit.graph.num_edges, blocks, generator)
+    return _permutation_from_blocks(circuit.graph.num_edges, blocks.values(), generator)
 
 
 def permutation_within_edge_offsets(
@@ -91,7 +92,7 @@ def permutation_within_edge_offsets(
         dv = int(circuit.node_v[target] - circuit.node_v[source])
         key = (circuit.node_types[source], circuit.node_types[target], du, dv)
         blocks[key].append(index)
-    return _permutation_from_blocks(circuit.graph.num_edges, blocks, generator)
+    return _permutation_from_blocks(circuit.graph.num_edges, blocks.values(), generator)
 
 
 def permutation_within_source_positions(
@@ -108,7 +109,7 @@ def permutation_within_source_positions(
             int(circuit.node_v[source]),
         )
         blocks[key].append(index)
-    return _permutation_from_blocks(circuit.graph.num_edges, blocks, generator)
+    return _permutation_from_blocks(circuit.graph.num_edges, blocks.values(), generator)
 
 
 def permutation_within_node_types(
@@ -118,7 +119,7 @@ def permutation_within_node_types(
     blocks: dict[str, list[int]] = defaultdict(list)
     for index, cell_type in enumerate(circuit.node_types):
         blocks[cell_type].append(index)
-    return _permutation_from_blocks(circuit.graph.num_nodes, blocks, generator)
+    return _permutation_from_blocks(circuit.graph.num_nodes, blocks.values(), generator)
 
 
 def synthetic_direction(
