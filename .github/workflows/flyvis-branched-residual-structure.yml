@@ -22,7 +22,8 @@ jobs:
         rule:
           - local
           - type_pair_edge_permuted_residual
-          - node_type_bias_permuted_residual
+          - offset_edge_permuted_residual
+          - source_position_edge_permuted_residual
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v10.0.1
