@@ -19,9 +19,7 @@ from predcircuit.flyvis_retinotopy import graph_from_flyvis_retinotopy
 from predcircuit.model import PredictiveCodingGraph
 
 
-def run_one(
-    *, seed: int, rule: str, nudge_steps: int
-) -> dict[str, float | int | str | bool]:
+def run_one(*, seed: int, rule: str, nudge_steps: int) -> dict[str, float | int | str | bool]:
     circuit = graph_from_flyvis_retinotopy(load_flyvis_spec(), extent=2)
     model = PredictiveCodingGraph(circuit.graph, seed=seed, init_scale=0.08)
     generator = torch.Generator().manual_seed(12_000_000 + seed)
@@ -100,13 +98,9 @@ def run_one(
         (weight, bias),
         retain_graph=True,
     )
-    total_quadratic = torch.dot(edge_direction, hvp_edge) + torch.dot(
-        bias_direction, hvp_bias
-    )
+    total_quadratic = torch.dot(edge_direction, hvp_edge) + torch.dot(bias_direction, hvp_bias)
 
-    residual_derivative = torch.dot(grad_edge, residual_edge) + torch.dot(
-        grad_bias, residual_bias
-    )
+    residual_derivative = torch.dot(grad_edge, residual_edge) + torch.dot(grad_bias, residual_bias)
     residual_hvp_edge, residual_hvp_bias = torch.autograd.grad(
         residual_derivative,
         (weight, bias),
@@ -115,8 +109,7 @@ def run_one(
         residual_bias, residual_hvp_bias
     )
     cross_quadratic = 2.0 * (
-        torch.dot(parallel_edge, residual_hvp_edge)
-        + torch.dot(parallel_bias, residual_hvp_bias)
+        torch.dot(parallel_edge, residual_hvp_edge) + torch.dot(parallel_bias, residual_hvp_bias)
     )
     parallel_quadratic = total_quadratic - residual_quadratic - cross_quadratic
 
