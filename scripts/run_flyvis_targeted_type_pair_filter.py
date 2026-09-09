@@ -51,7 +51,6 @@ def targeted_direction(
 
     groups = type_pair_indices(circuit)
     selected = set(groups) if rule == "all_type_pair" else DISCOVERY_PAIRS[rule]
-    affected = 0
     for pair in selected:
         indices = groups.get(pair)
         if indices is None:
@@ -63,7 +62,6 @@ def targeted_direction(
             oracle_edge[indices],
             target,
         )
-        affected += int(indices.numel())
 
     direction_edge = alpha * oracle_edge + filtered_edge
     direction_bias = alpha * oracle_bias + residual_bias
@@ -71,8 +69,7 @@ def targeted_direction(
         torch.linalg.vector_norm(direction_edge - local_edge)
         / torch.linalg.vector_norm(local_edge).clamp_min(1e-30)
     )
-    affected_fraction = affected / max(local_edge.numel(), 1)
-    return direction_edge, direction_bias, max(relative_change, affected_fraction * 0.0)
+    return direction_edge, direction_bias, relative_change
 
 
 def run_seed(
@@ -80,6 +77,7 @@ def run_seed(
     seed: int,
     rule: str,
     epochs: int,
+    start_epoch: int,
     nudge_steps: int,
     learning_rate: float,
     max_update: float,
@@ -125,13 +123,14 @@ def run_seed(
             frame_steps=2,
             step_size=0.015,
         )["final_ce_oracle"]
+        active_rule = rule if epoch >= start_epoch else "local"
         edge_direction, bias_direction, relative_change = targeted_direction(
             circuit,
             local_edge,
             local_bias,
             oracle_edge,
             oracle_bias,
-            rule=rule,
+            rule=active_rule,
         )
         local_geometry = geometry(local_edge, local_bias, oracle_edge, oracle_bias)
         filtered_geometry = geometry(edge_direction, bias_direction, oracle_edge, oracle_bias)
@@ -158,6 +157,7 @@ def run_seed(
         "rule": rule,
         "seed": seed,
         "epochs": epochs,
+        "start_epoch": start_epoch,
         "nudge_steps": nudge_steps,
         "learning_rate": learning_rate,
         "accuracy_before": before["accuracy"],
@@ -187,6 +187,7 @@ def main() -> None:
     )
     parser.add_argument("--seed", type=int, required=True)
     parser.add_argument("--epochs", type=int, default=100)
+    parser.add_argument("--start-epoch", type=int, default=0)
     parser.add_argument("--nudge-steps", type=int, default=2)
     parser.add_argument("--learning-rate", type=float, default=160.0)
     parser.add_argument("--max-update", type=float, default=0.05)
@@ -197,6 +198,8 @@ def main() -> None:
         default=Path("results/generated/flyvis_targeted_type_pair_filter.csv"),
     )
     args = parser.parse_args()
+    if not 0 <= args.start_epoch <= args.epochs:
+        raise ValueError("start-epoch must be between 0 and epochs")
 
     frame = pd.DataFrame(
         [
@@ -204,6 +207,7 @@ def main() -> None:
                 seed=args.seed,
                 rule=args.rule,
                 epochs=args.epochs,
+                start_epoch=args.start_epoch,
                 nudge_steps=args.nudge_steps,
                 learning_rate=args.learning_rate,
                 max_update=args.max_update,
