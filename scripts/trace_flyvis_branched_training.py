@@ -6,8 +6,8 @@ from pathlib import Path
 import pandas as pd
 import torch
 
-from diagnose_flyvis_temporal_ce_credit_alignment import cycle_ce_oracles, geometry
 from diagnose_flyvis_branch_nudge_alignment import cycle_branched_credit
+from diagnose_flyvis_temporal_ce_credit_alignment import cycle_ce_oracles, geometry
 from run_flyvis_credit_residual_scaling import evaluate_metrics
 from run_flyvis_temporal_coherence_gate import apply_local_credit
 
@@ -226,17 +226,19 @@ def main() -> None:
     frame = pd.DataFrame(rows)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     frame.to_csv(args.out, index=False)
-    summary = frame.groupby("epoch")[[
-        "accuracy",
-        "cross_entropy",
-        "margin",
-        "final_cosine",
-        "final_residual_fraction",
-        "final_norm_ratio",
-        "temporal_cosine",
-        "mean_abs_update_since_previous",
-        "mean_edge_clip_fraction_since_previous",
-    ]].agg(["mean", "median", "std"])
+    summary = frame.groupby("epoch")[
+        [
+            "accuracy",
+            "cross_entropy",
+            "margin",
+            "final_cosine",
+            "final_residual_fraction",
+            "final_norm_ratio",
+            "temporal_cosine",
+            "mean_abs_update_since_previous",
+            "mean_edge_clip_fraction_since_previous",
+        ]
+    ].agg(["mean", "median", "std"])
     print(
         f"Branched training trace: lr={args.learning_rate:g}, seeds={args.seeds}, "
         f"checkpoints={checkpoints}"
