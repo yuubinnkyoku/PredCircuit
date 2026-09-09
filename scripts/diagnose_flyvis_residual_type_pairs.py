@@ -60,14 +60,11 @@ def block_metrics(
         "residual_energy_fraction": float(
             torch.dot(residual, residual) / total_residual_energy.clamp_min(1e-30)
         ),
-        "oracle_energy_fraction": float(
-            oracle_norm_sq / total_oracle_energy.clamp_min(1e-30)
-        ),
+        "oracle_energy_fraction": float(oracle_norm_sq / total_oracle_energy.clamp_min(1e-30)),
         "local_oracle_cosine": cosine(local, oracle),
         "projection_coefficient": float(projection),
         "residual_to_parallel_norm": float(
-            torch.linalg.vector_norm(residual)
-            / torch.linalg.vector_norm(parallel).clamp_min(1e-30)
+            torch.linalg.vector_norm(residual) / torch.linalg.vector_norm(parallel).clamp_min(1e-30)
         ),
         "oracle_weighted_sign_agreement": weighted_sign_agreement(local, oracle),
     }
