@@ -190,9 +190,7 @@ def run_one(
         directional_derivative,
         (weight, bias),
     )
-    quadratic_form = torch.dot(edge_direction, hvp_edge) + torch.dot(
-        bias_direction, hvp_bias
-    )
+    quadratic_form = torch.dot(edge_direction, hvp_edge) + torch.dot(bias_direction, hvp_bias)
     direction_norm_sq = torch.dot(edge_direction, edge_direction) + torch.dot(
         bias_direction, bias_direction
     )
