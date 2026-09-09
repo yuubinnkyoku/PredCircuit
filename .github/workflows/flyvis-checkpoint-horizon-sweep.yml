@@ -1,0 +1,37 @@
+name: FlyVis checkpoint branch horizon sweep
+
+on:
+  push:
+    paths:
+      - "scripts/diagnose_flyvis_checkpoint_horizon_sweep.py"
+      - ".github/workflows/flyvis-checkpoint-horizon-sweep.yml"
+  workflow_dispatch:
+
+jobs:
+  sweep:
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [0, 1, 2, 3, 4]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Sweep horizons for seed ${{ matrix.seed }}
+        run: >-
+          uv run python scripts/diagnose_flyvis_checkpoint_horizon_sweep.py
+          --seed ${{ matrix.seed }}
+          --checkpoints 0,25,50,100
+          --horizons 1,2,4,8,16,32
+          --train-nudge-steps 2
+          --learning-rate 160
+          --weight-decay 0
+          --max-update 0.05
+          --test-repeats 8
+          --out results/generated/flyvis_checkpoint_horizon_seed${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-checkpoint-horizon-seed${{ matrix.seed }}
+          path: results/generated/flyvis_checkpoint_horizon_seed${{ matrix.seed }}.csv
