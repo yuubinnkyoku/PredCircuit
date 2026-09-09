@@ -1,0 +1,39 @@
+name: FlyVis strict residual SGD confirm
+
+on:
+  push:
+    paths:
+      - ".github/workflows/flyvis-strict-residual-sgd-confirm.yml"
+  workflow_dispatch:
+
+jobs:
+  train:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        rule:
+          - local
+          - type_pair_edge_permuted
+          - source_position_edge_permuted
+          - bias_permuted
+          - type_pair_mean
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Confirm SGD ${{ matrix.rule }}
+        run: >-
+          uv run python scripts/run_flyvis_strict_residual_sgd.py
+          --rule ${{ matrix.rule }}
+          --seeds 10
+          --epochs 100
+          --nudge-steps 16
+          --learning-rate 20
+          --test-repeats 8
+          --out results/generated/flyvis_strict_residual_sgd_confirm_${{ matrix.rule }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-strict-residual-sgd-confirm-${{ matrix.rule }}
+          path: results/generated/flyvis_strict_residual_sgd_confirm_${{ matrix.rule }}.csv
