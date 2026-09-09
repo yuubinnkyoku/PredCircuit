@@ -1,0 +1,34 @@
+name: FlyVis shared parameter LR sweep
+
+on:
+  push:
+    paths:
+      - ".github/workflows/flyvis-shared-parameter-lr-sweep.yml"
+  workflow_dispatch:
+
+jobs:
+  sweep:
+    strategy:
+      fail-fast: false
+      matrix:
+        learning_rate: [0.001, 0.003, 0.01, 0.03, 0.1, 0.3]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Train shared local nudge 8 at lr ${{ matrix.learning_rate }}
+        run: >-
+          uv run python scripts/run_flyvis_shared_parameter_training.py
+          --mode local
+          --seeds 5
+          --epochs 100
+          --nudge-steps 8
+          --learning-rate ${{ matrix.learning_rate }}
+          --test-repeats 8
+          --out results/generated/flyvis_shared_parameter_lr_${{ matrix.learning_rate }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-shared-parameter-lr-${{ matrix.learning_rate }}
+          path: results/generated/flyvis_shared_parameter_lr_${{ matrix.learning_rate }}.csv
