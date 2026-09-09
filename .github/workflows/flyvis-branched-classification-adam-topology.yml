@@ -1,0 +1,51 @@
+name: FlyVis branched classification Adam topology
+
+on:
+  push:
+    paths:
+      - .github/workflows/flyvis-branched-classification-adam-topology.yml
+      - scripts/run_flyvis_branched_classification_adam_topology.py
+      - scripts/run_flyvis_branched_classification_adam.py
+      - scripts/run_flyvis_classification_nudge_topology.py
+      - scripts/diagnose_flyvis_branch_nudge_alignment.py
+      - src/predcircuit/**
+  workflow_dispatch:
+
+jobs:
+  topology:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        topology: [biological, type_pair_rewire, pair_rotation]
+        learning_rate: [0.001, 0.01]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          enable-cache: true
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Train branched Adam across topology nulls
+        run: >-
+          uv run python scripts/run_flyvis_branched_classification_adam_topology.py
+          --topology ${{ matrix.topology }}
+          --extent 2
+          --seeds 10
+          --epochs 100
+          --frames 7
+          --frame-steps 2
+          --nudge-steps 2
+          --step-size 0.015
+          --beta 0.03
+          --learning-rate ${{ matrix.learning_rate }}
+          --beta1 0.9
+          --beta2 0.999
+          --adam-epsilon 1e-8
+          --test-repeats 8
+          --out results/generated/flyvis_branched_adam_${{ matrix.topology }}_lr_${{ matrix.learning_rate }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-branched-adam-${{ matrix.topology }}-lr-${{ matrix.learning_rate }}
+          path: results/generated/flyvis_branched_adam_${{ matrix.topology }}_lr_${{ matrix.learning_rate }}.csv
