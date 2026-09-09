@@ -118,14 +118,15 @@ def measure(
     oracle_cv = float(
         oracle_norms.std(unbiased=False) / oracle_norms.mean().clamp_min(1e-30)
     )
+    individual_cosines = [float(row["cosine"]) for row in direction_rows]
     summary = {
         "topology": topology,
         "seed": seed,
         "raw_summed_cosine": cosine(local_sum, oracle_sum),
         "equalized_summed_cosine": cosine(equalized, oracle_sum),
         "oracle_norm_matched_summed_cosine": cosine(oracle_matched, oracle_sum),
-        "mean_individual_cosine": sum(row["cosine"] for row in direction_rows) / len(DIRECTIONS),
-        "min_individual_cosine": min(row["cosine"] for row in direction_rows),
+        "mean_individual_cosine": sum(individual_cosines) / len(DIRECTIONS),
+        "min_individual_cosine": min(individual_cosines),
         "local_norm_cv": local_cv,
         "oracle_norm_cv": oracle_cv,
         "local_max_to_min_norm": float(local_norms.max() / local_norms.min().clamp_min(1e-30)),
