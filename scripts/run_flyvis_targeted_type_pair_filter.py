@@ -56,7 +56,7 @@ def targeted_direction(
         if indices is None:
             continue
         target = residual_edge[indices]
-        candidate = torch.full_like(target, target.mean())
+        candidate = torch.ones_like(target) * target.mean()
         filtered_edge[indices] = match_projection_and_norm(
             candidate,
             oracle_edge[indices],
