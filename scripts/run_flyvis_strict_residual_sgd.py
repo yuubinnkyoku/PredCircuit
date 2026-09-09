@@ -21,7 +21,6 @@ from predcircuit.flyvis import load_flyvis_spec
 from predcircuit.flyvis_retinotopy import graph_from_flyvis_retinotopy
 from predcircuit.model import PredictiveCodingGraph
 
-
 STRICT_RULES = {
     "type_pair_edge_permuted",
     "source_position_edge_permuted",
