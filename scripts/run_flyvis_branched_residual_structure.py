@@ -39,13 +39,34 @@ def orthogonalize_and_match(
     return orthogonal * (target_norm / orthogonal_norm)
 
 
+def permute_residual_groups(
+    residual: torch.Tensor,
+    *,
+    edge_size: int,
+    edge_permutation: torch.Tensor,
+    bias_permutation: torch.Tensor,
+    permute_edge: bool,
+    permute_bias: bool,
+) -> torch.Tensor:
+    edge = residual[:edge_size]
+    bias = residual[edge_size:]
+    if permute_edge:
+        edge = edge[edge_permutation]
+    if permute_bias:
+        bias = bias[bias_permutation]
+    return torch.cat((edge, bias))
+
+
 def synthetic_direction(
     local: torch.Tensor,
     oracle: torch.Tensor,
     *,
     rule: str,
     generator: torch.Generator,
-    permutation: torch.Tensor | None,
+    permutation: torch.Tensor,
+    edge_size: int,
+    edge_permutation: torch.Tensor,
+    bias_permutation: torch.Tensor,
 ) -> tuple[torch.Tensor, float, float]:
     oracle_norm_sq = torch.dot(oracle, oracle).clamp_min(1e-30)
     alpha = torch.dot(local, oracle) / oracle_norm_sq
@@ -67,9 +88,22 @@ def synthetic_direction(
         matched = orthogonalize_and_match(random_vector, oracle, residual_norm)
         direction = parallel + matched
     elif rule == "permuted_residual":
-        if permutation is None:
-            raise ValueError("permutation is required for permuted_residual")
         matched = orthogonalize_and_match(residual[permutation], oracle, residual_norm)
+        direction = parallel + matched
+    elif rule in {
+        "group_permuted_residual",
+        "edge_permuted_residual",
+        "bias_permuted_residual",
+    }:
+        grouped = permute_residual_groups(
+            residual,
+            edge_size=edge_size,
+            edge_permutation=edge_permutation,
+            bias_permutation=bias_permutation,
+            permute_edge=rule != "bias_permuted_residual",
+            permute_bias=rule != "edge_permuted_residual",
+        )
+        matched = orthogonalize_and_match(grouped, oracle, residual_norm)
         direction = parallel + matched
     else:
         raise ValueError(f"unsupported rule: {rule}")
@@ -108,8 +142,11 @@ def run_one(
     bias_m = torch.zeros_like(model.bias)
     bias_v = torch.zeros_like(model.bias)
     generator = torch.Generator().manual_seed(9_000_000 + seed)
-    full_size = model.weight.numel() + model.bias.numel()
-    permutation = torch.randperm(full_size, generator=generator)
+    edge_size = model.weight.numel()
+    bias_size = model.bias.numel()
+    permutation = torch.randperm(edge_size + bias_size, generator=generator)
+    edge_permutation = torch.randperm(edge_size, generator=generator)
+    bias_permutation = torch.randperm(bias_size, generator=generator)
 
     before = evaluate_metrics(
         model,
@@ -157,6 +194,9 @@ def run_one(
             rule=rule,
             generator=generator,
             permutation=permutation,
+            edge_size=edge_size,
+            edge_permutation=edge_permutation,
+            bias_permutation=bias_permutation,
         )
         edge_direction, bias_direction = split_credit(
             direction,
@@ -232,7 +272,15 @@ def main() -> None:
     )
     parser.add_argument(
         "--rule",
-        choices=("local", "parallel_only", "random_residual", "permuted_residual"),
+        choices=(
+            "local",
+            "parallel_only",
+            "random_residual",
+            "permuted_residual",
+            "group_permuted_residual",
+            "edge_permuted_residual",
+            "bias_permuted_residual",
+        ),
         required=True,
     )
     parser.add_argument("--seeds", type=int, default=5)
