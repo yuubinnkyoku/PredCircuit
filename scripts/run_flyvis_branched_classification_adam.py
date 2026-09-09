@@ -11,13 +11,16 @@ from run_flyvis_credit_residual_scaling import evaluate_metrics
 from run_flyvis_retinotopic_temporal_adam import local_adam_step
 
 from predcircuit.flyvis import load_flyvis_spec
-from predcircuit.flyvis_retinotopy import graph_from_flyvis_retinotopy
+from predcircuit.flyvis_retinotopy import (
+    RetinotopicFlyVisCircuit,
+    graph_from_flyvis_retinotopy,
+)
 from predcircuit.model import PredictiveCodingGraph
 
 
-def run_one(
+def run_circuit(
+    circuit: RetinotopicFlyVisCircuit,
     *,
-    extent: int,
     seed: int,
     epochs: int,
     frames: int,
@@ -32,7 +35,6 @@ def run_one(
     adam_epsilon: float,
     test_repeats: int,
 ) -> dict[str, float | int | bool]:
-    circuit = graph_from_flyvis_retinotopy(load_flyvis_spec(), extent=extent)
     model = PredictiveCodingGraph(circuit.graph, seed=seed, init_scale=0.08)
     edge_m = torch.zeros_like(model.weight)
     edge_v = torch.zeros_like(model.weight)
@@ -131,6 +133,42 @@ def run_one(
         "finite": bool(torch.isfinite(model.weight).all())
         and math.isfinite(after["cross_entropy"]),
     }
+
+
+def run_one(
+    *,
+    extent: int,
+    seed: int,
+    epochs: int,
+    frames: int,
+    width: float,
+    frame_steps: int,
+    nudge_steps: int,
+    step_size: float,
+    beta: float,
+    learning_rate: float,
+    beta1: float,
+    beta2: float,
+    adam_epsilon: float,
+    test_repeats: int,
+) -> dict[str, float | int | bool]:
+    circuit = graph_from_flyvis_retinotopy(load_flyvis_spec(), extent=extent)
+    return run_circuit(
+        circuit,
+        seed=seed,
+        epochs=epochs,
+        frames=frames,
+        width=width,
+        frame_steps=frame_steps,
+        nudge_steps=nudge_steps,
+        step_size=step_size,
+        beta=beta,
+        learning_rate=learning_rate,
+        beta1=beta1,
+        beta2=beta2,
+        adam_epsilon=adam_epsilon,
+        test_repeats=test_repeats,
+    )
 
 
 def main() -> None:
