@@ -1,0 +1,90 @@
+name: FlyVis candidate pair interventions
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "scripts/diagnose_flyvis_candidate_pair_interventions.py"
+      - ".github/workflows/flyvis-candidate-pair-interventions.yml"
+
+jobs:
+  diagnose:
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [0, 1, 2, 3, 4]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          enable-cache: true
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Replicate candidate pair signs
+        run: >-
+          uv run python scripts/diagnose_flyvis_candidate_pair_interventions.py
+          --seed ${{ matrix.seed }}
+          --out results/generated/flyvis_candidate_pair_interventions_seed${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-candidate-pair-interventions-seed${{ matrix.seed }}
+          path: results/generated/flyvis_candidate_pair_interventions_seed${{ matrix.seed }}.csv
+
+  aggregate:
+    needs: diagnose
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: flyvis-candidate-pair-interventions-*
+          path: pair-artifacts
+          merge-multiple: true
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Aggregate candidate pair signs
+        run: |
+          mkdir -p results/generated
+          uv run --with scipy python - <<'PY'
+          from pathlib import Path
+          import pandas as pd
+          from scipy import stats
+
+          frame = pd.concat(
+              [pd.read_csv(path) for path in sorted(Path("pair-artifacts").glob("*.csv"))],
+              ignore_index=True,
+          )
+          if len(frame) != 35:
+              raise RuntimeError(f"expected 35 rows, got {len(frame)}")
+          frame.to_csv("results/generated/flyvis_candidate_pair_interventions.csv", index=False)
+          rows = []
+          for (source, target), group in frame.groupby(["source_type", "target_type"]):
+              gains = group["filtered_loss_gain_vs_local"]
+              rows.append({
+                  "source_type": source,
+                  "target_type": target,
+                  "n": len(group),
+                  "gain_mean": gains.mean(),
+                  "gain_std": gains.std(ddof=1),
+                  "beneficial_seed_count": int((gains > 0).sum()),
+                  "harmful_seed_count": int((gains < 0).sum()),
+                  "zero_seed_count": int((gains == 0).sum()),
+                  "burden_mean": group["residual_curvature_contribution"].mean(),
+                  "gain_burden_spearman": stats.spearmanr(
+                      gains,
+                      group["residual_curvature_contribution"],
+                  ).statistic,
+              })
+          summary = pd.DataFrame(rows).sort_values("gain_mean", ascending=False)
+          summary.to_csv("results/generated/flyvis_candidate_pair_interventions_summary.csv", index=False)
+          print(summary.to_string(index=False))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-candidate-pair-interventions-aggregate
+          path: |
+            results/generated/flyvis_candidate_pair_interventions.csv
+            results/generated/flyvis_candidate_pair_interventions_summary.csv
