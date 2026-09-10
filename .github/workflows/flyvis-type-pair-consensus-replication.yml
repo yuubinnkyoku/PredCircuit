@@ -1,0 +1,112 @@
+name: FlyVis type-pair consensus replication
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/flyvis-type-pair-consensus-replication.yml"
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  validate:
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39]
+        condition: [local, g025_early, g025_late]
+        include:
+          - condition: local
+            gamma: 1.0
+            start_epoch: 0
+          - condition: g025_early
+            gamma: 0.25
+            start_epoch: 0
+          - condition: g025_late
+            gamma: 0.25
+            start_epoch: 50
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          enable-cache: true
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Validate ${{ matrix.condition }} on seed ${{ matrix.seed }}
+        run: >-
+          uv run python scripts/run_flyvis_type_pair_consensus.py
+          --seed ${{ matrix.seed }}
+          --gamma ${{ matrix.gamma }}
+          --start-epoch ${{ matrix.start_epoch }}
+          --out results/generated/flyvis_consensus_rep_${{ matrix.condition }}_seed${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-consensus-rep-${{ matrix.condition }}-seed${{ matrix.seed }}
+          path: results/generated/flyvis_consensus_rep_${{ matrix.condition }}_seed${{ matrix.seed }}.csv
+
+  aggregate:
+    needs: validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: flyvis-consensus-rep-*
+          path: consensus-rep-artifacts
+          merge-multiple: true
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Aggregate held-out replication
+        run: |
+          mkdir -p results/generated
+          uv run --with scipy python - <<'PY'
+          from pathlib import Path
+          import pandas as pd
+          from scipy import stats
+
+          files = sorted(Path("consensus-rep-artifacts").glob("*.csv"))
+          frame = pd.concat([pd.read_csv(path) for path in files], ignore_index=True)
+          if len(frame) != 60:
+              raise RuntimeError(f"expected 60 rows, got {len(frame)}")
+          frame.to_csv("results/generated/flyvis_type_pair_consensus_replication.csv", index=False)
+
+          local = frame[frame["gamma"] == 1.0].set_index("seed")
+          rows = []
+          for label, start_epoch in [("g025_early", 0), ("g025_late", 50)]:
+              group = frame[(frame["gamma"] == 0.25) & (frame["start_epoch"] == start_epoch)].set_index("seed")
+              common = local.index.intersection(group.index)
+              diff = group.loc[common, "cross_entropy_improvement"] - local.loc[common, "cross_entropy_improvement"]
+              sem = stats.sem(diff)
+              ci = stats.t.interval(0.95, len(diff) - 1, loc=diff.mean(), scale=sem)
+              rows.append({
+                  "condition": label,
+                  "n": len(diff),
+                  "ce_improvement_mean": group.loc[common, "cross_entropy_improvement"].mean(),
+                  "local_ce_improvement_mean": local.loc[common, "cross_entropy_improvement"].mean(),
+                  "diff_vs_local_mean": diff.mean(),
+                  "diff_vs_local_std": diff.std(ddof=1),
+                  "diff_ci95_low": ci[0],
+                  "diff_ci95_high": ci[1],
+                  "improved_seed_count": int((diff > 0).sum()),
+                  "paired_t_p": stats.ttest_rel(group.loc[common, "cross_entropy_improvement"], local.loc[common, "cross_entropy_improvement"]).pvalue,
+                  "wilcoxon_p": stats.wilcoxon(diff).pvalue,
+                  "accuracy_after_mean": group.loc[common, "accuracy_after"].mean(),
+                  "margin_after_mean": group.loc[common, "margin_after"].mean(),
+                  "direction_change_mean": group.loc[common, "mean_relative_edge_direction_change"].mean(),
+                  "norm_error_mean": group.loc[common, "mean_relative_edge_norm_error"].mean(),
+                  "finite_count": int(group.loc[common, "finite"].sum()),
+              })
+          summary = pd.DataFrame(rows)
+          summary.to_csv("results/generated/flyvis_type_pair_consensus_replication_summary.csv", index=False)
+          print(summary.to_string(index=False))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-type-pair-consensus-replication-aggregate
+          path: |
+            results/generated/flyvis_type_pair_consensus_replication.csv
+            results/generated/flyvis_type_pair_consensus_replication_summary.csv
