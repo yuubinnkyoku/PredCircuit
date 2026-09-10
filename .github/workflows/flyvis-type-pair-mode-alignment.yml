@@ -1,0 +1,93 @@
+name: FlyVis type-pair mode alignment
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "scripts/diagnose_flyvis_type_pair_mode_alignment.py"
+      - ".github/workflows/flyvis-type-pair-mode-alignment.yml"
+
+jobs:
+  diagnose:
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [80, 81, 82, 83, 84]
+        train_rule: [local, "4m+r"]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          enable-cache: true
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Diagnose credit modes
+        run: >-
+          uv run python scripts/diagnose_flyvis_type_pair_mode_alignment.py
+          --seed ${{ matrix.seed }}
+          --train-rule '${{ matrix.train_rule }}'
+          --checkpoints 0,25,50,100
+          --learning-rate 160
+          --out 'results/generated/mode_${{ matrix.train_rule }}_seed${{ matrix.seed }}.csv'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mode-${{ matrix.train_rule }}-seed${{ matrix.seed }}
+          path: results/generated/mode_${{ matrix.train_rule }}_seed${{ matrix.seed }}.csv
+
+  aggregate:
+    needs: diagnose
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: mode-*
+          path: artifacts
+          merge-multiple: true
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Aggregate modes
+        run: |
+          mkdir -p results/generated
+          uv run python - <<'PY'
+          from pathlib import Path
+          import pandas as pd
+
+          frame = pd.concat(
+              [pd.read_csv(path) for path in sorted(Path("artifacts").glob("*.csv"))],
+              ignore_index=True,
+          )
+          if len(frame) != 40:
+              raise RuntimeError(f"expected 40 rows, got {len(frame)}")
+          frame.to_csv("results/generated/flyvis_type_pair_mode_alignment.csv", index=False)
+          metrics = [
+              "cross_entropy",
+              "full_local_cosine",
+              "full_local_projection",
+              "full_boosted_cosine",
+              "full_boosted_projection",
+              "coarse_cosine",
+              "coarse_projection",
+              "coarse_norm_ratio",
+              "boosted_coarse_projection",
+              "residual_cosine",
+              "residual_projection",
+              "residual_norm_ratio",
+              "bias_cosine",
+              "bias_projection",
+              "oracle_coarse_edge_energy_fraction",
+              "local_coarse_edge_energy_fraction",
+          ]
+          summary = frame.groupby(["train_rule", "epoch"], as_index=False)[metrics].mean()
+          summary.to_csv("results/generated/flyvis_type_pair_mode_alignment_summary.csv", index=False)
+          print(summary.to_string(index=False))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-type-pair-mode-alignment-aggregate
+          path: |
+            results/generated/flyvis_type_pair_mode_alignment.csv
+            results/generated/flyvis_type_pair_mode_alignment_summary.csv
