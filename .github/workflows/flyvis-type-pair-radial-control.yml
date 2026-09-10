@@ -1,0 +1,155 @@
+name: FlyVis type-pair radial control
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "scripts/run_flyvis_type_pair_radial_control.py"
+      - ".github/workflows/flyvis-type-pair-radial-control.yml"
+
+jobs:
+  train:
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [110, 111, 112, 113, 114, 115, 116, 117, 118, 119]
+        rule: [local, shared_norm_matched, shared_radial_matched]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          enable-cache: false
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Train radial control
+        run: >-
+          uv run python scripts/run_flyvis_type_pair_radial_control.py
+          --seed ${{ matrix.seed }}
+          --rule ${{ matrix.rule }}
+          --learning-rate 160
+          --out results/generated/radial_${{ matrix.rule }}_seed${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: radial-${{ matrix.rule }}-seed${{ matrix.seed }}
+          path: results/generated/radial_${{ matrix.rule }}_seed${{ matrix.seed }}.csv
+
+  aggregate:
+    needs: train
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: radial-*
+          path: artifacts
+          merge-multiple: true
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          enable-cache: false
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Aggregate paired radial-control results
+        run: |
+          mkdir -p results/generated
+          uv run --with scipy python - <<'PY'
+          from pathlib import Path
+          import math
+          import pandas as pd
+          import scipy.stats as stats
+
+          frame = pd.concat(
+              [pd.read_csv(path) for path in sorted(Path("artifacts").glob("*.csv"))],
+              ignore_index=True,
+          )
+          if len(frame) != 30:
+              raise RuntimeError(f"expected 30 rows, got {len(frame)}")
+          if not bool(frame["finite"].all()):
+              raise RuntimeError("non-finite radial-control result")
+
+          local = frame[frame.rule == "local"].set_index("seed").sort_index()
+          rows = []
+          for rule in ("shared_norm_matched", "shared_radial_matched"):
+              current = frame[frame.rule == rule].set_index("seed").sort_index()
+              if not local.index.equals(current.index):
+                  raise RuntimeError(f"paired seed mismatch for {rule}")
+              for metric, higher_is_better in (
+                  ("cross_entropy_after", False),
+                  ("accuracy_after", True),
+                  ("margin_after", True),
+              ):
+                  raw = current[metric] - local[metric]
+                  delta = raw if higher_is_better else -raw
+                  n = len(delta)
+                  mean = float(delta.mean())
+                  sd = float(delta.std(ddof=1))
+                  se = sd / math.sqrt(n)
+                  tcrit = float(stats.t.ppf(0.975, n - 1))
+                  try:
+                      wilcoxon_p = float(stats.wilcoxon(delta).pvalue)
+                  except ValueError:
+                      wilcoxon_p = float("nan")
+                  rows.append({
+                      "rule": rule,
+                      "metric": metric,
+                      "n": n,
+                      "mean_gain_vs_local": mean,
+                      "median_gain_vs_local": float(delta.median()),
+                      "ci95_low": mean - tcrit * se,
+                      "ci95_high": mean + tcrit * se,
+                      "improved_seeds": int((delta > 0).sum()),
+                      "paired_t_p": float(stats.ttest_rel(current[metric], local[metric]).pvalue),
+                      "wilcoxon_p": wilcoxon_p,
+                      "cohen_dz": mean / sd if sd > 0 else float("nan"),
+                  })
+
+          norm = frame[frame.rule == "shared_norm_matched"].set_index("seed").sort_index()
+          radial = frame[frame.rule == "shared_radial_matched"].set_index("seed").sort_index()
+          for metric, higher_is_better in (
+              ("cross_entropy_after", False),
+              ("accuracy_after", True),
+              ("margin_after", True),
+          ):
+              raw = radial[metric] - norm[metric]
+              delta = raw if higher_is_better else -raw
+              n = len(delta)
+              mean = float(delta.mean())
+              sd = float(delta.std(ddof=1))
+              se = sd / math.sqrt(n)
+              tcrit = float(stats.t.ppf(0.975, n - 1))
+              rows.append({
+                  "rule": "radial_matched_vs_norm_matched",
+                  "metric": metric,
+                  "n": n,
+                  "mean_gain_vs_local": mean,
+                  "median_gain_vs_local": float(delta.median()),
+                  "ci95_low": mean - tcrit * se,
+                  "ci95_high": mean + tcrit * se,
+                  "improved_seeds": int((delta > 0).sum()),
+                  "paired_t_p": float(stats.ttest_rel(radial[metric], norm[metric]).pvalue),
+                  "wilcoxon_p": float(stats.wilcoxon(delta).pvalue),
+                  "cohen_dz": mean / sd if sd > 0 else float("nan"),
+              })
+
+          summary = pd.DataFrame(rows)
+          frame.to_csv("results/generated/flyvis_type_pair_radial_control.csv", index=False)
+          summary.to_csv("results/generated/flyvis_type_pair_radial_control_summary.csv", index=False)
+          print(summary.to_string(index=False))
+          print("\nRule means:")
+          print(
+              frame.groupby("rule")[[
+                  "weight_norm",
+                  "mean_edge_norm_ratio",
+                  "mean_radial_fraction",
+                  "mean_local_radial_fraction",
+                  "mean_relative_direction_change",
+              ]].mean().to_string()
+          )
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-type-pair-radial-control-aggregate
+          path: |
+            results/generated/flyvis_type_pair_radial_control.csv
+            results/generated/flyvis_type_pair_radial_control_summary.csv
