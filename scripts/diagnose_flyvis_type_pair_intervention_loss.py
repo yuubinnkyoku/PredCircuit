@@ -127,9 +127,7 @@ def run_diagnostic(
     )["final_ce_oracle"]
     local_geometry = geometry(local_edge, local_bias, oracle_edge, oracle_bias)
 
-    oracle_norm_sq = torch.dot(oracle_edge, oracle_edge) + torch.dot(
-        oracle_bias, oracle_bias
-    )
+    oracle_norm_sq = torch.dot(oracle_edge, oracle_edge) + torch.dot(oracle_bias, oracle_bias)
     alpha = (
         torch.dot(local_edge, oracle_edge) + torch.dot(local_bias, oracle_bias)
     ) / oracle_norm_sq.clamp_min(1e-30)
@@ -152,9 +150,7 @@ def run_diagnostic(
         (weight, bias),
         create_graph=True,
     )
-    residual_derivative = torch.dot(grad_edge, residual_edge) + torch.dot(
-        grad_bias, residual_bias
-    )
+    residual_derivative = torch.dot(grad_edge, residual_edge) + torch.dot(grad_bias, residual_bias)
     hvp_edge, hvp_bias = torch.autograd.grad(
         residual_derivative,
         (weight, bias),
@@ -273,12 +269,8 @@ def run_diagnostic(
                 "total_residual_curvature": float(total_residual_curvature),
                 "total_cross_curvature": float(total_cross_curvature),
                 "residual_norm": float(torch.linalg.vector_norm(residual_edge[indices])),
-                "relative_raw_direction_change": float(
-                    raw_change / local_norm.clamp_min(1e-30)
-                ),
-                "raw_cosine_error": abs(
-                    filtered_geometry["cosine"] - local_geometry["cosine"]
-                ),
+                "relative_raw_direction_change": float(raw_change / local_norm.clamp_min(1e-30)),
+                "raw_cosine_error": abs(filtered_geometry["cosine"] - local_geometry["cosine"]),
                 "raw_norm_ratio_error": abs(
                     filtered_geometry["norm_ratio"] - local_geometry["norm_ratio"]
                 ),
@@ -341,9 +333,11 @@ def main() -> None:
     frame.to_csv(args.out, index=False)
 
     pairs = frame[frame["source_type"] != "__all__"].copy()
-    spearman = pairs[
-        ["residual_curvature_contribution", "filtered_loss_gain_vs_local"]
-    ].corr(method="spearman").iloc[0, 1]
+    spearman = (
+        pairs[["residual_curvature_contribution", "filtered_loss_gain_vs_local"]]
+        .corr(method="spearman")
+        .iloc[0, 1]
+    )
     print(f"Spearman(old burden, actual one-step gain): {spearman:.6f}")
     print("\nTop beneficial pair interventions:")
     print(
@@ -356,7 +350,9 @@ def main() -> None:
                 "residual_curvature_contribution",
                 "relative_raw_direction_change",
             ]
-        ].head(20).to_string(index=False)
+        ]
+        .head(20)
+        .to_string(index=False)
     )
     print("\nMost harmful pair interventions:")
     print(
@@ -369,7 +365,9 @@ def main() -> None:
                 "residual_curvature_contribution",
                 "relative_raw_direction_change",
             ]
-        ].head(20).to_string(index=False)
+        ]
+        .head(20)
+        .to_string(index=False)
     )
     print("\nAll-pair intervention:")
     print(

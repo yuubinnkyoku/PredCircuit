@@ -155,9 +155,7 @@ def perturbation_amplification(
             step_size=step_size,
         )
         if step in horizons:
-            results[step] = float(
-                free_norm(perturbed - base, free_mask) / initial_distance
-            )
+            results[step] = float(free_norm(perturbed - base, free_mask) / initial_distance)
     return results
 
 

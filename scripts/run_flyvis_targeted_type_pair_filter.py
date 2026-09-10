@@ -136,8 +136,7 @@ def run_seed(
         cosine_error_sum += abs(filtered_geometry["cosine"] - local_geometry["cosine"])
         norm_error_sum += abs(filtered_geometry["norm_ratio"] - local_geometry["norm_ratio"])
         projection_error_sum += abs(
-            filtered_geometry["projection_coefficient"]
-            - local_geometry["projection_coefficient"]
+            filtered_geometry["projection_coefficient"] - local_geometry["projection_coefficient"]
         )
         relative_change_sum += relative_change
 

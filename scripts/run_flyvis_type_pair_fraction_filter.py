@@ -156,8 +156,7 @@ def run_seed(
         cosine_error_sum += abs(filtered_geometry["cosine"] - local_geometry["cosine"])
         norm_error_sum += abs(filtered_geometry["norm_ratio"] - local_geometry["norm_ratio"])
         projection_error_sum += abs(
-            filtered_geometry["projection_coefficient"]
-            - local_geometry["projection_coefficient"]
+            filtered_geometry["projection_coefficient"] - local_geometry["projection_coefficient"]
         )
         change_sum += change
         apply_local_credit(
@@ -193,7 +192,9 @@ def run_seed(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Test distributed subsets of type-pair residual filtering")
+    parser = argparse.ArgumentParser(
+        description="Test distributed subsets of type-pair residual filtering"
+    )
     parser.add_argument("--seed", type=int, required=True)
     parser.add_argument("--fraction", type=float, required=True)
     parser.add_argument("--salt", type=str, default="A")

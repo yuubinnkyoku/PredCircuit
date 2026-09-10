@@ -129,7 +129,9 @@ def run_seed(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Train with oracle-free type-pair credit consensus")
+    parser = argparse.ArgumentParser(
+        description="Train with oracle-free type-pair credit consensus"
+    )
     parser.add_argument("--seed", type=int, required=True)
     parser.add_argument("--gamma", type=float, required=True)
     parser.add_argument("--start-epoch", type=int, default=50)

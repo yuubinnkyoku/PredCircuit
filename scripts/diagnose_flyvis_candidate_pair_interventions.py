@@ -72,9 +72,7 @@ def run_seed(
         step_size=0.015,
     )["final_ce_oracle"]
 
-    oracle_norm_sq = torch.dot(oracle_edge, oracle_edge) + torch.dot(
-        oracle_bias, oracle_bias
-    )
+    oracle_norm_sq = torch.dot(oracle_edge, oracle_edge) + torch.dot(oracle_bias, oracle_bias)
     alpha = (
         torch.dot(local_edge, oracle_edge) + torch.dot(local_bias, oracle_bias)
     ) / oracle_norm_sq.clamp_min(1e-30)
@@ -91,9 +89,7 @@ def run_seed(
         (weight, bias),
         create_graph=True,
     )
-    residual_derivative = torch.dot(grad_edge, residual_edge) + torch.dot(
-        grad_bias, residual_bias
-    )
+    residual_derivative = torch.dot(grad_edge, residual_edge) + torch.dot(grad_bias, residual_bias)
     hvp_edge, _ = torch.autograd.grad(residual_derivative, (weight, bias))
 
     local_edge_update = clipped_update(

@@ -19,9 +19,7 @@ from predcircuit.flyvis_retinotopy import RetinotopicFlyVisCircuit, graph_from_f
 from predcircuit.model import PredictiveCodingGraph
 
 
-def grouped_edge_indices(
-    circuit: RetinotopicFlyVisCircuit, grouping: str
-) -> list[torch.Tensor]:
+def grouped_edge_indices(circuit: RetinotopicFlyVisCircuit, grouping: str) -> list[torch.Tensor]:
     if grouping == "type_pair":
         return type_pair_indices(circuit)
 
@@ -189,7 +187,15 @@ def main() -> None:
     parser.add_argument("--seed", type=int, required=True)
     parser.add_argument(
         "--grouping",
-        choices=["local", "type_pair", "random_a", "random_b", "source_type", "target_type", "global"],
+        choices=[
+            "local",
+            "type_pair",
+            "random_a",
+            "random_b",
+            "source_type",
+            "target_type",
+            "global",
+        ],
         required=True,
     )
     parser.add_argument("--epochs", type=int, default=100)

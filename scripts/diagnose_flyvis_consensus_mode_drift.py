@@ -33,9 +33,7 @@ def vector_geometry(candidate: torch.Tensor, oracle: torch.Tensor) -> dict[str, 
     oracle_norm = torch.linalg.vector_norm(oracle)
     denom = candidate_norm * oracle_norm
     cosine = float(torch.dot(candidate, oracle) / denom) if float(denom) > 1e-30 else float("nan")
-    projection = float(
-        torch.dot(candidate, oracle) / oracle_norm.square().clamp_min(1e-30)
-    )
+    projection = float(torch.dot(candidate, oracle) / oracle_norm.square().clamp_min(1e-30))
     return {
         "cosine": cosine,
         "candidate_norm": float(candidate_norm),
@@ -130,9 +128,7 @@ def checkpoint_row(
         "local_residual_norm_fraction": float(
             torch.linalg.vector_norm(local_residual) / local_norm
         ),
-        "oracle_coarse_norm_fraction": float(
-            torch.linalg.vector_norm(oracle_coarse) / oracle_norm
-        ),
+        "oracle_coarse_norm_fraction": float(torch.linalg.vector_norm(oracle_coarse) / oracle_norm),
         "oracle_residual_norm_fraction": float(
             torch.linalg.vector_norm(oracle_residual) / oracle_norm
         ),
@@ -149,10 +145,14 @@ def checkpoint_row(
         "weight_delta_residual_norm": float(torch.linalg.vector_norm(weight_delta_residual)),
         "weight_delta_coarse_fraction": float(
             torch.linalg.vector_norm(weight_delta_coarse) / weight_delta_norm
-        ) if checkpoint > 0 else 0.0,
+        )
+        if checkpoint > 0
+        else 0.0,
         "weight_delta_residual_fraction": float(
             torch.linalg.vector_norm(weight_delta_residual) / weight_delta_norm
-        ) if checkpoint > 0 else 0.0,
+        )
+        if checkpoint > 0
+        else 0.0,
         "bias_delta_norm": float(torch.linalg.vector_norm(bias_delta)),
         "oracle_bias_norm": float(torch.linalg.vector_norm(oracle_bias)),
         "local_bias_norm": float(torch.linalg.vector_norm(local_bias)),

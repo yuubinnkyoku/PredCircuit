@@ -29,36 +29,27 @@ def direction_curvature(
     oracle_edge: torch.Tensor,
     oracle_bias: torch.Tensor,
 ) -> dict[str, float]:
-    oracle_norm_sq = torch.dot(oracle_edge, oracle_edge) + torch.dot(
-        oracle_bias, oracle_bias
-    )
+    oracle_norm_sq = torch.dot(oracle_edge, oracle_edge) + torch.dot(oracle_bias, oracle_bias)
     alpha = (
-        torch.dot(direction_edge, oracle_edge)
-        + torch.dot(direction_bias, oracle_bias)
+        torch.dot(direction_edge, oracle_edge) + torch.dot(direction_bias, oracle_bias)
     ) / oracle_norm_sq.clamp_min(1e-30)
     parallel_edge = alpha * oracle_edge
     parallel_bias = alpha * oracle_bias
     residual_edge = direction_edge - parallel_edge
     residual_bias = direction_bias - parallel_bias
-    residual_derivative = torch.dot(grad_edge, residual_edge) + torch.dot(
-        grad_bias, residual_bias
-    )
+    residual_derivative = torch.dot(grad_edge, residual_edge) + torch.dot(grad_bias, residual_bias)
     hvp_edge, hvp_bias = torch.autograd.grad(
         residual_derivative,
         (weight, bias),
         retain_graph=True,
     )
-    residual_curvature = torch.dot(residual_edge, hvp_edge) + torch.dot(
-        residual_bias, hvp_bias
-    )
+    residual_curvature = torch.dot(residual_edge, hvp_edge) + torch.dot(residual_bias, hvp_bias)
     cross_curvature = 2.0 * (
         torch.dot(parallel_edge, hvp_edge) + torch.dot(parallel_bias, hvp_bias)
     )
     return {
         "alpha": float(alpha),
-        "residual_norm": float(
-            torch.linalg.vector_norm(torch.cat((residual_edge, residual_bias)))
-        ),
+        "residual_norm": float(torch.linalg.vector_norm(torch.cat((residual_edge, residual_bias)))),
         "residual_curvature": float(residual_curvature),
         "cross_curvature": float(cross_curvature),
     }
@@ -196,11 +187,7 @@ def checkpoint_rows(
                 "applied_update_cosine": update_geom["cosine"],
                 "applied_update_norm_ratio": update_geom["norm_ratio"],
                 "edge_clip_fraction": float(
-                    (learning_rate * edge_direction)
-                    .abs()
-                    .gt(max_update)
-                    .float()
-                    .mean()
+                    (learning_rate * edge_direction).abs().gt(max_update).float().mean()
                 ),
                 "weight_norm": float(torch.linalg.vector_norm(model.weight)),
                 "bias_norm": float(torch.linalg.vector_norm(model.bias)),

@@ -30,10 +30,7 @@ def type_pair_indices(
     groups: dict[tuple[str, str], list[int]] = defaultdict(list)
     for index, (source, target) in enumerate(circuit.graph.edge_index.t().tolist()):
         groups[(circuit.node_types[source], circuit.node_types[target])].append(index)
-    return {
-        pair: torch.tensor(indices, dtype=torch.long)
-        for pair, indices in groups.items()
-    }
+    return {pair: torch.tensor(indices, dtype=torch.long) for pair, indices in groups.items()}
 
 
 def checkpoint_rows(
@@ -91,9 +88,7 @@ def checkpoint_rows(
         torch.cat((grad_edge + oracle_edge, grad_bias + oracle_bias))
     ) / torch.linalg.vector_norm(torch.cat((oracle_edge, oracle_bias))).clamp_min(1e-30)
 
-    residual_derivative = torch.dot(grad_edge, residual_edge) + torch.dot(
-        grad_bias, residual_bias
-    )
+    residual_derivative = torch.dot(grad_edge, residual_edge) + torch.dot(grad_bias, residual_bias)
     hvp_edge, hvp_bias = torch.autograd.grad(
         residual_derivative,
         (weight, bias),
@@ -166,9 +161,7 @@ def checkpoint_rows(
                     / torch.linalg.vector_norm(residual).clamp_min(1e-30)
                 ),
                 "residual_curvature_contribution": float(torch.dot(residual, residual_hvp)),
-                "cross_curvature_contribution": float(
-                    2.0 * torch.dot(parallel, residual_hvp)
-                ),
+                "cross_curvature_contribution": float(2.0 * torch.dot(parallel, residual_hvp)),
                 "total_residual_curvature": float(total_residual_curvature),
                 "total_cross_curvature": float(total_cross_curvature),
                 "oracle_reconstruction_relative_error": float(oracle_reconstruction_error),
@@ -206,8 +199,7 @@ def checkpoint_rows(
             "residual_norm": float(torch.linalg.vector_norm(residual_bias)),
             "residual_edge_fraction_sq": float("nan"),
             "residual_full_fraction_sq": float(
-                torch.dot(residual_bias, residual_bias)
-                / full_residual_norm_sq.clamp_min(1e-30)
+                torch.dot(residual_bias, residual_bias) / full_residual_norm_sq.clamp_min(1e-30)
             ),
             "residual_mean": float(residual_bias.mean()),
             "centered_residual_norm": float("nan"),
@@ -322,7 +314,10 @@ def main() -> None:
                 "residual_curvature_contribution",
                 "cross_curvature_contribution",
             ]
-        ].groupby("epoch").head(12).to_string(index=False)
+        ]
+        .groupby("epoch")
+        .head(12)
+        .to_string(index=False)
     )
     print(f"\nSaved: {args.out}")
 

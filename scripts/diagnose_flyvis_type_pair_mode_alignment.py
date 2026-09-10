@@ -39,7 +39,9 @@ def vector_geometry(candidate: torch.Tensor, oracle: torch.Tensor) -> dict[str, 
     denom = candidate_norm * oracle_norm
     oracle_norm_sq = oracle_norm.square().clamp_min(1e-30)
     return {
-        "cosine": float(torch.dot(candidate, oracle) / denom) if float(denom) > 1e-30 else float("nan"),
+        "cosine": float(torch.dot(candidate, oracle) / denom)
+        if float(denom) > 1e-30
+        else float("nan"),
         "projection": float(torch.dot(candidate, oracle) / oracle_norm_sq),
         "norm_ratio": float(candidate_norm / oracle_norm.clamp_min(1e-30)),
         "candidate_norm": float(candidate_norm),
