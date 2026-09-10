@@ -1,0 +1,78 @@
+name: FlyVis plain consensus replication aggregate repair
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/flyvis-plain-consensus-replication-repair.yml"
+
+jobs:
+  aggregate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: plain-consensus-*
+          path: artifacts
+          merge-multiple: true
+          run-id: 34434577488
+          github-token: ${{ github.token }}
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Aggregate paired replication
+        run: |
+          mkdir -p results/generated
+          uv run --with scipy python - <<'PY'
+          from pathlib import Path
+          import math
+          import pandas as pd
+          import scipy.stats as stats
+
+          frame = pd.concat(
+              [pd.read_csv(path) for path in sorted(Path("artifacts").glob("*.csv"))],
+              ignore_index=True,
+          )
+          if len(frame) != 45:
+              raise RuntimeError(f"expected 45 rows, got {len(frame)}")
+          frame.to_csv("results/generated/plain_consensus_replication.csv", index=False)
+
+          local = frame[frame.rule == "local"].set_index("seed")
+          rows = []
+          for rule in ("pair_consensus", "plain_residual_shrink"):
+              current = frame[frame.rule == rule].set_index("seed").loc[local.index]
+              delta = local.cross_entropy_after - current.cross_entropy_after
+              n = len(delta)
+              mean = float(delta.mean())
+              sd = float(delta.std(ddof=1))
+              se = sd / math.sqrt(n)
+              tcrit = float(stats.t.ppf(0.975, n - 1))
+              ttest = stats.ttest_rel(local.cross_entropy_after, current.cross_entropy_after)
+              try:
+                  wilcoxon_p = float(stats.wilcoxon(delta).pvalue)
+              except ValueError:
+                  wilcoxon_p = float("nan")
+              rows.append({
+                  "rule": rule,
+                  "n": n,
+                  "mean_ce_gain_vs_local": mean,
+                  "median_ce_gain_vs_local": float(delta.median()),
+                  "sd_ce_gain": sd,
+                  "ci95_low": mean - tcrit * se,
+                  "ci95_high": mean + tcrit * se,
+                  "improved_seeds": int((delta > 0).sum()),
+                  "paired_t_p": float(ttest.pvalue),
+                  "wilcoxon_p": wilcoxon_p,
+                  "cohen_dz": mean / sd if sd > 0 else float("nan"),
+              })
+          summary = pd.DataFrame(rows)
+          summary.to_csv("results/generated/plain_consensus_replication_summary.csv", index=False)
+          print(summary.to_string(index=False))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: plain-consensus-replication-repaired-aggregate
+          path: |
+            results/generated/plain_consensus_replication.csv
+            results/generated/plain_consensus_replication_summary.csv
