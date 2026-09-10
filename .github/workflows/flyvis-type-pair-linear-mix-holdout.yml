@@ -1,0 +1,144 @@
+name: FlyVis type-pair linear-mix holdout
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/flyvis-type-pair-linear-mix-holdout.yml"
+
+jobs:
+  train:
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59]
+        coarse_gain: [1.0, 4.0]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          enable-cache: true
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Train fixed holdout rule
+        run: >-
+          uv run python scripts/run_flyvis_type_pair_linear_mix.py
+          --seed ${{ matrix.seed }}
+          --coarse-gain ${{ matrix.coarse_gain }}
+          --residual-gain 1.0
+          --epochs 100
+          --learning-rate 160
+          --out results/generated/holdout_c${{ matrix.coarse_gain }}_seed${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: holdout-c${{ matrix.coarse_gain }}-seed${{ matrix.seed }}
+          path: results/generated/holdout_c${{ matrix.coarse_gain }}_seed${{ matrix.seed }}.csv
+
+  aggregate:
+    needs: train
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: holdout-*
+          path: artifacts
+          merge-multiple: true
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Aggregate paired holdout
+        run: |
+          mkdir -p results/generated
+          uv run --with scipy python - <<'PY'
+          from pathlib import Path
+          import math
+          import pandas as pd
+          import scipy.stats as stats
+
+          frame = pd.concat(
+              [pd.read_csv(path) for path in sorted(Path("artifacts").glob("*.csv"))],
+              ignore_index=True,
+          )
+          if len(frame) != 40:
+              raise RuntimeError(f"expected 40 rows, got {len(frame)}")
+          if set(frame["seed"]) != set(range(40, 60)):
+              raise RuntimeError("holdout seed set mismatch")
+          if not bool(frame["finite"].all()):
+              raise RuntimeError("non-finite holdout result")
+
+          local = frame[frame.coarse_gain == 1.0].set_index("seed").sort_index()
+          shared = frame[frame.coarse_gain == 4.0].set_index("seed").sort_index()
+          if not local.index.equals(shared.index):
+              raise RuntimeError("paired seed mismatch")
+
+          def paired_summary(metric: str, higher_is_better: bool) -> dict[str, float | int | str]:
+              delta = shared[metric] - local[metric]
+              if not higher_is_better:
+                  delta = -delta
+              n = len(delta)
+              mean = float(delta.mean())
+              sd = float(delta.std(ddof=1))
+              se = sd / math.sqrt(n)
+              tcrit = float(stats.t.ppf(0.975, n - 1))
+              ttest = stats.ttest_rel(shared[metric], local[metric])
+              try:
+                  wilcoxon_p = float(stats.wilcoxon(delta).pvalue)
+              except ValueError:
+                  wilcoxon_p = float("nan")
+              return {
+                  "metric": metric,
+                  "n": n,
+                  "mean_gain_shared4_vs_local": mean,
+                  "median_gain_shared4_vs_local": float(delta.median()),
+                  "sd_gain": sd,
+                  "ci95_low": mean - tcrit * se,
+                  "ci95_high": mean + tcrit * se,
+                  "improved_seeds": int((delta > 0).sum()),
+                  "paired_t_p_two_sided": float(ttest.pvalue),
+                  "wilcoxon_p_two_sided": wilcoxon_p,
+                  "cohen_dz": mean / sd if sd > 0 else float("nan"),
+              }
+
+          summary = pd.DataFrame([
+              paired_summary("cross_entropy_after", higher_is_better=False),
+              paired_summary("accuracy_after", higher_is_better=True),
+              paired_summary("margin_after", higher_is_better=True),
+          ])
+          geometry = pd.DataFrame([
+              {
+                  "rule": "local_m_plus_r",
+                  "mean_relative_edge_direction_change": float(local.mean_relative_edge_direction_change.mean()),
+                  "mean_edge_norm_ratio": float(local.mean_edge_norm_ratio.mean()),
+                  "mean_edge_clip_fraction": float(local.mean_edge_clip_fraction.mean()),
+                  "mean_weight_norm": float(local.weight_norm.mean()),
+                  "mean_bias_norm": float(local.bias_norm.mean()),
+                  "all_finite": bool(local.finite.all()),
+              },
+              {
+                  "rule": "shared4_4m_plus_r",
+                  "mean_relative_edge_direction_change": float(shared.mean_relative_edge_direction_change.mean()),
+                  "mean_edge_norm_ratio": float(shared.mean_edge_norm_ratio.mean()),
+                  "mean_edge_clip_fraction": float(shared.mean_edge_clip_fraction.mean()),
+                  "mean_weight_norm": float(shared.weight_norm.mean()),
+                  "mean_bias_norm": float(shared.bias_norm.mean()),
+                  "all_finite": bool(shared.finite.all()),
+              },
+          ])
+
+          frame.to_csv("results/generated/flyvis_type_pair_linear_mix_holdout.csv", index=False)
+          summary.to_csv("results/generated/flyvis_type_pair_linear_mix_holdout_summary.csv", index=False)
+          geometry.to_csv("results/generated/flyvis_type_pair_linear_mix_holdout_geometry.csv", index=False)
+          print(summary.to_string(index=False))
+          print("\nGeometry:")
+          print(geometry.to_string(index=False))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-type-pair-linear-mix-holdout-aggregate
+          path: |
+            results/generated/flyvis_type_pair_linear_mix_holdout.csv
+            results/generated/flyvis_type_pair_linear_mix_holdout_summary.csv
+            results/generated/flyvis_type_pair_linear_mix_holdout_geometry.csv
