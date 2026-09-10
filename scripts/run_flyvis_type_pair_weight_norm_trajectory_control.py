@@ -14,11 +14,13 @@ from run_flyvis_type_pair_linear_mix import linear_mix_direction
 from run_flyvis_type_pair_norm_matched_control import match_norm
 
 from predcircuit.flyvis import load_flyvis_spec
-from predcircuit.flyvis_retinotopy import graph_from_flyvis_retinotopy
+from predcircuit.flyvis_retinotopy import RetinotopicFlyVisCircuit, graph_from_flyvis_retinotopy
 from predcircuit.model import PredictiveCodingGraph
 
 
-def evaluate(model: PredictiveCodingGraph, circuit: object, seed: int) -> dict[str, float]:
+def evaluate(
+    model: PredictiveCodingGraph, circuit: RetinotopicFlyVisCircuit, seed: int
+) -> dict[str, float]:
     return evaluate_metrics(
         model,
         circuit,
