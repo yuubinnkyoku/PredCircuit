@@ -17,7 +17,6 @@ from predcircuit.flyvis import load_flyvis_spec
 from predcircuit.flyvis_retinotopy import RetinotopicFlyVisCircuit, graph_from_flyvis_retinotopy
 from predcircuit.model import PredictiveCodingGraph
 
-
 DISCOVERY_PAIRS = {
     "robust_t4a_t4c": {("T4a", "T4c")},
     "t4_mi9": {("T4a", "Mi9"), ("T4b", "Mi9"), ("T4c", "Mi9")},
