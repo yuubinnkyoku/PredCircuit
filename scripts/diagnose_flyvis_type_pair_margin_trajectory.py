@@ -33,14 +33,6 @@ def run_seed(*, seed: int, learning_rate: float, max_update: float) -> pd.DataFr
     local_model = PredictiveCodingGraph(circuit.graph, seed=seed, init_scale=0.08)
     shared_model = PredictiveCodingGraph(circuit.graph, seed=seed, init_scale=0.08)
     groups = type_pair_indices(circuit)
-    eval_kwargs = {
-        "repeats": 8,
-        "frames": 7,
-        "width": 0.5,
-        "frame_steps": 2,
-        "step_size": 0.015,
-        "jitter_seed": 900_000 + seed,
-    }
     rows: list[dict[str, float | int | bool | str]] = []
     running_geometry = {
         "local": {"relative_change": 0.0, "constant_fraction": 0.0, "count": 0},
@@ -56,7 +48,16 @@ def run_seed(*, seed: int, learning_rate: float, max_update: float) -> pd.DataFr
             ("local", local_model),
             ("type_pair_norm_matched", shared_model),
         ):
-            metrics = evaluate_metrics(model, circuit, **eval_kwargs)
+            metrics = evaluate_metrics(
+                model,
+                circuit,
+                repeats=8,
+                frames=7,
+                width=0.5,
+                frame_steps=2,
+                step_size=0.015,
+                jitter_seed=900_000 + seed,
+            )
             geometry = running_geometry[rule]
             count = int(geometry["count"])
             rows.append(
