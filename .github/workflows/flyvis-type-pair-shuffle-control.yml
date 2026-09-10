@@ -24,14 +24,15 @@ jobs:
       - run: uv python install 3.11
       - run: uv sync
       - name: Train grouping control
-        run: >-
-          uv run python scripts/run_flyvis_type_pair_shuffle_control.py
-          --seed ${{ matrix.seed }}
-          --grouping ${{ matrix.grouping }}
-          --shuffle-seed ${{ 10000 + matrix.seed }}
-          --epochs 100
-          --learning-rate 160
-          --out results/generated/shuffle_control_${{ matrix.grouping }}_seed${{ matrix.seed }}.csv
+        run: |
+          SHUFFLE_SEED=$((10000 + ${{ matrix.seed }}))
+          uv run python scripts/run_flyvis_type_pair_shuffle_control.py \
+            --seed ${{ matrix.seed }} \
+            --grouping ${{ matrix.grouping }} \
+            --shuffle-seed "$SHUFFLE_SEED" \
+            --epochs 100 \
+            --learning-rate 160 \
+            --out results/generated/shuffle_control_${{ matrix.grouping }}_seed${{ matrix.seed }}.csv
       - uses: actions/upload-artifact@v4
         with:
           name: shuffle-control-${{ matrix.grouping }}-seed${{ matrix.seed }}
