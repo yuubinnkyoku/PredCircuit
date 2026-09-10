@@ -1,0 +1,136 @@
+name: FlyVis type-pair weight-norm trajectory control
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "scripts/run_flyvis_type_pair_weight_norm_trajectory_control.py"
+      - ".github/workflows/flyvis-type-pair-weight-norm-trajectory-control.yml"
+
+jobs:
+  train:
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [120, 121, 122, 123, 124, 125, 126, 127, 128, 129, 130, 131, 132, 133, 134, 135, 136, 137, 138, 139]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          enable-cache: false
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Train paired weight-norm trajectory control
+        run: >-
+          uv run python scripts/run_flyvis_type_pair_weight_norm_trajectory_control.py
+          --seed ${{ matrix.seed }}
+          --learning-rate 160
+          --out results/generated/weight_norm_trajectory_seed${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: weight-norm-trajectory-seed${{ matrix.seed }}
+          path: results/generated/weight_norm_trajectory_seed${{ matrix.seed }}.csv
+
+  aggregate:
+    needs: train
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: weight-norm-trajectory-*
+          path: artifacts
+          merge-multiple: true
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          enable-cache: false
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Aggregate paired weight-norm trajectory control
+        run: |
+          mkdir -p results/generated
+          uv run --with scipy python - <<'PY'
+          from pathlib import Path
+          import math
+          import pandas as pd
+          import scipy.stats as stats
+
+          frame = pd.concat(
+              [pd.read_csv(path) for path in sorted(Path("artifacts").glob("*.csv"))],
+              ignore_index=True,
+          )
+          if len(frame) != 40:
+              raise RuntimeError(f"expected 40 rows, got {len(frame)}")
+          if not bool(frame["finite"].all()):
+              raise RuntimeError("non-finite weight-norm trajectory result")
+
+          local = frame[frame.rule == "local"].set_index("seed").sort_index()
+          shared = frame[
+              frame.rule == "shared_weight_norm_trajectory_matched"
+          ].set_index("seed").sort_index()
+          if not local.index.equals(shared.index):
+              raise RuntimeError("paired seed mismatch")
+
+          rows = []
+          for metric, higher_is_better in (
+              ("cross_entropy_after", False),
+              ("accuracy_after", True),
+              ("margin_after", True),
+          ):
+              raw = shared[metric] - local[metric]
+              delta = raw if higher_is_better else -raw
+              n = len(delta)
+              mean = float(delta.mean())
+              sd = float(delta.std(ddof=1))
+              se = sd / math.sqrt(n)
+              tcrit = float(stats.t.ppf(0.975, n - 1))
+              try:
+                  wilcoxon_p = float(stats.wilcoxon(delta).pvalue)
+              except ValueError:
+                  wilcoxon_p = float("nan")
+              rows.append({
+                  "metric": metric,
+                  "n": n,
+                  "mean_gain_vs_local": mean,
+                  "median_gain_vs_local": float(delta.median()),
+                  "ci95_low": mean - tcrit * se,
+                  "ci95_high": mean + tcrit * se,
+                  "improved_seeds": int((delta > 0).sum()),
+                  "paired_t_p": float(stats.ttest_rel(shared[metric], local[metric]).pvalue),
+                  "wilcoxon_p": wilcoxon_p,
+                  "cohen_dz": mean / sd if sd > 0 else float("nan"),
+              })
+
+          summary = pd.DataFrame(rows)
+          frame.to_csv(
+              "results/generated/flyvis_type_pair_weight_norm_trajectory_control.csv",
+              index=False,
+          )
+          summary.to_csv(
+              "results/generated/flyvis_type_pair_weight_norm_trajectory_control_summary.csv",
+              index=False,
+          )
+          print(summary.to_string(index=False))
+          print("\nRule means:")
+          print(
+              frame.groupby("rule")[[
+                  "weight_norm",
+                  "bias_norm",
+                  "mean_relative_direction_change",
+                  "mean_pre_rescale_weight_norm_ratio",
+                  "mean_post_rescale_weight_norm_error",
+                  "mean_rescale_factor",
+                  "mean_edge_clip_fraction",
+              ]].mean().to_string()
+          )
+          print("\nFinal paired weight-norm absolute error:")
+          print(float((shared.weight_norm - local.weight_norm).abs().max()))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-type-pair-weight-norm-trajectory-control-aggregate
+          path: |
+            results/generated/flyvis_type_pair_weight_norm_trajectory_control.csv
+            results/generated/flyvis_type_pair_weight_norm_trajectory_control_summary.csv
