@@ -1,0 +1,99 @@
+name: FlyVis type-pair linear mix
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "scripts/run_flyvis_type_pair_linear_mix.py"
+      - ".github/workflows/flyvis-type-pair-linear-mix.yml"
+
+jobs:
+  train:
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [20, 21, 22, 23, 24]
+        coarse_gain: [2.0, 3.0, 4.0]
+        residual_gain: [0.5, 0.75, 1.0]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          enable-cache: true
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Train fixed mode mix
+        run: >-
+          uv run python scripts/run_flyvis_type_pair_linear_mix.py
+          --seed ${{ matrix.seed }}
+          --coarse-gain ${{ matrix.coarse_gain }}
+          --residual-gain ${{ matrix.residual_gain }}
+          --epochs 100
+          --learning-rate 160
+          --out results/generated/linear_mix_c${{ matrix.coarse_gain }}_r${{ matrix.residual_gain }}_seed${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linear-mix-c${{ matrix.coarse_gain }}-r${{ matrix.residual_gain }}-seed${{ matrix.seed }}
+          path: results/generated/linear_mix_c${{ matrix.coarse_gain }}_r${{ matrix.residual_gain }}_seed${{ matrix.seed }}.csv
+
+  aggregate:
+    needs: train
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: linear-mix-*
+          path: artifacts
+          merge-multiple: true
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Aggregate linear mix screen
+        run: |
+          mkdir -p results/generated
+          uv run python - <<'PY'
+          from pathlib import Path
+          import pandas as pd
+
+          frame = pd.concat(
+              [pd.read_csv(path) for path in sorted(Path("artifacts").glob("*.csv"))],
+              ignore_index=True,
+          )
+          if len(frame) != 45:
+              raise RuntimeError(f"expected 45 rows, got {len(frame)}")
+          frame.to_csv("results/generated/flyvis_type_pair_linear_mix.csv", index=False)
+          metrics = [
+              "cross_entropy_after",
+              "cross_entropy_improvement",
+              "accuracy_after",
+              "margin_after",
+              "mean_relative_edge_direction_change",
+              "mean_edge_norm_ratio",
+              "mean_edge_clip_fraction",
+              "weight_norm",
+              "bias_norm",
+          ]
+          summary = (
+              frame.groupby(["coarse_gain", "residual_gain"])[metrics]
+              .agg(["mean", "std"])
+              .reset_index()
+          )
+          summary.to_csv("results/generated/flyvis_type_pair_linear_mix_summary.csv", index=False)
+          print(summary.to_string(index=False))
+          best = (
+              frame.groupby(["coarse_gain", "residual_gain"])["cross_entropy_after"]
+              .mean()
+              .sort_values()
+          )
+          print("\nMean CE ranking:")
+          print(best.to_string())
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-type-pair-linear-mix-aggregate
+          path: |
+            results/generated/flyvis_type_pair_linear_mix.csv
+            results/generated/flyvis_type_pair_linear_mix_summary.csv
