@@ -1,0 +1,35 @@
+name: FlyVis type-pair intervention loss
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "scripts/diagnose_flyvis_type_pair_intervention_loss.py"
+      - ".github/workflows/flyvis-type-pair-intervention-loss.yml"
+
+jobs:
+  diagnose:
+    strategy:
+      fail-fast: false
+      matrix:
+        probe_lr: [20, 160]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          enable-cache: true
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Diagnose intervention-specific pair effects
+        run: >-
+          uv run python scripts/diagnose_flyvis_type_pair_intervention_loss.py
+          --seed 0
+          --checkpoint 100
+          --probe-learning-rate ${{ matrix.probe_lr }}
+          --out results/generated/flyvis_type_pair_intervention_loss_lr${{ matrix.probe_lr }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-type-pair-intervention-loss-lr${{ matrix.probe_lr }}
+          path: results/generated/flyvis_type_pair_intervention_loss_lr${{ matrix.probe_lr }}.csv
