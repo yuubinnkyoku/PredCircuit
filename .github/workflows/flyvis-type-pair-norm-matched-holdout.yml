@@ -1,0 +1,135 @@
+name: FlyVis type-pair norm-matched holdout
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/flyvis-type-pair-norm-matched-holdout.yml"
+
+jobs:
+  train:
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89]
+        rule: [local, type_pair_norm_matched]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          enable-cache: false
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Train fixed norm-matched holdout
+        run: |
+          SHUFFLE_SEED=$((10000 + ${{ matrix.seed }}))
+          uv run python scripts/run_flyvis_type_pair_norm_matched_control.py \
+            --seed ${{ matrix.seed }} \
+            --rule ${{ matrix.rule }} \
+            --shuffle-seed "$SHUFFLE_SEED" \
+            --epochs 100 \
+            --learning-rate 160 \
+            --out results/generated/norm_matched_holdout_${{ matrix.rule }}_seed${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: norm-matched-holdout-${{ matrix.rule }}-seed${{ matrix.seed }}
+          path: results/generated/norm_matched_holdout_${{ matrix.rule }}_seed${{ matrix.seed }}.csv
+
+  aggregate:
+    needs: train
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: norm-matched-holdout-*
+          path: artifacts
+          merge-multiple: true
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          enable-cache: false
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Aggregate fixed holdout
+        run: |
+          mkdir -p results/generated
+          uv run --with scipy python - <<'PY'
+          from pathlib import Path
+          import math
+          import pandas as pd
+          import scipy.stats as stats
+
+          frame = pd.concat(
+              [pd.read_csv(path) for path in sorted(Path("artifacts").glob("*.csv"))],
+              ignore_index=True,
+          )
+          if len(frame) != 40:
+              raise RuntimeError(f"expected 40 rows, got {len(frame)}")
+          if not bool(frame["finite"].all()):
+              raise RuntimeError("non-finite holdout result")
+
+          local = frame[frame.rule == "local"].set_index("seed").sort_index()
+          shared = frame[frame.rule == "type_pair_norm_matched"].set_index("seed").sort_index()
+          if not local.index.equals(shared.index):
+              raise RuntimeError("paired seed mismatch")
+
+          rows = []
+          for metric, higher_is_better in (
+              ("cross_entropy_after", False),
+              ("accuracy_after", True),
+              ("margin_after", True),
+          ):
+              raw = shared[metric] - local[metric]
+              delta = raw if higher_is_better else -raw
+              n = len(delta)
+              mean = float(delta.mean())
+              sd = float(delta.std(ddof=1))
+              se = sd / math.sqrt(n)
+              tcrit = float(stats.t.ppf(0.975, n - 1))
+              ttest = stats.ttest_rel(shared[metric], local[metric])
+              try:
+                  wilcoxon_p = float(stats.wilcoxon(delta).pvalue)
+              except ValueError:
+                  wilcoxon_p = float("nan")
+              rows.append({
+                  "metric": metric,
+                  "n": n,
+                  "mean_gain_vs_local": mean,
+                  "median_gain_vs_local": float(delta.median()),
+                  "sd_gain": sd,
+                  "ci95_low": mean - tcrit * se,
+                  "ci95_high": mean + tcrit * se,
+                  "improved_seeds": int((delta > 0).sum()),
+                  "paired_t_p_two_sided": float(ttest.pvalue),
+                  "wilcoxon_p_two_sided": wilcoxon_p,
+                  "cohen_dz": mean / sd if sd > 0 else float("nan"),
+              })
+
+          summary = pd.DataFrame(rows)
+          geometry = (
+              frame.groupby("rule")[[
+                  "mean_relative_edge_direction_change",
+                  "mean_edge_norm_ratio",
+                  "mean_edge_clip_fraction",
+                  "weight_norm",
+                  "bias_norm",
+              ]]
+              .mean()
+              .reset_index()
+          )
+          frame.to_csv("results/generated/flyvis_type_pair_norm_matched_holdout.csv", index=False)
+          summary.to_csv("results/generated/flyvis_type_pair_norm_matched_holdout_summary.csv", index=False)
+          geometry.to_csv("results/generated/flyvis_type_pair_norm_matched_holdout_geometry.csv", index=False)
+          print(summary.to_string(index=False))
+          print("\nGeometry:")
+          print(geometry.to_string(index=False))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-type-pair-norm-matched-holdout-aggregate
+          path: |
+            results/generated/flyvis_type_pair_norm_matched_holdout.csv
+            results/generated/flyvis_type_pair_norm_matched_holdout_summary.csv
+            results/generated/flyvis_type_pair_norm_matched_holdout_geometry.csv
