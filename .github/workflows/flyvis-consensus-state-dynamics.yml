@@ -1,0 +1,118 @@
+name: FlyVis consensus state dynamics
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "scripts/diagnose_flyvis_consensus_state_dynamics.py"
+      - ".github/workflows/flyvis-consensus-state-dynamics.yml"
+
+jobs:
+  diagnose:
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [20, 21, 22, 23, 24]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          enable-cache: true
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Diagnose inference-map state dynamics
+        run: >-
+          uv run python scripts/diagnose_flyvis_consensus_state_dynamics.py
+          --seed ${{ matrix.seed }}
+          --gamma 0.25
+          --learning-rate 160
+          --power-iterations 12
+          --out results/generated/flyvis_consensus_state_dynamics_seed${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-consensus-state-dynamics-seed${{ matrix.seed }}
+          path: results/generated/flyvis_consensus_state_dynamics_seed${{ matrix.seed }}.csv
+
+  aggregate:
+    needs: diagnose
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: flyvis-consensus-state-dynamics-seed*
+          path: dynamics-artifacts
+          merge-multiple: true
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Aggregate state dynamics
+        run: |
+          mkdir -p results/generated
+          uv run python - <<'PY'
+          from pathlib import Path
+          import pandas as pd
+
+          frame = pd.concat(
+              [pd.read_csv(path) for path in sorted(Path("dynamics-artifacts").glob("*.csv"))],
+              ignore_index=True,
+          )
+          if len(frame) != 40:
+              raise RuntimeError(f"expected 40 rows, got {len(frame)}")
+          frame.to_csv("results/generated/flyvis_consensus_state_dynamics.csv", index=False)
+
+          metrics = [
+              "jacobian_sigma_max",
+              "perturb_amp_1",
+              "perturb_amp_2",
+              "perturb_amp_4",
+              "perturb_amp_8",
+              "state_rms",
+              "prediction_rms",
+              "error_rms",
+              "internal_gradient_rms",
+              "activation_prime_mean",
+              "activation_prime_p10",
+              "activation_prime_p01",
+              "activation_prime_lt_0_5",
+              "activation_prime_lt_0_2",
+              "energy",
+              "weight_norm",
+              "bias_norm",
+          ]
+          summary = (
+              frame.groupby(["trajectory_rule", "checkpoint"])[metrics]
+              .agg(["mean", "std"])
+              .reset_index()
+          )
+          summary.columns = [
+              "_".join(str(part) for part in column if part).rstrip("_")
+              if isinstance(column, tuple)
+              else column
+              for column in summary.columns
+          ]
+          summary.to_csv("results/generated/flyvis_consensus_state_dynamics_summary.csv", index=False)
+
+          wide = frame.pivot(index=["seed", "checkpoint"], columns="trajectory_rule", values=metrics)
+          deltas = pd.DataFrame(index=wide.index)
+          for metric in metrics:
+              deltas[f"{metric}_consensus_minus_local"] = wide[(metric, "consensus")] - wide[(metric, "local")]
+          deltas = deltas.reset_index()
+          deltas.to_csv("results/generated/flyvis_consensus_state_dynamics_paired.csv", index=False)
+          paired_summary = deltas.groupby("checkpoint").agg(["mean", "std"])
+          paired_summary.to_csv("results/generated/flyvis_consensus_state_dynamics_paired_summary.csv")
+
+          print(summary.to_string(index=False))
+          print("\nPaired consensus - local differences:")
+          print(deltas.groupby("checkpoint").mean(numeric_only=True).to_string())
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-consensus-state-dynamics-aggregate
+          path: |
+            results/generated/flyvis_consensus_state_dynamics.csv
+            results/generated/flyvis_consensus_state_dynamics_summary.csv
+            results/generated/flyvis_consensus_state_dynamics_paired.csv
+            results/generated/flyvis_consensus_state_dynamics_paired_summary.csv
