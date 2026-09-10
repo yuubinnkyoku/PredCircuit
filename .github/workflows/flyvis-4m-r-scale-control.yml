@@ -1,0 +1,151 @@
+name: FlyVis 4m+r scale control
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/flyvis-4m-r-scale-control.yml"
+
+jobs:
+  train:
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79]
+        condition: [local, uniform, type_pair_boost]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          enable-cache: true
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Resolve gains
+        id: gains
+        shell: bash
+        run: |
+          case "${{ matrix.condition }}" in
+            local)
+              echo "coarse=1.0" >> "$GITHUB_OUTPUT"
+              echo "residual=1.0" >> "$GITHUB_OUTPUT"
+              ;;
+            uniform)
+              echo "coarse=1.291" >> "$GITHUB_OUTPUT"
+              echo "residual=1.291" >> "$GITHUB_OUTPUT"
+              ;;
+            type_pair_boost)
+              echo "coarse=4.0" >> "$GITHUB_OUTPUT"
+              echo "residual=1.0" >> "$GITHUB_OUTPUT"
+              ;;
+          esac
+      - name: Train scale control
+        run: >-
+          uv run python scripts/run_flyvis_type_pair_linear_mix.py
+          --seed ${{ matrix.seed }}
+          --coarse-gain ${{ steps.gains.outputs.coarse }}
+          --residual-gain ${{ steps.gains.outputs.residual }}
+          --epochs 100
+          --learning-rate 160
+          --out results/generated/scale_${{ matrix.condition }}_seed${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: scale-${{ matrix.condition }}-seed${{ matrix.seed }}
+          path: results/generated/scale_${{ matrix.condition }}_seed${{ matrix.seed }}.csv
+
+  aggregate:
+    needs: train
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: scale-*
+          path: artifacts
+          merge-multiple: true
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Aggregate scale control
+        run: |
+          mkdir -p results/generated
+          uv run --with scipy python - <<'PY'
+          from pathlib import Path
+          import math
+          import pandas as pd
+          import scipy.stats as stats
+
+          frame = pd.concat(
+              [pd.read_csv(path) for path in sorted(Path("artifacts").glob("*.csv"))],
+              ignore_index=True,
+          )
+          if len(frame) != 60:
+              raise RuntimeError(f"expected 60 rows, got {len(frame)}")
+          if not bool(frame["finite"].all()):
+              raise RuntimeError("non-finite training result in scale control")
+          def label(row):
+              a = float(row.coarse_gain)
+              b = float(row.residual_gain)
+              if abs(a - 1.0) < 1e-9 and abs(b - 1.0) < 1e-9:
+                  return "local"
+              if abs(a - 1.291) < 1e-9 and abs(b - 1.291) < 1e-9:
+                  return "uniform"
+              if abs(a - 4.0) < 1e-9 and abs(b - 1.0) < 1e-9:
+                  return "type_pair_boost"
+              raise RuntimeError((a, b))
+          frame["condition"] = frame.apply(label, axis=1)
+          frame.to_csv("results/generated/flyvis_4m_r_scale_control.csv", index=False)
+          by = {c: frame[frame.condition == c].set_index("seed").sort_index() for c in frame.condition.unique()}
+
+          rows = []
+          for lhs, rhs in [
+              ("type_pair_boost", "local"),
+              ("uniform", "local"),
+              ("type_pair_boost", "uniform"),
+          ]:
+              a = by[lhs]
+              b = by[rhs].loc[a.index]
+              delta = b.cross_entropy_after - a.cross_entropy_after
+              n = len(delta)
+              mean = float(delta.mean())
+              sd = float(delta.std(ddof=1))
+              se = sd / math.sqrt(n)
+              tcrit = float(stats.t.ppf(0.975, n - 1))
+              try:
+                  wilcoxon_p = float(stats.wilcoxon(delta).pvalue)
+              except ValueError:
+                  wilcoxon_p = float("nan")
+              rows.append({
+                  "lhs": lhs,
+                  "rhs": rhs,
+                  "n": n,
+                  "mean_ce_gain_lhs_vs_rhs": mean,
+                  "median_ce_gain": float(delta.median()),
+                  "ci95_low": mean - tcrit * se,
+                  "ci95_high": mean + tcrit * se,
+                  "improved_seeds": int((delta > 0).sum()),
+                  "paired_t_p": float(stats.ttest_rel(b.cross_entropy_after, a.cross_entropy_after).pvalue),
+                  "wilcoxon_p": wilcoxon_p,
+                  "cohen_dz": mean / sd if sd > 0 else float("nan"),
+                  "lhs_ce_mean": float(a.cross_entropy_after.mean()),
+                  "rhs_ce_mean": float(b.cross_entropy_after.mean()),
+                  "lhs_accuracy_mean": float(a.accuracy_after.mean()),
+                  "rhs_accuracy_mean": float(b.accuracy_after.mean()),
+                  "lhs_margin_mean": float(a.margin_after.mean()),
+                  "rhs_margin_mean": float(b.margin_after.mean()),
+                  "lhs_edge_norm_ratio": float(a.mean_edge_norm_ratio.mean()),
+                  "rhs_edge_norm_ratio": float(b.mean_edge_norm_ratio.mean()),
+                  "lhs_clip_fraction": float(a.mean_edge_clip_fraction.mean()),
+                  "rhs_clip_fraction": float(b.mean_edge_clip_fraction.mean()),
+              })
+          summary = pd.DataFrame(rows)
+          summary.to_csv("results/generated/flyvis_4m_r_scale_control_summary.csv", index=False)
+          print(summary.to_string(index=False))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-4m-r-scale-control-aggregate
+          path: |
+            results/generated/flyvis_4m_r_scale_control.csv
+            results/generated/flyvis_4m_r_scale_control_summary.csv
