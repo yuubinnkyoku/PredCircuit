@@ -19,7 +19,6 @@ from predcircuit.flyvis import load_flyvis_spec
 from predcircuit.flyvis_retinotopy import graph_from_flyvis_retinotopy
 from predcircuit.model import PredictiveCodingGraph
 
-
 CANDIDATES = (
     ("R7", "Mi9"),
     ("R8", "Mi9"),
