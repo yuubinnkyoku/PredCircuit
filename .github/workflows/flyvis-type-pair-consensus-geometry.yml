@@ -1,0 +1,98 @@
+name: FlyVis type-pair consensus geometry
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "scripts/trace_flyvis_type_pair_consensus_geometry.py"
+      - ".github/workflows/flyvis-type-pair-consensus-geometry.yml"
+
+jobs:
+  trace:
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [20, 21, 22, 23, 24]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          enable-cache: true
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Trace local and consensus trajectories
+        run: >-
+          uv run python scripts/trace_flyvis_type_pair_consensus_geometry.py
+          --seed ${{ matrix.seed }}
+          --out results/generated/flyvis_type_pair_consensus_geometry_seed${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-type-pair-consensus-geometry-seed${{ matrix.seed }}
+          path: results/generated/flyvis_type_pair_consensus_geometry_seed${{ matrix.seed }}.csv
+
+  aggregate:
+    needs: trace
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: flyvis-type-pair-consensus-geometry-seed*
+          path: trace-artifacts
+          merge-multiple: true
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Aggregate geometry trace
+        run: |
+          mkdir -p results/generated
+          uv run python - <<'PY'
+          from pathlib import Path
+          import pandas as pd
+
+          frame = pd.concat(
+              [pd.read_csv(path) for path in sorted(Path("trace-artifacts").glob("*.csv"))],
+              ignore_index=True,
+          )
+          if len(frame) != 80:
+              raise RuntimeError(f"expected 80 rows, got {len(frame)}")
+          frame.to_csv("results/generated/flyvis_type_pair_consensus_geometry.csv", index=False)
+          metrics = [
+              "cross_entropy",
+              "margin",
+              "cosine",
+              "norm_ratio",
+              "projection_coefficient",
+              "residual_norm",
+              "residual_curvature",
+              "cross_curvature",
+              "applied_update_cosine",
+              "post_step_exact_loss",
+              "consensus_one_step_gain_vs_local",
+              "consensus_edge_direction_change",
+              "edge_clip_fraction",
+              "weight_norm",
+              "bias_norm",
+          ]
+          summary = (
+              frame.groupby(["trajectory_rule", "checkpoint", "candidate_rule"])[metrics]
+              .agg(["mean", "std"])
+              .reset_index()
+          )
+          summary.columns = [
+              "_".join(str(part) for part in column if part).rstrip("_")
+              if isinstance(column, tuple)
+              else column
+              for column in summary.columns
+          ]
+          summary.to_csv("results/generated/flyvis_type_pair_consensus_geometry_summary.csv", index=False)
+          print(summary.to_string(index=False))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-type-pair-consensus-geometry-aggregate
+          path: |
+            results/generated/flyvis_type_pair_consensus_geometry.csv
+            results/generated/flyvis_type_pair_consensus_geometry_summary.csv
