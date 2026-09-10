@@ -1,0 +1,131 @@
+name: FlyVis type-pair margin trajectory
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "scripts/diagnose_flyvis_type_pair_margin_trajectory.py"
+      - ".github/workflows/flyvis-type-pair-margin-trajectory.yml"
+
+jobs:
+  trace:
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [90, 91, 92, 93, 94, 95, 96, 97, 98, 99]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          enable-cache: false
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Trace paired learning trajectories
+        run: >-
+          uv run python scripts/diagnose_flyvis_type_pair_margin_trajectory.py
+          --seed ${{ matrix.seed }}
+          --learning-rate 160
+          --out results/generated/margin_trajectory_seed${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: margin-trajectory-seed${{ matrix.seed }}
+          path: results/generated/margin_trajectory_seed${{ matrix.seed }}.csv
+
+  aggregate:
+    needs: trace
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: margin-trajectory-seed*
+          path: artifacts
+          merge-multiple: true
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          enable-cache: false
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Aggregate trajectory differences
+        run: |
+          mkdir -p results/generated
+          uv run --with scipy python - <<'PY'
+          from pathlib import Path
+          import math
+          import pandas as pd
+          import scipy.stats as stats
+
+          frame = pd.concat(
+              [pd.read_csv(path) for path in sorted(Path("artifacts").glob("*.csv"))],
+              ignore_index=True,
+          )
+          expected = 10 * 2 * 8
+          if len(frame) != expected:
+              raise RuntimeError(f"expected {expected} rows, got {len(frame)}")
+          if not bool(frame["finite"].all()):
+              raise RuntimeError("non-finite trajectory result")
+
+          rows = []
+          for epoch in sorted(frame.epoch.unique()):
+              current = frame[frame.epoch == epoch]
+              local = current[current.rule == "local"].set_index("seed").sort_index()
+              shared = current[current.rule == "type_pair_norm_matched"].set_index("seed").sort_index()
+              if not local.index.equals(shared.index):
+                  raise RuntimeError(f"paired seed mismatch at epoch {epoch}")
+              for metric, higher_is_better in (
+                  ("cross_entropy", False),
+                  ("accuracy", True),
+                  ("margin", True),
+              ):
+                  raw = shared[metric] - local[metric]
+                  delta = raw if higher_is_better else -raw
+                  n = len(delta)
+                  mean = float(delta.mean())
+                  sd = float(delta.std(ddof=1))
+                  se = sd / math.sqrt(n)
+                  tcrit = float(stats.t.ppf(0.975, n - 1))
+                  try:
+                      wilcoxon_p = float(stats.wilcoxon(delta).pvalue)
+                  except ValueError:
+                      wilcoxon_p = float("nan")
+                  rows.append({
+                      "epoch": int(epoch),
+                      "metric": metric,
+                      "n": n,
+                      "mean_gain_vs_local": mean,
+                      "median_gain_vs_local": float(delta.median()),
+                      "ci95_low": mean - tcrit * se,
+                      "ci95_high": mean + tcrit * se,
+                      "improved_seeds": int((delta > 0).sum()),
+                      "paired_t_p_two_sided": float(stats.ttest_rel(shared[metric], local[metric]).pvalue),
+                      "wilcoxon_p_two_sided": wilcoxon_p,
+                      "cohen_dz": mean / sd if sd > 0 else float("nan"),
+                  })
+
+          summary = pd.DataFrame(rows)
+          geometry = (
+              frame.groupby(["rule", "epoch"])[[
+                  "mean_relative_direction_change",
+                  "mean_group_constant_fraction",
+                  "weight_norm",
+                  "bias_norm",
+              ]]
+              .mean()
+              .reset_index()
+          )
+          frame.to_csv("results/generated/flyvis_type_pair_margin_trajectory.csv", index=False)
+          summary.to_csv("results/generated/flyvis_type_pair_margin_trajectory_summary.csv", index=False)
+          geometry.to_csv("results/generated/flyvis_type_pair_margin_trajectory_geometry.csv", index=False)
+          print(summary.to_string(index=False))
+          print("\nGeometry:")
+          print(geometry.to_string(index=False))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-type-pair-margin-trajectory-aggregate
+          path: |
+            results/generated/flyvis_type_pair_margin_trajectory.csv
+            results/generated/flyvis_type_pair_margin_trajectory_summary.csv
+            results/generated/flyvis_type_pair_margin_trajectory_geometry.csv
