@@ -1,0 +1,97 @@
+name: Aggregate FlyVis type-pair consensus artifacts
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/aggregate-flyvis-type-pair-consensus.yml"
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  aggregate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: 34416604009
+          pattern: flyvis-consensus-*
+          path: consensus-artifacts
+          merge-multiple: true
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Aggregate CSVs and statistics
+        run: |
+          mkdir -p results/generated
+          uv run --with scipy python - <<'PY'
+          from pathlib import Path
+          import json
+          import pandas as pd
+          from scipy import stats
+
+          files = sorted(Path("consensus-artifacts").glob("*.csv"))
+          frames = [pd.read_csv(path) for path in files]
+          frame = pd.concat(frames, ignore_index=True)
+          if len(frame) != 45:
+              raise RuntimeError(f"expected 45 rows, got {len(frame)}")
+          frame.to_csv("results/generated/flyvis_type_pair_consensus_aggregate.csv", index=False)
+
+          local = frame[frame["gamma"] == 1.0].set_index("seed")["cross_entropy_improvement"]
+          local_ce_after = frame[frame["gamma"] == 1.0].set_index("seed")["cross_entropy_after"]
+          rows = []
+          for (start_epoch, gamma), group in frame.groupby(["start_epoch", "gamma"]):
+              values = group.set_index("seed")["cross_entropy_improvement"]
+              ce_after = group.set_index("seed")["cross_entropy_after"]
+              common = local.index.intersection(values.index)
+              diff = values.loc[common] - local.loc[common]
+              ce_after_diff = ce_after.loc[common] - local_ce_after.loc[common]
+              rows.append({
+                  "start_epoch": int(start_epoch),
+                  "gamma": float(gamma),
+                  "n": int(len(diff)),
+                  "ce_improvement_mean": float(values.mean()),
+                  "ce_after_mean": float(ce_after.mean()),
+                  "diff_vs_local_mean": float(diff.mean()),
+                  "diff_vs_local_std": float(diff.std(ddof=1)) if len(diff) > 1 else float("nan"),
+                  "ce_after_diff_vs_local_mean": float(ce_after_diff.mean()),
+                  "improved_seed_count": int((diff > 0).sum()),
+                  "paired_t_p": float(stats.ttest_rel(values.loc[common], local.loc[common]).pvalue) if len(diff) > 1 and (diff != 0).any() else float("nan"),
+                  "wilcoxon_p": float(stats.wilcoxon(diff).pvalue) if len(diff) > 0 and (diff != 0).any() else float("nan"),
+                  "accuracy_after_mean": float(group["accuracy_after"].mean()),
+                  "margin_after_mean": float(group["margin_after"].mean()),
+                  "direction_change_mean": float(group["mean_relative_edge_direction_change"].mean()),
+                  "norm_error_mean": float(group["mean_relative_edge_norm_error"].mean()),
+                  "finite_count": int(group["finite"].sum()),
+              })
+          summary = pd.DataFrame(rows).sort_values(["start_epoch", "gamma"])
+          summary.to_csv("results/generated/flyvis_type_pair_consensus_summary.csv", index=False)
+
+          trends = {}
+          for start_epoch in [0, 50]:
+              subset = summary[summary["start_epoch"] == start_epoch].copy()
+              if start_epoch == 50:
+                  baseline = summary[(summary["start_epoch"] == 0) & (summary["gamma"] == 1.0)].copy()
+                  baseline["start_epoch"] = 50
+                  subset = pd.concat([subset, baseline], ignore_index=True)
+              subset = subset.sort_values("gamma")
+              trends[str(start_epoch)] = {
+                  "gamma": subset["gamma"].tolist(),
+                  "diff_vs_local_mean": subset["diff_vs_local_mean"].tolist(),
+                  "spearman_gamma_diff": float(stats.spearmanr(subset["gamma"], subset["diff_vs_local_mean"]).statistic),
+              }
+          Path("results/generated/flyvis_type_pair_consensus_trend.json").write_text(json.dumps(trends, indent=2))
+          print(summary.to_string(index=False))
+          print(json.dumps(trends, indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-type-pair-consensus-aggregate
+          path: |
+            results/generated/flyvis_type_pair_consensus_aggregate.csv
+            results/generated/flyvis_type_pair_consensus_summary.csv
+            results/generated/flyvis_type_pair_consensus_trend.json
