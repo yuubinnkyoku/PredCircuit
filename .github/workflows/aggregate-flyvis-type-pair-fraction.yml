@@ -27,6 +27,7 @@ jobs:
       - run: uv sync
       - name: Aggregate CSVs and statistics
         run: |
+          mkdir -p results/generated
           uv run --with scipy python - <<'PY'
           from pathlib import Path
           import json
