@@ -1,0 +1,26 @@
+name: Ruff format export
+
+on:
+  push:
+    paths:
+      - ".github/workflows/ruff-format-export.yml"
+
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Format scripts
+        run: |
+          uv run ruff format scripts
+          git diff --name-only -- scripts > formatted_files.txt
+          cat formatted_files.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ruff-formatted-scripts
+          path: |
+            scripts/
+            formatted_files.txt
