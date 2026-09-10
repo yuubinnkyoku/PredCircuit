@@ -1,0 +1,31 @@
+name: FlyVis type-pair shared-credit geometry
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "scripts/diagnose_flyvis_type_pair_shared_credit_geometry.py"
+      - ".github/workflows/flyvis-type-pair-shared-credit-geometry.yml"
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          enable-cache: true
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Measure exact-CE alignment
+        run: >-
+          uv run python scripts/diagnose_flyvis_type_pair_shared_credit_geometry.py
+          --seed-start 60
+          --seeds 10
+          --shuffle-offset 10000
+          --out results/generated/flyvis_type_pair_shared_credit_geometry.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-type-pair-shared-credit-geometry
+          path: results/generated/flyvis_type_pair_shared_credit_geometry.csv
