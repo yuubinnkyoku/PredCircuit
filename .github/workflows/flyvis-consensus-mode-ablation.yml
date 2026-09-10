@@ -1,0 +1,106 @@
+name: FlyVis consensus mode ablation
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "scripts/run_flyvis_consensus_mode_ablation.py"
+      - ".github/workflows/flyvis-consensus-mode-ablation.yml"
+
+jobs:
+  train:
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [20, 21, 22, 23, 24]
+        rule: [local, pair_consensus, coarse_boost, residual_shrink, plain_residual_shrink]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          enable-cache: true
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Run mode ablation
+        run: >-
+          uv run python scripts/run_flyvis_consensus_mode_ablation.py
+          --seed ${{ matrix.seed }}
+          --rule ${{ matrix.rule }}
+          --gamma 0.25
+          --epochs 100
+          --learning-rate 160
+          --out results/generated/flyvis_consensus_mode_ablation_${{ matrix.rule }}_seed${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-consensus-mode-ablation-${{ matrix.rule }}-seed${{ matrix.seed }}
+          path: results/generated/flyvis_consensus_mode_ablation_${{ matrix.rule }}_seed${{ matrix.seed }}.csv
+
+  aggregate:
+    needs: train
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: flyvis-consensus-mode-ablation-*
+          path: ablation-artifacts
+          merge-multiple: true
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Aggregate mode ablation
+        run: |
+          mkdir -p results/generated
+          uv run python - <<'PY'
+          from pathlib import Path
+          import pandas as pd
+
+          frame = pd.concat(
+              [pd.read_csv(path) for path in sorted(Path("ablation-artifacts").glob("*.csv"))],
+              ignore_index=True,
+          )
+          if len(frame) != 25:
+              raise RuntimeError(f"expected 25 rows, got {len(frame)}")
+          frame.to_csv("results/generated/flyvis_consensus_mode_ablation.csv", index=False)
+          metrics = [
+              "cross_entropy_after",
+              "cross_entropy_improvement",
+              "accuracy_after",
+              "margin_after",
+              "mean_relative_edge_direction_change",
+              "mean_relative_edge_norm_error",
+              "mean_edge_clip_fraction",
+              "weight_norm",
+              "bias_norm",
+          ]
+          summary = frame.groupby("rule")[metrics].agg(["mean", "std"])
+          summary.to_csv("results/generated/flyvis_consensus_mode_ablation_summary.csv")
+          print(summary.to_string())
+
+          local = frame[frame["rule"] == "local"].set_index("seed")
+          paired_rows = []
+          for rule, group in frame[frame["rule"] != "local"].groupby("rule"):
+              current = group.set_index("seed").loc[local.index]
+              delta = local["cross_entropy_after"] - current["cross_entropy_after"]
+              paired_rows.append(
+                  {
+                      "rule": rule,
+                      "mean_ce_gain_vs_local": delta.mean(),
+                      "median_ce_gain_vs_local": delta.median(),
+                      "improved_seeds": int((delta > 0).sum()),
+                  }
+              )
+          paired = pd.DataFrame(paired_rows)
+          paired.to_csv("results/generated/flyvis_consensus_mode_ablation_paired.csv", index=False)
+          print("\nPaired CE gain vs local:")
+          print(paired.to_string(index=False))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-consensus-mode-ablation-aggregate
+          path: |
+            results/generated/flyvis_consensus_mode_ablation.csv
+            results/generated/flyvis_consensus_mode_ablation_summary.csv
+            results/generated/flyvis_consensus_mode_ablation_paired.csv
