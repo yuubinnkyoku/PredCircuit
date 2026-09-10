@@ -1,0 +1,94 @@
+name: FlyVis consensus mode drift
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "scripts/diagnose_flyvis_consensus_mode_drift.py"
+      - ".github/workflows/flyvis-consensus-mode-drift.yml"
+
+jobs:
+  diagnose:
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [20, 21, 22, 23, 24]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          enable-cache: true
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Diagnose pair-mean and residual modes
+        run: >-
+          uv run python scripts/diagnose_flyvis_consensus_mode_drift.py
+          --seed ${{ matrix.seed }}
+          --gamma 0.25
+          --learning-rate 160
+          --out results/generated/flyvis_consensus_mode_drift_seed${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-consensus-mode-drift-seed${{ matrix.seed }}
+          path: results/generated/flyvis_consensus_mode_drift_seed${{ matrix.seed }}.csv
+
+  aggregate:
+    needs: diagnose
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: flyvis-consensus-mode-drift-seed*
+          path: mode-artifacts
+          merge-multiple: true
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Aggregate mode drift
+        run: |
+          mkdir -p results/generated
+          uv run python - <<'PY'
+          from pathlib import Path
+          import pandas as pd
+
+          frame = pd.concat(
+              [pd.read_csv(path) for path in sorted(Path("mode-artifacts").glob("*.csv"))],
+              ignore_index=True,
+          )
+          if len(frame) != 40:
+              raise RuntimeError(f"expected 40 rows, got {len(frame)}")
+          frame.to_csv("results/generated/flyvis_consensus_mode_drift.csv", index=False)
+          metrics = [column for column in frame.columns if column not in {"seed", "trajectory_rule", "checkpoint", "finite"}]
+          summary = (
+              frame.groupby(["trajectory_rule", "checkpoint"])[metrics]
+              .agg(["mean", "std"])
+              .reset_index()
+          )
+          summary.columns = [
+              "_".join(str(part) for part in column if part).rstrip("_")
+              if isinstance(column, tuple)
+              else column
+              for column in summary.columns
+          ]
+          summary.to_csv("results/generated/flyvis_consensus_mode_drift_summary.csv", index=False)
+
+          wide = frame.pivot(index=["seed", "checkpoint"], columns="trajectory_rule", values=metrics)
+          paired = pd.DataFrame(index=wide.index)
+          for metric in metrics:
+              paired[f"{metric}_consensus_minus_local"] = wide[(metric, "consensus")] - wide[(metric, "local")]
+          paired = paired.reset_index()
+          paired.to_csv("results/generated/flyvis_consensus_mode_drift_paired.csv", index=False)
+          print(summary.to_string(index=False))
+          print("\nPaired consensus - local differences:")
+          print(paired.groupby("checkpoint").mean(numeric_only=True).to_string())
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-consensus-mode-drift-aggregate
+          path: |
+            results/generated/flyvis_consensus_mode_drift.csv
+            results/generated/flyvis_consensus_mode_drift_summary.csv
+            results/generated/flyvis_consensus_mode_drift_paired.csv
