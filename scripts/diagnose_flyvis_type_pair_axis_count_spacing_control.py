@@ -3,8 +3,8 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-import pandas as pd
 import diagnose_flyvis_type_pair_axis_burst_schedule as burst_schedule
+import pandas as pd
 
 
 def main() -> None:
