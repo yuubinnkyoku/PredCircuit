@@ -21,7 +21,6 @@ from predcircuit.flyvis import load_flyvis_spec
 from predcircuit.flyvis_retinotopy import graph_from_flyvis_retinotopy
 from predcircuit.model import PredictiveCodingGraph
 
-
 PULSE_INTERVALS = (1, 5, 20, 100)
 SIGNS = (("neg", -1.0), ("pos", 1.0))
 
