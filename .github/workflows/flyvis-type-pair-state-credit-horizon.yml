@@ -1,0 +1,186 @@
+name: FlyVis type-pair state-credit horizon holdout
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "scripts/diagnose_flyvis_type_pair_state_credit_horizon.py"
+      - ".github/workflows/flyvis-type-pair-state-credit-horizon.yml"
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [440, 441, 442, 443, 444, 445, 446, 447, 448, 449, 450, 451, 452, 453, 454, 455, 456, 457, 458, 459]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Measure state-credit horizon response
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run python scripts/diagnose_flyvis_type_pair_state_credit_horizon.py \
+            --seed ${{ matrix.seed }} \
+            --shuffle-seed $((840000 + ${{ matrix.seed }})) \
+            --out results/generated/flyvis_type_pair_state_credit_horizon_seed${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: type-pair-state-credit-horizon-seed${{ matrix.seed }}
+          path: results/generated/flyvis_type_pair_state_credit_horizon_seed${{ matrix.seed }}.csv
+
+  aggregate:
+    needs: diagnose
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: type-pair-state-credit-horizon-seed*
+          path: artifacts
+          merge-multiple: true
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Aggregate state-credit horizon response
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run --with scipy python - <<'PY'
+          from pathlib import Path
+
+          import numpy as np
+          import pandas as pd
+          from scipy import stats
+
+          frame = pd.concat(
+              [pd.read_csv(path) for path in sorted(Path("artifacts").glob("*.csv"))],
+              ignore_index=True,
+          )
+          if len(frame) != 600:
+              raise RuntimeError(f"expected 600 rows, got {len(frame)}")
+          if not frame["finite"].all():
+              raise RuntimeError("non-finite state-credit horizon run detected")
+          if not np.isfinite(frame.select_dtypes(include=[np.number]).to_numpy()).all():
+              raise RuntimeError("non-finite state-credit horizon metric detected")
+
+          frame.to_csv(
+              "results/generated/flyvis_type_pair_state_credit_horizon_holdout.csv",
+              index=False,
+          )
+          wide = frame.pivot(index="seed", columns=["horizon", "condition"])
+
+          def paired_row(label, delta):
+              delta = np.asarray(delta, dtype=float)
+              n = len(delta)
+              mean = float(np.mean(delta))
+              std = float(np.std(delta, ddof=1))
+              if std == 0.0:
+                  ci = (mean, mean)
+                  paired_t_p = 1.0 if mean == 0.0 else 0.0
+                  wilcoxon_p = 1.0 if mean == 0.0 else float(stats.wilcoxon(delta).pvalue)
+                  dz = float("nan")
+              else:
+                  ci = stats.t.interval(0.95, n - 1, loc=mean, scale=std / np.sqrt(n))
+                  paired_t_p = float(stats.ttest_1samp(delta, 0.0).pvalue)
+                  try:
+                      wilcoxon_p = float(stats.wilcoxon(delta).pvalue)
+                  except ValueError:
+                      wilcoxon_p = 1.0
+                  dz = mean / std
+              return {
+                  "comparison": label,
+                  "n": n,
+                  "mean_gain": mean,
+                  "ci95_low": float(ci[0]),
+                  "ci95_high": float(ci[1]),
+                  "improved_seeds": int(np.sum(delta > 0)),
+                  "paired_t_p": paired_t_p,
+                  "wilcoxon_p": wilcoxon_p,
+                  "cohen_dz": dz,
+              }
+
+          rows = []
+          ce_interactions = {}
+          for horizon in (0, 1, 2, 5, 10, 25):
+              def values(metric, condition):
+                  return wide[metric][(horizon, condition)].to_numpy()
+
+              type_credit_benefit_type_state_ce = (
+                  values("cross_entropy", "type_receives_shuffle")
+                  - values("cross_entropy", "type_donor")
+              )
+              type_credit_benefit_shuffle_state_ce = (
+                  values("cross_entropy", "shuffle_donor")
+                  - values("cross_entropy", "shuffle_receives_type")
+              )
+              interaction_ce = (
+                  type_credit_benefit_type_state_ce
+                  - type_credit_benefit_shuffle_state_ce
+              )
+              ce_interactions[horizon] = interaction_ce
+              rows.append(
+                  paired_row(
+                      f"primary_state_x_credit_ce:horizon{horizon}",
+                      interaction_ce,
+                  )
+              )
+
+              for metric in ("margin", "accuracy"):
+                  type_credit_benefit_type_state = (
+                      values(metric, "type_donor")
+                      - values(metric, "type_receives_shuffle")
+                  )
+                  type_credit_benefit_shuffle_state = (
+                      values(metric, "shuffle_receives_type")
+                      - values(metric, "shuffle_donor")
+                  )
+                  rows.append(
+                      paired_row(
+                          f"primary_state_x_credit_{metric}:horizon{horizon}",
+                          type_credit_benefit_type_state
+                          - type_credit_benefit_shuffle_state,
+                      )
+                  )
+
+          for left, right in ((1, 0), (2, 1), (5, 2), (10, 5), (25, 10), (25, 1)):
+              rows.append(
+                  paired_row(
+                      f"state_x_credit_ce_growth:horizon{left}-horizon{right}",
+                      ce_interactions[left] - ce_interactions[right],
+                  )
+              )
+
+          summary = pd.DataFrame(rows)
+          summary.to_csv(
+              "results/generated/flyvis_type_pair_state_credit_horizon_holdout_summary.csv",
+              index=False,
+          )
+          print(summary.to_string(index=False))
+          print("\nGeometry by horizon/condition:")
+          print(
+              frame.groupby(["horizon", "condition"])[
+                  [
+                      "weight_cosine_to_local",
+                      "weight_relative_distance_to_local",
+                      "mean_postburst_own_credit_cosine_to_local",
+                      "mean_postburst_own_credit_relative_distance_to_local",
+                      "mean_postburst_applied_credit_cosine_to_local",
+                      "mean_postburst_applied_credit_relative_distance_to_local",
+                      "mean_burst_angle_match_error",
+                  ]
+              ]
+              .mean()
+              .to_string()
+          )
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-type-pair-state-credit-horizon-holdout-aggregate
+          path: |
+            results/generated/flyvis_type_pair_state_credit_horizon_holdout.csv
+            results/generated/flyvis_type_pair_state_credit_horizon_holdout_summary.csv
