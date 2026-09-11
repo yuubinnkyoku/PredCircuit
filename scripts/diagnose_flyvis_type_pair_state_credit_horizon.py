@@ -3,8 +3,8 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-import pandas as pd
 import diagnose_flyvis_type_pair_axis_postburst_donor_transfer as donor_transfer
+import pandas as pd
 
 
 HORIZONS = (0, 1, 2, 5, 10, 25)
