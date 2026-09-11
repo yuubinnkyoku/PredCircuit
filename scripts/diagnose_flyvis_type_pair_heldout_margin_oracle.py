@@ -131,9 +131,7 @@ def run_seed(
             )
             values = {
                 "margin_oracle_cosine": margin_geometry["cosine"],
-                "margin_oracle_projection_coefficient": margin_geometry[
-                    "projection_coefficient"
-                ],
+                "margin_oracle_projection_coefficient": margin_geometry["projection_coefficient"],
                 "ce_oracle_cosine": ce_geometry["cosine"],
                 "ce_oracle_projection_coefficient": ce_geometry["projection_coefficient"],
             }
