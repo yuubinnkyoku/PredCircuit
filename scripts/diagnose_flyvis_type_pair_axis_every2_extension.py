@@ -4,7 +4,7 @@ import argparse
 from pathlib import Path
 
 import pandas as pd
-import run_flyvis_type_pair_axis_pulse_frequency as pulse_frequency
+import run_flyvis_type_pair_axis_pulse_frequency as pulse_frequency  # ty: ignore[unresolved-import]
 
 
 def main() -> None:
