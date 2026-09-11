@@ -120,6 +120,7 @@ def run_seed(
             applied_hvp_edge, applied_hvp_bias = torch.autograd.grad(
                 applied_derivative,
                 (weight, bias),
+                retain_graph=True,
             )
             applied_curvature = torch.dot(actual_step_edge, applied_hvp_edge) + torch.dot(
                 actual_step_bias, applied_hvp_bias
