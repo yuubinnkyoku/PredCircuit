@@ -58,9 +58,7 @@ def run_seed(
         "type": {},
         "shuffle": {},
     }
-    finite = bool(torch.isfinite(model.weight).all()) and bool(
-        torch.isfinite(model.bias).all()
-    )
+    finite = bool(torch.isfinite(model.weight).all()) and bool(torch.isfinite(model.bias).all())
 
     for epoch in SAMPLE_EPOCHS:
         raw_edge, raw_bias = credit(model, circuit, seed=seed, epoch=epoch)
@@ -111,23 +109,13 @@ def run_seed(
             values = {
                 "raw_oracle_cosine": raw_geometry["cosine"],
                 "coarse_oracle_cosine": coarse_geometry["cosine"],
-                "coarse_oracle_projection_coefficient": coarse_geometry[
-                    "projection_coefficient"
-                ],
+                "coarse_oracle_projection_coefficient": coarse_geometry["projection_coefficient"],
                 "residual_oracle_edge_cosine": _cosine(residual, oracle_edge),
                 "mixed_oracle_cosine": mixed_geometry["cosine"],
-                "mixed_oracle_projection_coefficient": mixed_geometry[
-                    "projection_coefficient"
-                ],
-                "mixed_cosine_gain_vs_raw": (
-                    mixed_geometry["cosine"] - raw_geometry["cosine"]
-                ),
-                "coarse_norm_fraction": float(
-                    torch.linalg.vector_norm(coarse) / raw_edge_norm
-                ),
-                "residual_norm_fraction": float(
-                    torch.linalg.vector_norm(residual) / raw_edge_norm
-                ),
+                "mixed_oracle_projection_coefficient": mixed_geometry["projection_coefficient"],
+                "mixed_cosine_gain_vs_raw": (mixed_geometry["cosine"] - raw_geometry["cosine"]),
+                "coarse_norm_fraction": float(torch.linalg.vector_norm(coarse) / raw_edge_norm),
+                "residual_norm_fraction": float(torch.linalg.vector_norm(residual) / raw_edge_norm),
                 "mixed_relative_change": float(
                     torch.linalg.vector_norm(matched - raw_edge) / raw_edge_norm
                 ),
