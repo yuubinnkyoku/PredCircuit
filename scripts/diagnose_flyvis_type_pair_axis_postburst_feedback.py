@@ -45,7 +45,9 @@ def run_seed(
         "type_common",
         "shuffle_common",
     )
-    models = {name: PredictiveCodingGraph(circuit.graph, seed=seed, init_scale=0.08) for name in names}
+    models = {
+        name: PredictiveCodingGraph(circuit.graph, seed=seed, init_scale=0.08) for name in names
+    }
     biological_groups = type_pair_indices(circuit)
     shuffled_groups = shuffled_groups_like(
         biological_groups,
@@ -164,7 +166,9 @@ def run_seed(
                         "weight_relative_distance_to_local": _relative_distance(
                             model.weight, local_model.weight
                         ),
-                        "mean_postburst_own_credit_cosine_to_local": postburst_credit_cosine_sum[name]
+                        "mean_postburst_own_credit_cosine_to_local": postburst_credit_cosine_sum[
+                            name
+                        ]
                         / denom,
                         "mean_postburst_own_credit_relative_distance_to_local": postburst_credit_distance_sum[
                             name
