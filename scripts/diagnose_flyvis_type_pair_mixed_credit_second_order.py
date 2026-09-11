@@ -51,9 +51,7 @@ def run_seed(
         )
 
     sums: dict[str, dict[str, float]] = {"type": {}, "shuffle": {}}
-    finite = bool(torch.isfinite(model.weight).all()) and bool(
-        torch.isfinite(model.bias).all()
-    )
+    finite = bool(torch.isfinite(model.weight).all()) and bool(torch.isfinite(model.bias).all())
 
     for epoch in SAMPLE_EPOCHS:
         raw_edge, raw_bias = credit(model, circuit, seed=seed, epoch=epoch)
@@ -76,9 +74,7 @@ def run_seed(
             )
             matched = match_norm(mixed, raw_edge)
 
-            first_derivative = torch.dot(grad_edge, matched) + torch.dot(
-                grad_bias, raw_bias
-            )
+            first_derivative = torch.dot(grad_edge, matched) + torch.dot(grad_bias, raw_bias)
             hvp_edge, hvp_bias = torch.autograd.grad(
                 first_derivative,
                 (weight, bias),
