@@ -111,7 +111,10 @@ def run_seed(
             finite = (
                 bool(torch.isfinite(model.weight).all())
                 and bool(torch.isfinite(model.bias).all())
-                and all(math.isfinite(float(metrics[key])) for key in ("cross_entropy", "margin", "accuracy"))
+                and all(
+                    math.isfinite(float(metrics[key]))
+                    for key in ("cross_entropy", "margin", "accuracy")
+                )
             )
             rows.append(
                 {
@@ -122,7 +125,9 @@ def run_seed(
                     "margin": metrics["margin"],
                     "accuracy": metrics["accuracy"],
                     "weight_norm": float(torch.linalg.vector_norm(model.weight)),
-                    "weight_cosine_to_local": _cosine(model.weight.detach(), local_weight),
+                    "weight_cosine_to_local": _cosine(
+                        model.weight.detach(), local_weight
+                    ),
                     "weight_relative_distance_to_local": _relative_distance(
                         model.weight.detach(), local_weight
                     ),
