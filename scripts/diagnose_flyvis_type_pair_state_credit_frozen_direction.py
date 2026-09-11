@@ -188,7 +188,7 @@ def run_seed(
                     )
                     source_reference = (
                         dynamic_type
-                        if name.endswith("type_donor") or name.endswith("shuffle_receives_type")
+                        if name.endswith(("type_donor", "shuffle_receives_type"))
                         else dynamic_shuffle
                     )
                     source_cosine_to_current_donor[name] += _cosine(
