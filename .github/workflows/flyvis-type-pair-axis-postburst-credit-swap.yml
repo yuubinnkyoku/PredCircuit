@@ -1,0 +1,179 @@
+name: FlyVis type-pair axis post-burst credit swap
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "scripts/diagnose_flyvis_type_pair_axis_postburst_credit_swap.py"
+      - ".github/workflows/flyvis-type-pair-axis-postburst-credit-swap.yml"
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [360, 361, 362, 363, 364, 365, 366, 367, 368, 369, 370, 371, 372, 373, 374, 375, 376, 377, 378, 379]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Measure post-burst credit swap
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run python scripts/diagnose_flyvis_type_pair_axis_postburst_credit_swap.py \
+            --seed ${{ matrix.seed }} \
+            --shuffle-seed $((850000 + ${{ matrix.seed }})) \
+            --out results/generated/flyvis_type_pair_axis_postburst_credit_swap_seed${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: type-pair-axis-postburst-credit-swap-seed${{ matrix.seed }}
+          path: results/generated/flyvis_type_pair_axis_postburst_credit_swap_seed${{ matrix.seed }}.csv
+
+  aggregate:
+    needs: diagnose
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: type-pair-axis-postburst-credit-swap-seed*
+          path: artifacts
+          merge-multiple: true
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Aggregate post-burst credit swap
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run --with scipy python - <<'PY'
+          from pathlib import Path
+
+          import numpy as np
+          import pandas as pd
+          from scipy import stats
+
+          frame = pd.concat(
+              [pd.read_csv(path) for path in sorted(Path("artifacts").glob("*.csv"))],
+              ignore_index=True,
+          )
+          if len(frame) != 400:
+              raise RuntimeError(f"expected 400 rows, got {len(frame)}")
+          if not frame["finite"].all():
+              raise RuntimeError("non-finite post-burst credit-swap run detected")
+          numeric = frame[
+              [
+                  "cross_entropy",
+                  "accuracy",
+                  "margin",
+                  "weight_cosine_to_local",
+                  "weight_relative_distance_to_local",
+                  "mean_postburst_own_credit_cosine_to_local",
+                  "mean_postburst_own_credit_relative_distance_to_local",
+                  "mean_burst_angle_match_error",
+              ]
+          ]
+          if not np.isfinite(numeric.to_numpy()).all():
+              raise RuntimeError("non-finite post-burst credit-swap metric detected")
+          frame.to_csv(
+              "results/generated/flyvis_type_pair_axis_postburst_credit_swap.csv",
+              index=False,
+          )
+
+          def paired_row(label, delta):
+              n = len(delta)
+              mean = float(np.mean(delta))
+              std = float(np.std(delta, ddof=1))
+              ci = stats.t.interval(0.95, n - 1, loc=mean, scale=std / np.sqrt(n))
+              try:
+                  wilcoxon_p = float(stats.wilcoxon(delta).pvalue)
+              except ValueError:
+                  wilcoxon_p = 1.0
+              return {
+                  "comparison": label,
+                  "n": n,
+                  "mean_gain": mean,
+                  "ci95_low": float(ci[0]),
+                  "ci95_high": float(ci[1]),
+                  "improved_seeds": int(np.sum(delta > 0)),
+                  "paired_t_p": float(stats.ttest_1samp(delta, 0.0).pvalue),
+                  "wilcoxon_p": wilcoxon_p,
+                  "cohen_dz": mean / std if std > 0 else float("nan"),
+              }
+
+          wide = frame.pivot(index="seed", columns=["epoch", "condition"])
+          rows = []
+          axis_ce = {}
+          axis_margin = {}
+          for epoch in (75, 80, 90, 100):
+              for continuation in ("endogenous", "swapped"):
+                  type_name = f"type_{continuation}"
+                  shuffle_name = f"shuffle_{continuation}"
+                  ce = (
+                      wide["cross_entropy"][(epoch, shuffle_name)].to_numpy()
+                      - wide["cross_entropy"][(epoch, type_name)].to_numpy()
+                  )
+                  margin = (
+                      wide["margin"][(epoch, type_name)].to_numpy()
+                      - wide["margin"][(epoch, shuffle_name)].to_numpy()
+                  )
+                  accuracy = (
+                      wide["accuracy"][(epoch, type_name)].to_numpy()
+                      - wide["accuracy"][(epoch, shuffle_name)].to_numpy()
+                  )
+                  axis_ce[(epoch, continuation)] = ce
+                  axis_margin[(epoch, continuation)] = margin
+                  rows.append(paired_row(f"axis_ce:{continuation}:epoch{epoch}", ce))
+                  rows.append(paired_row(f"axis_margin:{continuation}:epoch{epoch}", margin))
+                  rows.append(paired_row(f"axis_accuracy:{continuation}:epoch{epoch}", accuracy))
+
+          for metric_name, values in (("ce", axis_ce), ("margin", axis_margin)):
+              endogenous_amp = values[(100, "endogenous")] - values[(75, "endogenous")]
+              swapped_amp = values[(100, "swapped")] - values[(75, "swapped")]
+              rows.append(paired_row(f"postburst_amplification_{metric_name}:endogenous", endogenous_amp))
+              rows.append(paired_row(f"postburst_amplification_{metric_name}:swapped", swapped_amp))
+              rows.append(
+                  paired_row(
+                      f"credit_swap_did_{metric_name}:endogenous-swapped",
+                      endogenous_amp - swapped_amp,
+                  )
+              )
+              rows.append(
+                  paired_row(
+                      f"credit_swap_axis_{metric_name}:epoch100_endogenous-swapped",
+                      values[(100, "endogenous")] - values[(100, "swapped")],
+                  )
+              )
+
+          summary = pd.DataFrame(rows)
+          summary.to_csv(
+              "results/generated/flyvis_type_pair_axis_postburst_credit_swap_summary.csv",
+              index=False,
+          )
+          print(summary.to_string(index=False))
+          print("\nCredit and weight geometry at epoch 100:")
+          print(
+              frame[(frame["epoch"] == 100) & (frame["condition"] != "local")]
+              .groupby("condition")[
+                  [
+                      "weight_cosine_to_local",
+                      "weight_relative_distance_to_local",
+                      "mean_postburst_own_credit_cosine_to_local",
+                      "mean_postburst_own_credit_relative_distance_to_local",
+                      "mean_burst_angle_match_error",
+                  ]
+              ]
+              .mean()
+              .to_string()
+          )
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-type-pair-axis-postburst-credit-swap-aggregate
+          path: |
+            results/generated/flyvis_type_pair_axis_postburst_credit_swap.csv
+            results/generated/flyvis_type_pair_axis_postburst_credit_swap_summary.csv
