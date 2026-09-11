@@ -9,7 +9,12 @@ import torch
 import torch.nn.functional as F
 from diagnose_flyvis_temporal_ce_credit_alignment import differentiable_frame_states
 from diagnose_flyvis_type_pair_axis_ce_geometry import candidate_directions
-from run_flyvis_retinotopic_contrastive import DIRECTIONS, output_nodes, render_motion_batch, targets_for
+from run_flyvis_retinotopic_contrastive import (
+    DIRECTIONS,
+    output_nodes,
+    render_motion_batch,
+    targets_for,
+)
 from run_flyvis_temporal_coherence_gate import apply_local_credit
 from run_flyvis_type_pair_axis_identity_control import credit
 from run_flyvis_type_pair_consensus import type_pair_indices
