@@ -27,9 +27,7 @@ def candidate_directions(
     biological_groups: list[torch.Tensor],
     shuffled_groups: list[torch.Tensor],
 ) -> dict[str, tuple[torch.Tensor, float, float]]:
-    candidates: dict[str, tuple[torch.Tensor, float, float]] = {
-        "local": (edge.clone(), 0.0, 1.0)
-    }
+    candidates: dict[str, tuple[torch.Tensor, float, float]] = {"local": (edge.clone(), 0.0, 1.0)}
     target_changes: dict[str, float] = {}
     for suffix, gain in (("neg", -2.0), ("pos", 4.0)):
         mixed = linear_mix_direction(
