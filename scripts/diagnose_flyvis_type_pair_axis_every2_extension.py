@@ -4,8 +4,8 @@ import argparse
 from pathlib import Path
 from typing import Any, cast
 
-import pandas as pd
 import diagnose_flyvis_type_pair_axis_pulse_frequency as pulse_frequency
+import pandas as pd
 
 
 def main() -> None:
