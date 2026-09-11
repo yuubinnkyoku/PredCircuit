@@ -1,11 +1,6 @@
 name: FlyVis state-credit stimulus-state decomposition
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - "scripts/diagnose_flyvis_type_pair_state_credit_stimulus_state_decomposition.py"
-      - ".github/workflows/flyvis-type-pair-state-credit-stimulus-state-decomposition.yml"
   workflow_dispatch:
 
 jobs:
