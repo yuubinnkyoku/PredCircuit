@@ -62,8 +62,7 @@ def measure_future_trajectory(
     models = {
         "base": clone_model(checkpoint_model, circuit, seed=seed),
         **{
-            condition: clone_model(checkpoint_model, circuit, seed=seed)
-            for condition in candidates
+            condition: clone_model(checkpoint_model, circuit, seed=seed) for condition in candidates
         },
     }
     initial_norm_error = {condition: 0.0 for condition in models}
@@ -88,8 +87,7 @@ def measure_future_trajectory(
                 bias_delta = torch.linalg.vector_norm(model.bias - reference.bias)
                 weight_delta = torch.linalg.vector_norm(model.weight - reference.weight)
                 cosine = torch.dot(model.weight, reference.weight) / (
-                    torch.linalg.vector_norm(model.weight).clamp_min(1e-30)
-                    * reference_weight_norm
+                    torch.linalg.vector_norm(model.weight).clamp_min(1e-30) * reference_weight_norm
                 )
                 rows.append(
                     {
