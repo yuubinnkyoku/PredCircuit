@@ -104,9 +104,7 @@ def run_seed(
             direction = match_norm(mixed, edge)
             treatment_edges[name] = direction
             edge_norm = torch.linalg.vector_norm(edge).clamp_min(1e-30)
-            direction_change[name] += float(
-                torch.linalg.vector_norm(direction - edge) / edge_norm
-            )
+            direction_change[name] += float(torch.linalg.vector_norm(direction - edge) / edge_norm)
             clip_fraction[name] += float(
                 (learning_rate * direction).abs().gt(max_update).float().mean()
             )
