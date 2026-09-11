@@ -133,9 +133,7 @@ def run_seed(
                 weight_decay=0.0,
                 max_update=max_update,
             )
-            model.weight.mul_(
-                target_norm / torch.linalg.vector_norm(model.weight).clamp_min(1e-30)
-            )
+            model.weight.mul_(target_norm / torch.linalg.vector_norm(model.weight).clamp_min(1e-30))
             model.bias.copy_(local_model.bias)
             post_weight_error[name] += float(
                 (torch.linalg.vector_norm(model.weight) - target_norm).abs()
