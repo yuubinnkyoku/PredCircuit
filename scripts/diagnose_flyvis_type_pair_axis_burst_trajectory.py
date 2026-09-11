@@ -18,7 +18,7 @@ from run_flyvis_type_pair_norm_matched_control import match_norm
 from run_flyvis_type_pair_shuffle_control import shuffled_groups_like
 
 from predcircuit.flyvis import load_flyvis_spec
-from predcircuit.flyvis_retinotopy import graph_from_flyvis_retinotopy
+from predcircuit.flyvis_retinotopy import RetinotopicFlyVisCircuit, graph_from_flyvis_retinotopy
 from predcircuit.model import PredictiveCodingGraph
 
 CHECKPOINTS = (0, 25, 26, 30, 35, 40, 50, 60, 70, 75, 80, 90, 100)
@@ -39,7 +39,7 @@ def _checkpoint_rows(
     *,
     epoch: int,
     seed: int,
-    circuit,
+    circuit: RetinotopicFlyVisCircuit,
     local_model: PredictiveCodingGraph,
     type_model: PredictiveCodingGraph,
     shuffle_model: PredictiveCodingGraph,
@@ -86,7 +86,10 @@ def _checkpoint_rows(
                 else effective_gain_sum / pulse_count,
                 "finite": bool(torch.isfinite(model.weight).all())
                 and bool(torch.isfinite(model.bias).all())
-                and all(math.isfinite(float(evaluation[key])) for key in ("cross_entropy", "accuracy", "margin")),
+                and all(
+                    math.isfinite(float(evaluation[key]))
+                    for key in ("cross_entropy", "accuracy", "margin")
+                ),
             }
         )
     return rows
