@@ -111,9 +111,7 @@ def run_seed(
 
         target_norm = torch.linalg.vector_norm(local_model.weight)
         treatment_norm = torch.linalg.vector_norm(shared_model.weight).clamp_min(1e-30)
-        pre_weight_norm_ratio_sum += float(
-            treatment_norm / target_norm.clamp_min(1e-30)
-        )
+        pre_weight_norm_ratio_sum += float(treatment_norm / target_norm.clamp_min(1e-30))
         shared_model.weight.mul_(target_norm / treatment_norm)
         shared_model.bias.copy_(local_model.bias)
 
@@ -121,9 +119,7 @@ def run_seed(
         weight_norm_error_sum += float(
             (post_norm - target_norm).abs() / target_norm.clamp_min(1e-30)
         )
-        bias_error_sum += float(
-            torch.linalg.vector_norm(shared_model.bias - local_model.bias)
-        )
+        bias_error_sum += float(torch.linalg.vector_norm(shared_model.bias - local_model.bias))
 
     local_after = evaluate(local_model, circuit, seed)
     shared_after = evaluate(shared_model, circuit, seed)
@@ -141,8 +137,7 @@ def run_seed(
                 "rule": rule,
                 "cross_entropy_before": before["cross_entropy"],
                 "cross_entropy_after": after["cross_entropy"],
-                "cross_entropy_improvement": before["cross_entropy"]
-                - after["cross_entropy"],
+                "cross_entropy_improvement": before["cross_entropy"] - after["cross_entropy"],
                 "accuracy_after": after["accuracy"],
                 "margin_after": after["margin"],
                 "weight_norm": float(torch.linalg.vector_norm(model.weight)),
@@ -153,15 +148,9 @@ def run_seed(
                 "mean_pre_weight_norm_ratio": pre_weight_norm_ratio_sum / 100.0
                 if is_shared
                 else 1.0,
-                "mean_post_weight_norm_error": weight_norm_error_sum / 100.0
-                if is_shared
-                else 0.0,
-                "mean_post_bias_vector_error": bias_error_sum / 100.0
-                if is_shared
-                else 0.0,
-                "mean_edge_clip_fraction": clip_fraction_sum / 100.0
-                if is_shared
-                else float("nan"),
+                "mean_post_weight_norm_error": weight_norm_error_sum / 100.0 if is_shared else 0.0,
+                "mean_post_bias_vector_error": bias_error_sum / 100.0 if is_shared else 0.0,
+                "mean_edge_clip_fraction": clip_fraction_sum / 100.0 if is_shared else float("nan"),
                 "finite": bool(torch.isfinite(model.weight).all())
                 and bool(torch.isfinite(model.bias).all())
                 and math.isfinite(after["cross_entropy"]),
