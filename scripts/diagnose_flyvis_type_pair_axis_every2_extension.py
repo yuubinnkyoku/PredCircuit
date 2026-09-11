@@ -3,8 +3,8 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+import diagnose_flyvis_type_pair_axis_pulse_frequency as pulse_frequency  # ty: ignore[unresolved-import]
 import pandas as pd
-import run_flyvis_type_pair_axis_pulse_frequency as pulse_frequency  # ty: ignore[unresolved-import]
 
 
 def main() -> None:
