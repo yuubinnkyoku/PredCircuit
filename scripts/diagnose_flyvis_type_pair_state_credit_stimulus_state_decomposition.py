@@ -158,18 +158,26 @@ def run_seed(
             )[0]
 
             if frozen_type is None:
-                frozen_type = credit(
-                    models[_name("frozen_vector", "type_donor")],
-                    circuit,
-                    seed=seed,
-                    epoch=BURST_END,
-                )[0].detach().clone()
-                frozen_shuffle = credit(
-                    models[_name("frozen_vector", "shuffle_donor")],
-                    circuit,
-                    seed=seed,
-                    epoch=BURST_END,
-                )[0].detach().clone()
+                frozen_type = (
+                    credit(
+                        models[_name("frozen_vector", "type_donor")],
+                        circuit,
+                        seed=seed,
+                        epoch=BURST_END,
+                    )[0]
+                    .detach()
+                    .clone()
+                )
+                frozen_shuffle = (
+                    credit(
+                        models[_name("frozen_vector", "shuffle_donor")],
+                        circuit,
+                        seed=seed,
+                        epoch=BURST_END,
+                    )[0]
+                    .detach()
+                    .clone()
+                )
             assert frozen_shuffle is not None
 
             frozen_type_step = match_norm(frozen_type, fixed_type)
