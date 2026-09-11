@@ -52,8 +52,7 @@ def run_seed(
         "shuffle_receives_type",
     )
     models = {
-        name: PredictiveCodingGraph(circuit.graph, seed=seed, init_scale=0.08)
-        for name in names
+        name: PredictiveCodingGraph(circuit.graph, seed=seed, init_scale=0.08) for name in names
     }
     direction_change = {name: 0.0 for name in names}
     angle_match_error = {name: 0.0 for name in names}
@@ -174,17 +173,13 @@ def run_seed(
                 weight_decay=0.0,
                 max_update=max_update,
             )
-            model.weight.mul_(
-                target_norm / torch.linalg.vector_norm(model.weight).clamp_min(1e-30)
-            )
+            model.weight.mul_(target_norm / torch.linalg.vector_norm(model.weight).clamp_min(1e-30))
             model.bias.copy_(local_model.bias)
             post_weight_error[name] += float(
                 (torch.linalg.vector_norm(model.weight) - target_norm).abs()
                 / target_norm.clamp_min(1e-30)
             )
-            post_bias_error[name] += float(
-                torch.linalg.vector_norm(model.bias - local_model.bias)
-            )
+            post_bias_error[name] += float(torch.linalg.vector_norm(model.bias - local_model.bias))
 
         completed_epoch = epoch + 1
         if completed_epoch in CHECKPOINTS:
@@ -245,9 +240,7 @@ def run_seed(
                             else 0.0
                         ),
                         "mean_postburst_applied_credit_cosine_to_local": (
-                            applied_credit_cosine[name] / credit_count
-                            if credit_count
-                            else 0.0
+                            applied_credit_cosine[name] / credit_count if credit_count else 0.0
                         ),
                         "mean_postburst_applied_credit_relative_distance_to_local": (
                             applied_credit_relative_distance[name] / credit_count
@@ -259,10 +252,8 @@ def run_seed(
                         "mean_burst_angle_match_error": angle_match_error[name] / burst_count,
                         "mean_burst_effective_gain": effective_gain[name] / burst_count,
                         "mean_burst_edge_clip_fraction": clip_fraction[name] / burst_count,
-                        "mean_post_weight_norm_error": post_weight_error[name]
-                        / completed_epoch,
-                        "mean_post_bias_vector_error": post_bias_error[name]
-                        / completed_epoch,
+                        "mean_post_weight_norm_error": post_weight_error[name] / completed_epoch,
+                        "mean_post_bias_vector_error": post_bias_error[name] / completed_epoch,
                         "finite": bool(torch.isfinite(model.weight).all())
                         and bool(torch.isfinite(model.bias).all())
                         and math.isfinite(after["cross_entropy"]),
