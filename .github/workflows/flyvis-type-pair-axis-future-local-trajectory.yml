@@ -1,0 +1,174 @@
+name: FlyVis type-pair future local trajectory
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "scripts/diagnose_flyvis_type_pair_axis_future_local_trajectory.py"
+      - ".github/workflows/flyvis-type-pair-axis-future-local-trajectory.yml"
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [260, 261, 262, 263, 264, 265, 266, 267, 268, 269]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Measure future local trajectory
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run python scripts/diagnose_flyvis_type_pair_axis_future_local_trajectory.py \
+            --seed ${{ matrix.seed }} \
+            --shuffle-seed $((760000 + ${{ matrix.seed }})) \
+            --out results/generated/flyvis_type_pair_axis_future_local_trajectory_seed${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: type-pair-axis-future-local-trajectory-seed${{ matrix.seed }}
+          path: results/generated/flyvis_type_pair_axis_future_local_trajectory_seed${{ matrix.seed }}.csv
+
+  aggregate:
+    needs: diagnose
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: type-pair-axis-future-local-trajectory-seed*
+          path: artifacts
+          merge-multiple: true
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Aggregate paired future trajectories
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run --with scipy python - <<'PY'
+          from pathlib import Path
+
+          import numpy as np
+          import pandas as pd
+          from scipy import stats
+
+          frame = pd.concat(
+              [pd.read_csv(path) for path in sorted(Path("artifacts").glob("*.csv"))],
+              ignore_index=True,
+          )
+          expected = 10 * 3 * 4 * 6
+          if len(frame) != expected:
+              raise RuntimeError(f"expected {expected} rows, got {len(frame)}")
+          if not frame["finite"].all():
+              raise RuntimeError("non-finite future trajectory run detected")
+          numeric = frame.select_dtypes(include=[np.number])
+          if not np.isfinite(numeric.to_numpy()).all():
+              raise RuntimeError("non-finite numeric future trajectory metric detected")
+          frame.to_csv(
+              "results/generated/flyvis_type_pair_axis_future_local_trajectory.csv",
+              index=False,
+          )
+
+          comparisons = (
+              ("type_neg", "shuffle_angle_neg"),
+              ("type_pos", "shuffle_angle_pos"),
+          )
+          performance = {
+              "cross_entropy": -1.0,
+              "accuracy": 1.0,
+              "margin": 1.0,
+          }
+          geometry = (
+              "relative_weight_norm_delta_vs_base",
+              "relative_weight_vector_delta_vs_base",
+              "weight_cosine_vs_base",
+              "relative_bias_vector_delta_vs_base",
+          )
+          rows = []
+          for checkpoint in (0, 20, 100):
+              for horizon in (0, 1, 5, 20):
+                  subset = frame[
+                      (frame["checkpoint"] == checkpoint)
+                      & (frame["horizon"] == horizon)
+                  ]
+                  wide = subset.pivot(index="seed", columns="condition")
+                  for treatment, reference in comparisons:
+                      for metric, sign in performance.items():
+                          delta = sign * (
+                              wide[metric][treatment].to_numpy()
+                              - wide[metric][reference].to_numpy()
+                          )
+                          n = len(delta)
+                          mean = float(np.mean(delta))
+                          std = float(np.std(delta, ddof=1))
+                          ci = stats.t.interval(
+                              0.95,
+                              n - 1,
+                              loc=mean,
+                              scale=std / np.sqrt(n),
+                          )
+                          try:
+                              wilcoxon_p = float(stats.wilcoxon(delta).pvalue)
+                          except ValueError:
+                              wilcoxon_p = 1.0
+                          rows.append(
+                              {
+                                  "checkpoint": checkpoint,
+                                  "horizon": horizon,
+                                  "treatment": treatment,
+                                  "reference": reference,
+                                  "metric": metric,
+                                  "n": n,
+                                  "mean_delta": mean,
+                                  "ci95_low": float(ci[0]),
+                                  "ci95_high": float(ci[1]),
+                                  "positive_seeds": int(np.sum(delta > 0)),
+                                  "paired_t_p": float(stats.ttest_1samp(delta, 0.0).pvalue),
+                                  "wilcoxon_p": wilcoxon_p,
+                                  "cohen_dz": mean / std if std > 0 else float("nan"),
+                              }
+                          )
+                      for metric in geometry:
+                          delta = (
+                              wide[metric][treatment].to_numpy()
+                              - wide[metric][reference].to_numpy()
+                          )
+                          rows.append(
+                              {
+                                  "checkpoint": checkpoint,
+                                  "horizon": horizon,
+                                  "treatment": treatment,
+                                  "reference": reference,
+                                  "metric": metric,
+                                  "n": len(delta),
+                                  "mean_delta": float(np.mean(delta)),
+                                  "ci95_low": float("nan"),
+                                  "ci95_high": float("nan"),
+                                  "positive_seeds": int(np.sum(delta > 0)),
+                                  "paired_t_p": float("nan"),
+                                  "wilcoxon_p": float("nan"),
+                                  "cohen_dz": float("nan"),
+                              }
+                          )
+          summary = pd.DataFrame(rows)
+          summary.to_csv(
+              "results/generated/flyvis_type_pair_axis_future_local_trajectory_summary.csv",
+              index=False,
+          )
+          print(
+              summary[
+                  summary["metric"].isin(["cross_entropy", "margin"])
+              ].to_string(index=False)
+          )
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-type-pair-axis-future-local-trajectory-aggregate
+          path: |
+            results/generated/flyvis_type_pair_axis_future_local_trajectory.csv
+            results/generated/flyvis_type_pair_axis_future_local_trajectory_summary.csv
