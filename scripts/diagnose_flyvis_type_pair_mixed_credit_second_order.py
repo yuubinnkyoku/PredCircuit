@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import math
 from pathlib import Path
 
@@ -20,14 +21,6 @@ from predcircuit.model import PredictiveCodingGraph
 
 FROZEN_EPOCH = 75
 SAMPLE_EPOCHS = (75, 80, 85, 90, 95)
-
-
-def _clone_model(model: PredictiveCodingGraph) -> PredictiveCodingGraph:
-    clone = PredictiveCodingGraph(model.graph, seed=0, init_scale=0.0)
-    with torch.no_grad():
-        clone.weight.copy_(model.weight)
-        clone.bias.copy_(model.bias)
-    return clone
 
 
 def run_seed(
@@ -93,7 +86,7 @@ def run_seed(
             )
             curvature = torch.dot(matched, hvp_edge) + torch.dot(raw_bias, hvp_bias)
 
-            updated = _clone_model(model)
+            updated = copy.deepcopy(model)
             before_weight = updated.weight.detach().clone()
             before_bias = updated.bias.detach().clone()
             apply_local_credit(
