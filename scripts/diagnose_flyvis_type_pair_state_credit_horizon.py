@@ -6,7 +6,6 @@ from pathlib import Path
 import diagnose_flyvis_type_pair_axis_postburst_donor_transfer as donor_transfer
 import pandas as pd
 
-
 HORIZONS = (0, 1, 2, 5, 10, 25)
 CHECKPOINTS = tuple(donor_transfer.BURST_END + horizon for horizon in HORIZONS)
 
