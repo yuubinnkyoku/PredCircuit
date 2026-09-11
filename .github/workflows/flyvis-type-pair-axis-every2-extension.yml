@@ -1,0 +1,113 @@
+name: FlyVis type-pair axis every2 extension
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "scripts/diagnose_flyvis_type_pair_axis_every2_extension.py"
+      - ".github/workflows/flyvis-type-pair-axis-every2-extension.yml"
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [280, 281, 282, 283, 284, 285, 286, 287, 288, 289]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Measure every-two-epochs response
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run python scripts/diagnose_flyvis_type_pair_axis_every2_extension.py \
+            --seed ${{ matrix.seed }} \
+            --shuffle-seed $((780000 + ${{ matrix.seed }})) \
+            --out results/generated/flyvis_type_pair_axis_every2_seed${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: type-pair-axis-every2-seed${{ matrix.seed }}
+          path: results/generated/flyvis_type_pair_axis_every2_seed${{ matrix.seed }}.csv
+
+  aggregate:
+    needs: diagnose
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: type-pair-axis-every2-seed*
+          path: artifacts
+          merge-multiple: true
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Aggregate every-two-epochs response
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run --with scipy python - <<'PY'
+          from pathlib import Path
+
+          import numpy as np
+          import pandas as pd
+          from scipy import stats
+
+          frame = pd.concat(
+              [pd.read_csv(path) for path in sorted(Path("artifacts").glob("*.csv"))],
+              ignore_index=True,
+          )
+          if len(frame) != 50:
+              raise RuntimeError(f"expected 50 rows, got {len(frame)}")
+          if not frame["finite"].all():
+              raise RuntimeError("non-finite every2 run detected")
+          frame.to_csv("results/generated/flyvis_type_pair_axis_every2.csv", index=False)
+          wide = frame.pivot(index="seed", columns="condition")
+          rows = []
+          for suffix in ("neg", "pos"):
+              type_name = f"type_{suffix}_every2"
+              shuffle_name = f"shuffle_{suffix}_every2"
+              for metric, sign in (
+                  ("cross_entropy_after", -1.0),
+                  ("accuracy_after", 1.0),
+                  ("margin_after", 1.0),
+              ):
+                  delta = sign * (
+                      wide[metric][type_name].to_numpy()
+                      - wide[metric][shuffle_name].to_numpy()
+                  )
+                  n = len(delta)
+                  mean = float(np.mean(delta))
+                  std = float(np.std(delta, ddof=1))
+                  ci = stats.t.interval(0.95, n - 1, loc=mean, scale=std / np.sqrt(n))
+                  rows.append(
+                      {
+                          "sign": suffix,
+                          "metric": metric,
+                          "n": n,
+                          "mean_gain": mean,
+                          "ci95_low": float(ci[0]),
+                          "ci95_high": float(ci[1]),
+                          "improved_seeds": int(np.sum(delta > 0)),
+                          "paired_t_p": float(stats.ttest_1samp(delta, 0.0).pvalue),
+                          "wilcoxon_p": float(stats.wilcoxon(delta).pvalue),
+                          "cohen_dz": mean / std if std > 0 else float("nan"),
+                      }
+                  )
+          summary = pd.DataFrame(rows)
+          summary.to_csv(
+              "results/generated/flyvis_type_pair_axis_every2_summary.csv",
+              index=False,
+          )
+          print(summary.to_string(index=False))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-type-pair-axis-every2-aggregate
+          path: |
+            results/generated/flyvis_type_pair_axis_every2.csv
+            results/generated/flyvis_type_pair_axis_every2_summary.csv
