@@ -1,0 +1,98 @@
+name: FlyVis type-pair axis count-spacing holdout
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/flyvis-type-pair-axis-count-spacing-holdout.yml"
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [300, 301, 302, 303, 304, 305, 306, 307, 308, 309, 310, 311, 312, 313, 314, 315, 316, 317, 318, 319]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Measure count-spacing holdout
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run python scripts/diagnose_flyvis_type_pair_axis_count_spacing_control.py \
+            --seed ${{ matrix.seed }} \
+            --shuffle-seed $((790000 + ${{ matrix.seed }})) \
+            --out results/generated/count_spacing_holdout_seed${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: count-spacing-holdout-seed${{ matrix.seed }}
+          path: results/generated/count_spacing_holdout_seed${{ matrix.seed }}.csv
+
+  aggregate:
+    needs: diagnose
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: count-spacing-holdout-seed*
+          path: artifacts
+          merge-multiple: true
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Aggregate holdout
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run --with scipy python - <<'PY'
+          from pathlib import Path
+          import numpy as np
+          import pandas as pd
+          from scipy import stats
+
+          frame = pd.concat([pd.read_csv(p) for p in sorted(Path("artifacts").glob("*.csv"))], ignore_index=True)
+          if len(frame) != 220:
+              raise RuntimeError(f"expected 220 rows, got {len(frame)}")
+          if not frame["finite"].all():
+              raise RuntimeError("non-finite holdout run")
+          frame.to_csv("results/generated/flyvis_type_pair_axis_count_spacing_holdout.csv", index=False)
+          wide = frame.pivot(index="seed", columns="condition")
+
+          def row(label, delta):
+              n = len(delta)
+              mean = float(np.mean(delta))
+              std = float(np.std(delta, ddof=1))
+              ci = stats.t.interval(0.95, n - 1, loc=mean, scale=std / np.sqrt(n))
+              try:
+                  wp = float(stats.wilcoxon(delta).pvalue)
+              except ValueError:
+                  wp = 1.0
+              return {"comparison": label, "n": n, "mean_gain": mean, "ci95_low": float(ci[0]), "ci95_high": float(ci[1]), "improved_seeds": int(np.sum(delta > 0)), "paired_t_p": float(stats.ttest_1samp(delta, 0.0).pvalue), "wilcoxon_p": wp, "cohen_dz": mean / std if std > 0 else float("nan")}
+
+          rows = []
+          ce = {}
+          for s in ("centered20", "spread20", "centered50", "spread50", "all100"):
+              t = f"type_{s}"
+              sh = f"shuffle_{s}"
+              ce[s] = wide["cross_entropy_after"][sh].to_numpy() - wide["cross_entropy_after"][t].to_numpy()
+              rows.append(row(f"axis_ce:{s}", ce[s]))
+              for metric in ("margin_after", "accuracy_after"):
+                  d = wide[metric][t].to_numpy() - wide[metric][sh].to_numpy()
+                  rows.append(row(f"axis_{metric}:{s}", d))
+          for a, b in (("centered20", "spread20"), ("centered50", "spread50"), ("centered50", "centered20"), ("spread50", "spread20")):
+              rows.append(row(f"axis_ce_did:{a}-{b}", ce[a] - ce[b]))
+          summary = pd.DataFrame(rows)
+          summary.to_csv("results/generated/flyvis_type_pair_axis_count_spacing_holdout_summary.csv", index=False)
+          print(summary.to_string(index=False))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-type-pair-axis-count-spacing-holdout-aggregate
+          path: |
+            results/generated/flyvis_type_pair_axis_count_spacing_holdout.csv
+            results/generated/flyvis_type_pair_axis_count_spacing_holdout_summary.csv
