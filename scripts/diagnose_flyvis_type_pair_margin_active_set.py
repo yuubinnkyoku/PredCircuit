@@ -27,7 +27,7 @@ from predcircuit.flyvis_retinotopy import graph_from_flyvis_retinotopy
 from predcircuit.model import PredictiveCodingGraph
 
 FROZEN_EPOCH = 75
-HORIZONS = tuple(range(0, 26))
+HORIZONS = tuple(range(26))
 RULES = ("local", "type", "shuffle")
 
 
