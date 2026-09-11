@@ -132,9 +132,7 @@ def run_seed(
             transformed.append(matched)
             raw_norm_tensor = torch.linalg.vector_norm(raw).clamp_min(1e-30)
             coarse_fraction.append(float(torch.linalg.vector_norm(coarse) / raw_norm_tensor))
-            relative_change.append(
-                float(torch.linalg.vector_norm(matched - raw) / raw_norm_tensor)
-            )
+            relative_change.append(float(torch.linalg.vector_norm(matched - raw) / raw_norm_tensor))
 
         finite = all(bool(torch.isfinite(vector).all()) for vector in transformed)
         rows.append(
@@ -146,9 +144,7 @@ def run_seed(
                 "mean_leave_one_out_cosine_to_raw_mean": _leave_one_out_cosine(
                     transformed, raw_vectors
                 ),
-                "mean_relative_distance_to_own_mean": _mean_relative_distance_to_mean(
-                    transformed
-                ),
+                "mean_relative_distance_to_own_mean": _mean_relative_distance_to_mean(transformed),
                 "mean_coarse_norm_fraction": float(sum(coarse_fraction) / len(coarse_fraction)),
                 "mean_transformed_relative_change": float(
                     sum(relative_change) / len(relative_change)
