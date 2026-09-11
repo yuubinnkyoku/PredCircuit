@@ -1,0 +1,184 @@
+name: FlyVis type-pair axis count-spacing control
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "scripts/diagnose_flyvis_type_pair_axis_count_spacing_control.py"
+      - ".github/workflows/flyvis-type-pair-axis-count-spacing-control.yml"
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [290, 291, 292, 293, 294, 295, 296, 297, 298, 299]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Measure matched pulse count and spacing
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run python scripts/diagnose_flyvis_type_pair_axis_count_spacing_control.py \
+            --seed ${{ matrix.seed }} \
+            --shuffle-seed $((790000 + ${{ matrix.seed }})) \
+            --out results/generated/flyvis_type_pair_axis_count_spacing_seed${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: type-pair-axis-count-spacing-seed${{ matrix.seed }}
+          path: results/generated/flyvis_type_pair_axis_count_spacing_seed${{ matrix.seed }}.csv
+
+  aggregate:
+    needs: diagnose
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: type-pair-axis-count-spacing-seed*
+          path: artifacts
+          merge-multiple: true
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Aggregate count-spacing response
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run --with scipy python - <<'PY'
+          from pathlib import Path
+
+          import numpy as np
+          import pandas as pd
+          from scipy import stats
+
+          frame = pd.concat(
+              [pd.read_csv(path) for path in sorted(Path("artifacts").glob("*.csv"))],
+              ignore_index=True,
+          )
+          if len(frame) != 110:
+              raise RuntimeError(f"expected 110 rows, got {len(frame)}")
+          if not frame["finite"].all():
+              raise RuntimeError("non-finite count-spacing run detected")
+          finite_metrics = frame[
+              [
+                  "cross_entropy_after",
+                  "accuracy_after",
+                  "margin_after",
+                  "mean_post_weight_norm_error",
+                  "mean_post_bias_vector_error",
+              ]
+          ]
+          if not np.isfinite(finite_metrics.to_numpy()).all():
+              raise RuntimeError("non-finite count-spacing metric detected")
+          frame.to_csv(
+              "results/generated/flyvis_type_pair_axis_count_spacing.csv",
+              index=False,
+          )
+
+          wide = frame.pivot(index="seed", columns="condition")
+
+          def paired_row(label, delta):
+              n = len(delta)
+              mean = float(np.mean(delta))
+              std = float(np.std(delta, ddof=1))
+              ci = stats.t.interval(0.95, n - 1, loc=mean, scale=std / np.sqrt(n))
+              try:
+                  wilcoxon_p = float(stats.wilcoxon(delta).pvalue)
+              except ValueError:
+                  wilcoxon_p = 1.0
+              return {
+                  "comparison": label,
+                  "n": n,
+                  "mean_gain": mean,
+                  "ci95_low": float(ci[0]),
+                  "ci95_high": float(ci[1]),
+                  "improved_seeds": int(np.sum(delta > 0)),
+                  "paired_t_p": float(stats.ttest_1samp(delta, 0.0).pvalue),
+                  "wilcoxon_p": wilcoxon_p,
+                  "cohen_dz": mean / std if std > 0 else float("nan"),
+              }
+
+          schedules = ("centered20", "spread20", "centered50", "spread50", "all100")
+          rows = []
+          ce_gain = {}
+          margin_gain = {}
+          for schedule in schedules:
+              type_name = f"type_{schedule}"
+              shuffle_name = f"shuffle_{schedule}"
+              ce = (
+                  wide["cross_entropy_after"][shuffle_name].to_numpy()
+                  - wide["cross_entropy_after"][type_name].to_numpy()
+              )
+              margin = (
+                  wide["margin_after"][type_name].to_numpy()
+                  - wide["margin_after"][shuffle_name].to_numpy()
+              )
+              ce_gain[schedule] = ce
+              margin_gain[schedule] = margin
+              rows.append(paired_row(f"axis_ce:{schedule}", ce))
+              rows.append(paired_row(f"axis_margin:{schedule}", margin))
+              rows.append(
+                  paired_row(
+                      f"axis_accuracy:{schedule}",
+                      wide["accuracy_after"][type_name].to_numpy()
+                      - wide["accuracy_after"][shuffle_name].to_numpy(),
+                  )
+              )
+
+          for left, right in (
+              ("centered20", "spread20"),
+              ("centered50", "spread50"),
+              ("spread50", "spread20"),
+              ("centered50", "centered20"),
+              ("all100", "spread50"),
+              ("all100", "centered50"),
+          ):
+              rows.append(
+                  paired_row(
+                      f"axis_ce_did:{left}-{right}",
+                      ce_gain[left] - ce_gain[right],
+                  )
+              )
+              rows.append(
+                  paired_row(
+                      f"axis_margin_did:{left}-{right}",
+                      margin_gain[left] - margin_gain[right],
+                  )
+              )
+
+          summary = pd.DataFrame(rows)
+          summary.to_csv(
+              "results/generated/flyvis_type_pair_axis_count_spacing_summary.csv",
+              index=False,
+          )
+          print(summary.to_string(index=False))
+          print("\nGeometry by schedule:")
+          print(
+              frame[frame["condition"] != "local"]
+              .groupby(["schedule", "grouping"])[
+                  [
+                      "pulse_count",
+                      "mean_pulse_relative_direction_change",
+                      "mean_pulse_angle_match_error",
+                      "mean_pulse_effective_gain",
+                      "mean_pulse_edge_clip_fraction",
+                      "mean_post_weight_norm_error",
+                      "mean_post_bias_vector_error",
+                  ]
+              ]
+              .mean()
+              .to_string()
+          )
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-type-pair-axis-count-spacing-aggregate
+          path: |
+            results/generated/flyvis_type_pair_axis_count_spacing.csv
+            results/generated/flyvis_type_pair_axis_count_spacing_summary.csv
