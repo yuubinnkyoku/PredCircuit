@@ -1,0 +1,177 @@
+name: FlyVis type-pair axis post-burst donor transfer
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "scripts/diagnose_flyvis_type_pair_axis_postburst_donor_transfer.py"
+      - ".github/workflows/flyvis-type-pair-axis-postburst-donor-transfer.yml"
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [380, 381, 382, 383, 384, 385, 386, 387, 388, 389, 390, 391, 392, 393, 394, 395, 396, 397, 398, 399]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Measure post-burst donor transfer
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run python scripts/diagnose_flyvis_type_pair_axis_postburst_donor_transfer.py \
+            --seed ${{ matrix.seed }} \
+            --shuffle-seed $((860000 + ${{ matrix.seed }})) \
+            --out results/generated/flyvis_type_pair_axis_postburst_donor_transfer_seed${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: type-pair-axis-postburst-donor-transfer-seed${{ matrix.seed }}
+          path: results/generated/flyvis_type_pair_axis_postburst_donor_transfer_seed${{ matrix.seed }}.csv
+
+  aggregate:
+    needs: diagnose
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: type-pair-axis-postburst-donor-transfer-seed*
+          path: artifacts
+          merge-multiple: true
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Aggregate post-burst donor transfer
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run --with scipy python - <<'PY'
+          from pathlib import Path
+
+          import numpy as np
+          import pandas as pd
+          from scipy import stats
+
+          frame = pd.concat(
+              [pd.read_csv(path) for path in sorted(Path("artifacts").glob("*.csv"))],
+              ignore_index=True,
+          )
+          if len(frame) != 400:
+              raise RuntimeError(f"expected 400 rows, got {len(frame)}")
+          if not frame["finite"].all():
+              raise RuntimeError("non-finite donor-transfer run detected")
+          numeric = frame.select_dtypes(include=[np.number])
+          if not np.isfinite(numeric.to_numpy()).all():
+              raise RuntimeError("non-finite donor-transfer metric detected")
+          frame.to_csv(
+              "results/generated/flyvis_type_pair_axis_postburst_donor_transfer.csv",
+              index=False,
+          )
+
+          def paired_row(label, delta):
+              n = len(delta)
+              mean = float(np.mean(delta))
+              std = float(np.std(delta, ddof=1))
+              ci = stats.t.interval(0.95, n - 1, loc=mean, scale=std / np.sqrt(n))
+              try:
+                  wp = float(stats.wilcoxon(delta).pvalue)
+              except ValueError:
+                  wp = 1.0
+              return {
+                  "comparison": label,
+                  "n": n,
+                  "mean_gain": mean,
+                  "ci95_low": float(ci[0]),
+                  "ci95_high": float(ci[1]),
+                  "improved_seeds": int(np.sum(delta > 0)),
+                  "paired_t_p": float(stats.ttest_1samp(delta, 0.0).pvalue),
+                  "wilcoxon_p": wp,
+                  "cohen_dz": mean / std if std > 0 else float("nan"),
+              }
+
+          wide = frame.pivot(index="seed", columns=["epoch", "condition"])
+          rows = []
+          for epoch in (75, 80, 90, 100):
+              donor_ce = (
+                  wide["cross_entropy"][(epoch, "shuffle_donor")].to_numpy()
+                  - wide["cross_entropy"][(epoch, "type_donor")].to_numpy()
+              )
+              recipient_ce = (
+                  wide["cross_entropy"][(epoch, "shuffle_receives_type")].to_numpy()
+                  - wide["cross_entropy"][(epoch, "type_receives_shuffle")].to_numpy()
+              )
+              donor_margin = (
+                  wide["margin"][(epoch, "type_donor")].to_numpy()
+                  - wide["margin"][(epoch, "shuffle_donor")].to_numpy()
+              )
+              recipient_margin = (
+                  wide["margin"][(epoch, "type_receives_shuffle")].to_numpy()
+                  - wide["margin"][(epoch, "shuffle_receives_type")].to_numpy()
+              )
+              rows.append(paired_row(f"donor_axis_ce:epoch{epoch}", donor_ce))
+              rows.append(paired_row(f"recipient_state_axis_ce:epoch{epoch}", recipient_ce))
+              rows.append(paired_row(f"donor_axis_margin:epoch{epoch}", donor_margin))
+              rows.append(
+                  paired_row(f"recipient_state_axis_margin:epoch{epoch}", recipient_margin)
+              )
+              if epoch == 100:
+                  rows.append(
+                      paired_row(
+                          "credit_transfer_ce:donor-minus-recipient_state_axis_epoch100",
+                          donor_ce - recipient_ce,
+                      )
+                  )
+                  rows.append(
+                      paired_row(
+                          "credit_transfer_margin:donor-minus-recipient_state_axis_epoch100",
+                          donor_margin - recipient_margin,
+                      )
+                  )
+
+          type_credit_effect_ce = (
+              wide["cross_entropy"][(100, "type_receives_shuffle")].to_numpy()
+              - wide["cross_entropy"][(100, "type_donor")].to_numpy()
+          )
+          shuffle_credit_effect_ce = (
+              wide["cross_entropy"][(100, "shuffle_donor")].to_numpy()
+              - wide["cross_entropy"][(100, "shuffle_receives_type")].to_numpy()
+          )
+          rows.append(paired_row("type_state_benefit_of_type_credit:ce", type_credit_effect_ce))
+          rows.append(
+              paired_row("shuffle_state_benefit_of_type_credit:ce", shuffle_credit_effect_ce)
+          )
+          summary = pd.DataFrame(rows)
+          summary.to_csv(
+              "results/generated/flyvis_type_pair_axis_postburst_donor_transfer_summary.csv",
+              index=False,
+          )
+          print(summary.to_string(index=False))
+          print("\nEpoch-100 geometry:")
+          print(
+              frame[(frame["epoch"] == 100) & (frame["condition"] != "local")]
+              .groupby("condition")[
+                  [
+                      "weight_cosine_to_local",
+                      "weight_relative_distance_to_local",
+                      "mean_postburst_own_credit_cosine_to_local",
+                      "mean_postburst_own_credit_relative_distance_to_local",
+                      "mean_postburst_applied_credit_cosine_to_local",
+                      "mean_postburst_applied_credit_relative_distance_to_local",
+                      "mean_burst_angle_match_error",
+                  ]
+              ]
+              .mean()
+              .to_string()
+          )
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-type-pair-axis-postburst-donor-transfer-aggregate
+          path: |
+            results/generated/flyvis_type_pair_axis_postburst_donor_transfer.csv
+            results/generated/flyvis_type_pair_axis_postburst_donor_transfer_summary.csv
