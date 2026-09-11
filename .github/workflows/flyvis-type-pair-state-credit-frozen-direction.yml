@@ -1,0 +1,205 @@
+name: FlyVis type-pair frozen-credit direction holdout
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "scripts/diagnose_flyvis_type_pair_state_credit_frozen_direction.py"
+      - ".github/workflows/flyvis-type-pair-state-credit-frozen-direction.yml"
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [460, 461, 462, 463, 464, 465, 466, 467, 468, 469, 470, 471, 472, 473, 474, 475, 476, 477, 478, 479]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Measure frozen-credit direction response
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run python scripts/diagnose_flyvis_type_pair_state_credit_frozen_direction.py \
+            --seed ${{ matrix.seed }} \
+            --shuffle-seed $((850000 + ${{ matrix.seed }})) \
+            --out results/generated/flyvis_type_pair_state_credit_frozen_direction_seed${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: type-pair-frozen-credit-direction-seed${{ matrix.seed }}
+          path: results/generated/flyvis_type_pair_state_credit_frozen_direction_seed${{ matrix.seed }}.csv
+
+  aggregate:
+    needs: diagnose
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: type-pair-frozen-credit-direction-seed*
+          path: artifacts
+          merge-multiple: true
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Aggregate frozen-credit direction response
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run --with scipy python - <<'PY'
+          from pathlib import Path
+
+          import numpy as np
+          import pandas as pd
+          from scipy import stats
+
+          frame = pd.concat(
+              [pd.read_csv(path) for path in sorted(Path("artifacts").glob("*.csv"))],
+              ignore_index=True,
+          )
+          if len(frame) != 1080:
+              raise RuntimeError(f"expected 1080 rows, got {len(frame)}")
+          if not frame["finite"].all():
+              raise RuntimeError("non-finite frozen-credit direction run detected")
+          numeric = frame.select_dtypes(include=[np.number])
+          if not np.isfinite(numeric.to_numpy()).all():
+              raise RuntimeError("non-finite frozen-credit direction metric detected")
+
+          frame.to_csv(
+              "results/generated/flyvis_type_pair_state_credit_frozen_direction_holdout.csv",
+              index=False,
+          )
+          treatment = frame[frame["mode"] != "local"].copy()
+          wide = treatment.pivot(index="seed", columns=["horizon", "mode", "condition"])
+
+          def paired_row(label, delta):
+              delta = np.asarray(delta, dtype=float)
+              n = len(delta)
+              mean = float(np.mean(delta))
+              std = float(np.std(delta, ddof=1))
+              if std == 0.0:
+                  ci = (mean, mean)
+                  paired_t_p = 1.0 if mean == 0.0 else 0.0
+                  wilcoxon_p = 1.0 if mean == 0.0 else float(stats.wilcoxon(delta).pvalue)
+                  dz = float("nan")
+              else:
+                  ci = stats.t.interval(0.95, n - 1, loc=mean, scale=std / np.sqrt(n))
+                  paired_t_p = float(stats.ttest_1samp(delta, 0.0).pvalue)
+                  try:
+                      wilcoxon_p = float(stats.wilcoxon(delta).pvalue)
+                  except ValueError:
+                      wilcoxon_p = 1.0
+                  dz = mean / std
+              return {
+                  "comparison": label,
+                  "n": n,
+                  "mean_gain": mean,
+                  "ci95_low": float(ci[0]),
+                  "ci95_high": float(ci[1]),
+                  "improved_seeds": int(np.sum(delta > 0)),
+                  "paired_t_p": paired_t_p,
+                  "wilcoxon_p": wilcoxon_p,
+                  "cohen_dz": dz,
+              }
+
+          def values(metric, horizon, mode, condition):
+              return wide[metric][(horizon, mode, condition)].to_numpy()
+
+          rows = []
+          interactions = {"cross_entropy": {}, "margin": {}, "accuracy": {}}
+          for horizon in (0, 1, 2, 5, 10, 25):
+              for mode in ("recompute", "frozen"):
+                  ce_type_state = (
+                      values("cross_entropy", horizon, mode, "type_receives_shuffle")
+                      - values("cross_entropy", horizon, mode, "type_donor")
+                  )
+                  ce_shuffle_state = (
+                      values("cross_entropy", horizon, mode, "shuffle_donor")
+                      - values("cross_entropy", horizon, mode, "shuffle_receives_type")
+                  )
+                  interaction_ce = ce_type_state - ce_shuffle_state
+                  interactions["cross_entropy"][(horizon, mode)] = interaction_ce
+                  rows.append(
+                      paired_row(
+                          f"state_x_credit_ce:{mode}:horizon{horizon}",
+                          interaction_ce,
+                      )
+                  )
+
+                  for metric in ("margin", "accuracy"):
+                      type_state = (
+                          values(metric, horizon, mode, "type_donor")
+                          - values(metric, horizon, mode, "type_receives_shuffle")
+                      )
+                      shuffle_state = (
+                          values(metric, horizon, mode, "shuffle_receives_type")
+                          - values(metric, horizon, mode, "shuffle_donor")
+                      )
+                      interaction = type_state - shuffle_state
+                      interactions[metric][(horizon, mode)] = interaction
+                      rows.append(
+                          paired_row(
+                              f"state_x_credit_{metric}:{mode}:horizon{horizon}",
+                              interaction,
+                          )
+                      )
+
+              for metric in ("cross_entropy", "margin", "accuracy"):
+                  rows.append(
+                      paired_row(
+                          f"recompute_minus_frozen_{metric}:horizon{horizon}",
+                          interactions[metric][(horizon, "recompute")]
+                          - interactions[metric][(horizon, "frozen")],
+                      )
+                  )
+
+          rows.append(
+              paired_row(
+                  "primary_recompute_minus_frozen_ce_growth:horizon25-horizon1",
+                  (
+                      interactions["cross_entropy"][(25, "recompute")]
+                      - interactions["cross_entropy"][(1, "recompute")]
+                  )
+                  - (
+                      interactions["cross_entropy"][(25, "frozen")]
+                      - interactions["cross_entropy"][(1, "frozen")]
+                  ),
+              )
+          )
+
+          summary = pd.DataFrame(rows)
+          summary.to_csv(
+              "results/generated/flyvis_type_pair_state_credit_frozen_direction_holdout_summary.csv",
+              index=False,
+          )
+          print(summary.to_string(index=False))
+          print("\nGeometry by horizon/mode/condition:")
+          print(
+              treatment.groupby(["horizon", "mode", "condition"])[
+                  [
+                      "weight_cosine_to_local",
+                      "weight_relative_distance_to_local",
+                      "mean_postburst_own_credit_cosine_to_local",
+                      "mean_postburst_own_credit_relative_distance_to_local",
+                      "mean_postburst_applied_credit_cosine_to_local",
+                      "mean_postburst_applied_credit_relative_distance_to_local",
+                      "mean_postburst_source_cosine_to_current_donor",
+                      "mean_burst_angle_match_error",
+                      "mean_post_weight_norm_error",
+                      "mean_post_bias_vector_error",
+                  ]
+              ]
+              .mean()
+              .to_string()
+          )
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-type-pair-state-credit-frozen-direction-holdout-aggregate
+          path: |
+            results/generated/flyvis_type_pair_state_credit_frozen_direction_holdout.csv
+            results/generated/flyvis_type_pair_state_credit_frozen_direction_holdout_summary.csv
