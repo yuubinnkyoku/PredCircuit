@@ -1,0 +1,19 @@
+name: Ruff pulse-frequency import diff
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/ruff-pulse-frequency-import-diff.yml"
+  workflow_dispatch:
+
+jobs:
+  diff:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Show Ruff import fix
+        run: uv run ruff check --diff scripts/diagnose_flyvis_type_pair_axis_pulse_frequency.py
