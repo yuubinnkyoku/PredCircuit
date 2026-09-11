@@ -1,0 +1,145 @@
+name: FlyVis type-pair axis angle-matched holdout
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/flyvis-type-pair-axis-angle-matched-holdout.yml"
+  workflow_dispatch:
+
+jobs:
+  train:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [220, 221, 222, 223, 224, 225, 226, 227, 228, 229, 230, 231, 232, 233, 234, 235, 236, 237, 238, 239]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Train independent angle-matched holdout
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run python scripts/run_flyvis_type_pair_axis_angle_matched_control.py \
+            --seed ${{ matrix.seed }} \
+            --shuffle-seed $((720000 + ${{ matrix.seed }})) \
+            --out results/generated/flyvis_type_pair_axis_angle_matched_holdout_seed${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: axis-angle-matched-holdout-seed${{ matrix.seed }}
+          path: results/generated/flyvis_type_pair_axis_angle_matched_holdout_seed${{ matrix.seed }}.csv
+
+  aggregate:
+    needs: train
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: axis-angle-matched-holdout-seed*
+          path: artifacts
+          merge-multiple: true
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Aggregate independent holdout
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run --with scipy python - <<'PY'
+          from pathlib import Path
+
+          import numpy as np
+          import pandas as pd
+          from scipy import stats
+
+          frame = pd.concat(
+              [pd.read_csv(path) for path in sorted(Path("artifacts").glob("*.csv"))],
+              ignore_index=True,
+          )
+          if len(frame) != 100:
+              raise RuntimeError(f"expected 100 rows, got {len(frame)}")
+          if not frame["finite"].all():
+              raise RuntimeError("non-finite run detected")
+          frame.to_csv(
+              "results/generated/flyvis_type_pair_axis_angle_matched_holdout.csv", index=False
+          )
+
+          wide = frame.pivot(index="seed", columns="condition")
+          rows = []
+          comparisons = [
+              ("type_neg", "local"),
+              ("type_pos", "local"),
+              ("shuffle_angle_neg", "local"),
+              ("shuffle_angle_pos", "local"),
+              ("type_neg", "shuffle_angle_neg"),
+              ("type_pos", "shuffle_angle_pos"),
+          ]
+          for treatment, reference in comparisons:
+              for metric in ("cross_entropy_after", "accuracy_after", "margin_after"):
+                  treatment_values = wide[metric][treatment].to_numpy()
+                  reference_values = wide[metric][reference].to_numpy()
+                  delta = (
+                      reference_values - treatment_values
+                      if metric == "cross_entropy_after"
+                      else treatment_values - reference_values
+                  )
+                  n = len(delta)
+                  mean = float(np.mean(delta))
+                  std = float(np.std(delta, ddof=1))
+                  ci = stats.t.interval(0.95, n - 1, loc=mean, scale=std / np.sqrt(n))
+                  try:
+                      wilcoxon_p = float(stats.wilcoxon(delta).pvalue)
+                  except ValueError:
+                      wilcoxon_p = 1.0
+                  rows.append(
+                      {
+                          "treatment": treatment,
+                          "reference": reference,
+                          "metric": metric,
+                          "n": n,
+                          "mean_gain": mean,
+                          "ci95_low": float(ci[0]),
+                          "ci95_high": float(ci[1]),
+                          "improved_seeds": int(np.sum(delta > 0)),
+                          "paired_t_p": float(stats.ttest_1samp(delta, 0.0).pvalue),
+                          "wilcoxon_p": wilcoxon_p,
+                          "cohen_dz": mean / std if std > 0 else float("nan"),
+                      }
+                  )
+          summary = pd.DataFrame(rows)
+          summary.to_csv(
+              "results/generated/flyvis_type_pair_axis_angle_matched_holdout_summary.csv",
+              index=False,
+          )
+          geometry = (
+              frame[frame["condition"] != "local"]
+              .groupby("condition")[[
+                  "mean_relative_direction_change",
+                  "mean_angle_match_error",
+                  "mean_effective_gain",
+                  "mean_edge_clip_fraction",
+                  "mean_post_weight_norm_error",
+                  "mean_post_bias_vector_error",
+              ]]
+              .mean()
+              .reset_index()
+          )
+          geometry.to_csv(
+              "results/generated/flyvis_type_pair_axis_angle_matched_holdout_geometry.csv",
+              index=False,
+          )
+          print(summary.to_string(index=False))
+          print("\nGeometry:")
+          print(geometry.to_string(index=False))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-type-pair-axis-angle-matched-holdout-aggregate
+          path: |
+            results/generated/flyvis_type_pair_axis_angle_matched_holdout.csv
+            results/generated/flyvis_type_pair_axis_angle_matched_holdout_summary.csv
+            results/generated/flyvis_type_pair_axis_angle_matched_holdout_geometry.csv
