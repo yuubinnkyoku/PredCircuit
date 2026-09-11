@@ -1,11 +1,6 @@
 name: FlyVis state-frozen stimulus replay
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - "scripts/diagnose_flyvis_type_pair_state_frozen_stimulus_replay.py"
-      - ".github/workflows/flyvis-type-pair-state-frozen-stimulus-replay.yml"
   workflow_dispatch:
 
 jobs:
@@ -145,14 +140,14 @@ jobs:
                           )
                       )
 
-                  for metric in ("cross_entropy", "margin", "accuracy"):
-                      rows.append(
-                          paired_row(
-                              f"live_minus_state_frozen_{metric}:horizon{horizon}",
-                              interactions[metric][(horizon, "live")]
-                              - interactions[metric][(horizon, "state_frozen_replay")],
-                          )
+              for metric in ("cross_entropy", "margin", "accuracy"):
+                  rows.append(
+                      paired_row(
+                          f"live_minus_state_frozen_{metric}:horizon{horizon}",
+                          interactions[metric][(horizon, "live")]
+                          - interactions[metric][(horizon, "state_frozen_replay")],
                       )
+                  )
 
           for metric in ("cross_entropy", "margin", "accuracy"):
               rows.append(
