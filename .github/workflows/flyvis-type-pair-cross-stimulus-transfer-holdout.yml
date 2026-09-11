@@ -1,0 +1,91 @@
+name: FlyVis type-pair cross-stimulus transfer holdout
+
+on:
+  push:
+    paths:
+      - ".github/triggers/run-cross-stimulus-transfer-580-599"
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [580, 581, 582, 583, 584, 585, 586, 587, 588, 589, 590, 591, 592, 593, 594, 595, 596, 597, 598, 599]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Measure one-update cross-stimulus transfer
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run python scripts/diagnose_flyvis_type_pair_cross_stimulus_transfer.py \
+            --seed ${{ matrix.seed }} \
+            --shuffle-seed $((920000 + ${{ matrix.seed }})) \
+            --out results/generated/flyvis_type_pair_cross_stimulus_transfer_seed${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: type-pair-cross-stimulus-transfer-seed${{ matrix.seed }}
+          path: results/generated/flyvis_type_pair_cross_stimulus_transfer_seed${{ matrix.seed }}.csv
+
+  aggregate:
+    needs: diagnose
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: type-pair-cross-stimulus-transfer-seed*
+          path: artifacts
+          merge-multiple: true
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Aggregate cross-stimulus transfer
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run --with scipy python - <<'PY'
+          from pathlib import Path
+          import numpy as np
+          import pandas as pd
+          from scipy import stats
+
+          frame = pd.concat([pd.read_csv(p) for p in sorted(Path("artifacts").glob("*.csv"))], ignore_index=True)
+          if len(frame) != 40:
+              raise RuntimeError(f"expected 40 rows, got {len(frame)}")
+          if not frame["finite"].all():
+              raise RuntimeError("non-finite cross-stimulus transfer run detected")
+          frame.to_csv("results/generated/flyvis_type_pair_cross_stimulus_transfer.csv", index=False)
+          t = frame[frame.grouping == "type"].set_index("seed").sort_index()
+          s = frame[frame.grouping == "shuffle"].set_index("seed").loc[t.index]
+
+          def row(label, delta):
+              delta = np.asarray(delta, dtype=float)
+              n = len(delta); mean = float(delta.mean()); std = float(delta.std(ddof=1))
+              ci = stats.t.interval(0.95, n - 1, loc=mean, scale=std / np.sqrt(n))
+              try: wp = float(stats.wilcoxon(delta).pvalue)
+              except ValueError: wp = 1.0
+              return {"comparison": label, "n": n, "mean_gain": mean, "ci95_low": float(ci[0]), "ci95_high": float(ci[1]), "positive_seeds": int((delta > 0).sum()), "paired_t_p": float(stats.ttest_1samp(delta, 0.0).pvalue), "wilcoxon_p": wp, "cohen_dz": mean / std if std > 0 else float("nan")}
+
+          rows = [
+              row("type_advantage:self_ce_delta", s.self_ce_delta - t.self_ce_delta),
+              row("type_advantage:transfer_ce_delta", s.transfer_ce_delta - t.transfer_ce_delta),
+              row("type_minus_shuffle:transfer_minus_self", t.transfer_minus_self - s.transfer_minus_self),
+              row("transfer_advantage_minus_self_advantage", (s.transfer_ce_delta - t.transfer_ce_delta) - (s.self_ce_delta - t.self_ce_delta)),
+          ]
+          summary = pd.DataFrame(rows)
+          summary.to_csv("results/generated/flyvis_type_pair_cross_stimulus_transfer_summary.csv", index=False)
+          print(summary.to_string(index=False))
+          print("\nCondition means:")
+          print(frame.groupby("grouping")[["self_ce_delta", "transfer_ce_delta", "transfer_minus_self"]].mean().to_string())
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-type-pair-cross-stimulus-transfer-aggregate
+          path: |
+            results/generated/flyvis_type_pair_cross_stimulus_transfer.csv
+            results/generated/flyvis_type_pair_cross_stimulus_transfer_summary.csv
