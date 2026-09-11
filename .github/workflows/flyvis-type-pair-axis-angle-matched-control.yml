@@ -1,0 +1,136 @@
+name: FlyVis type-pair axis angle-matched control
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "scripts/run_flyvis_type_pair_axis_angle_matched_control.py"
+      - ".github/workflows/flyvis-type-pair-axis-angle-matched-control.yml"
+  workflow_dispatch:
+
+jobs:
+  train:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 210, 211, 212, 213, 214, 215, 216, 217, 218, 219]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Train angle-matched axis control
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run python scripts/run_flyvis_type_pair_axis_angle_matched_control.py \
+            --seed ${{ matrix.seed }} \
+            --shuffle-seed $((710000 + ${{ matrix.seed }})) \
+            --out results/generated/flyvis_type_pair_axis_angle_matched_seed${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: axis-angle-matched-seed${{ matrix.seed }}
+          path: results/generated/flyvis_type_pair_axis_angle_matched_seed${{ matrix.seed }}.csv
+
+  aggregate:
+    needs: train
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: axis-angle-matched-seed*
+          path: artifacts
+          merge-multiple: true
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Aggregate angle-matched axis control
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run --with scipy python - <<'PY'
+          from pathlib import Path
+
+          import numpy as np
+          import pandas as pd
+          from scipy import stats
+
+          frame = pd.concat(
+              [pd.read_csv(path) for path in sorted(Path("artifacts").glob("*.csv"))],
+              ignore_index=True,
+          )
+          if len(frame) != 100:
+              raise RuntimeError(f"expected 100 rows, got {len(frame)}")
+          if not frame["finite"].all():
+              raise RuntimeError("non-finite run detected")
+          frame.to_csv(
+              "results/generated/flyvis_type_pair_axis_angle_matched_control.csv", index=False
+          )
+
+          wide = frame.pivot(index="seed", columns="condition")
+          rows = []
+          comparisons = [
+              ("type_neg", "local"),
+              ("type_pos", "local"),
+              ("shuffle_angle_neg", "local"),
+              ("shuffle_angle_pos", "local"),
+              ("type_neg", "shuffle_angle_neg"),
+              ("type_pos", "shuffle_angle_pos"),
+          ]
+          for treatment, reference in comparisons:
+              for metric in ("cross_entropy_after", "accuracy_after", "margin_after"):
+                  t = wide[metric][treatment].to_numpy()
+                  r = wide[metric][reference].to_numpy()
+                  delta = r - t if metric == "cross_entropy_after" else t - r
+                  n = len(delta)
+                  mean = float(np.mean(delta))
+                  std = float(np.std(delta, ddof=1))
+                  ci = stats.t.interval(0.95, n - 1, loc=mean, scale=std / np.sqrt(n))
+                  try:
+                      wilcoxon_p = float(stats.wilcoxon(delta).pvalue)
+                  except ValueError:
+                      wilcoxon_p = 1.0
+                  rows.append(
+                      {
+                          "treatment": treatment,
+                          "reference": reference,
+                          "metric": metric,
+                          "n": n,
+                          "mean_gain": mean,
+                          "ci95_low": float(ci[0]),
+                          "ci95_high": float(ci[1]),
+                          "improved_seeds": int(np.sum(delta > 0)),
+                          "paired_t_p": float(stats.ttest_1samp(delta, 0.0).pvalue),
+                          "wilcoxon_p": wilcoxon_p,
+                          "cohen_dz": mean / std if std > 0 else float("nan"),
+                      }
+                  )
+          summary = pd.DataFrame(rows)
+          summary.to_csv(
+              "results/generated/flyvis_type_pair_axis_angle_matched_control_summary.csv",
+              index=False,
+          )
+          print(summary.to_string(index=False))
+          print("\nGeometry:")
+          print(
+              frame[frame["condition"] != "local"]
+              .groupby("condition")[[
+                  "mean_relative_direction_change",
+                  "mean_angle_match_error",
+                  "mean_effective_gain",
+                  "mean_edge_clip_fraction",
+                  "mean_post_weight_norm_error",
+                  "mean_post_bias_vector_error",
+              ]]
+              .mean()
+              .to_string()
+          )
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-type-pair-axis-angle-matched-control-aggregate
+          path: |
+            results/generated/flyvis_type_pair_axis_angle_matched_control.csv
+            results/generated/flyvis_type_pair_axis_angle_matched_control_summary.csv
