@@ -1,10 +1,6 @@
 name: FlyVis type-pair shared-credit oracle alignment
 
 on:
-  push:
-    paths:
-      - "scripts/diagnose_flyvis_type_pair_shared_credit_oracle_alignment.py"
-      - ".github/workflows/flyvis-type-pair-shared-credit-oracle-alignment.yml"
   workflow_dispatch:
 
 jobs:
