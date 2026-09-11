@@ -1,0 +1,131 @@
+name: FlyVis type-pair held-out horizon holdout
+
+on:
+  push:
+    paths:
+      - ".github/triggers/run-type-pair-heldout-horizon-600-619"
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [600, 601, 602, 603, 604, 605, 606, 607, 608, 609, 610, 611, 612, 613, 614, 615, 616, 617, 618, 619]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Measure held-out trajectory for seed ${{ matrix.seed }}
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run python scripts/diagnose_flyvis_type_pair_heldout_horizon.py \
+            --seed ${{ matrix.seed }} \
+            --shuffle-seed $((930000 + ${{ matrix.seed }})) \
+            --out results/generated/flyvis_type_pair_heldout_horizon_seed${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: type-pair-heldout-horizon-seed${{ matrix.seed }}
+          path: results/generated/flyvis_type_pair_heldout_horizon_seed${{ matrix.seed }}.csv
+
+  aggregate:
+    needs: diagnose
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: type-pair-heldout-horizon-seed*
+          path: artifacts
+          merge-multiple: true
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Aggregate held-out horizon results
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run --with scipy python - <<'PY'
+          from pathlib import Path
+          import numpy as np
+          import pandas as pd
+          from scipy import stats
+
+          frame = pd.concat([pd.read_csv(p) for p in sorted(Path("artifacts").glob("*.csv"))], ignore_index=True)
+          if len(frame) != 300:
+              raise RuntimeError(f"expected 300 rows, got {len(frame)}")
+          if not frame["finite"].all():
+              raise RuntimeError("non-finite held-out horizon run detected")
+          frame.to_csv("results/generated/flyvis_type_pair_heldout_horizon.csv", index=False)
+
+          def summary_row(label, horizon, delta):
+              delta = np.asarray(delta, dtype=float)
+              n = len(delta)
+              mean = float(delta.mean())
+              std = float(delta.std(ddof=1))
+              ci = stats.t.interval(0.95, n - 1, loc=mean, scale=std / np.sqrt(n))
+              try:
+                  wp = float(stats.wilcoxon(delta).pvalue)
+              except ValueError:
+                  wp = 1.0
+              return {
+                  "comparison": label,
+                  "horizon": horizon,
+                  "n": n,
+                  "mean_gain": mean,
+                  "ci95_low": float(ci[0]),
+                  "ci95_high": float(ci[1]),
+                  "positive_seeds": int((delta > 0).sum()),
+                  "paired_t_p": float(stats.ttest_1samp(delta, 0.0).pvalue),
+                  "wilcoxon_p": wp,
+                  "cohen_dz": mean / std if std > 0 else float("nan"),
+              }
+
+          rows = []
+          for horizon in sorted(frame.horizon.unique()):
+              part = frame[frame.horizon == horizon]
+              local = part[part.rule == "local"].set_index("seed").sort_index()
+              type_ = part[part.rule == "type"].set_index("seed").loc[local.index]
+              shuffle = part[part.rule == "shuffle"].set_index("seed").loc[local.index]
+              for metric in ("cross_entropy", "margin", "accuracy"):
+                  if metric == "cross_entropy":
+                      type_local = local[metric] - type_[metric]
+                      shuffle_local = local[metric] - shuffle[metric]
+                      type_shuffle = shuffle[metric] - type_[metric]
+                  else:
+                      type_local = type_[metric] - local[metric]
+                      shuffle_local = shuffle[metric] - local[metric]
+                      type_shuffle = type_[metric] - shuffle[metric]
+                  rows.extend(
+                      [
+                          summary_row(f"type_vs_local:{metric}", horizon, type_local),
+                          summary_row(f"shuffle_vs_local:{metric}", horizon, shuffle_local),
+                          summary_row(f"type_vs_shuffle:{metric}", horizon, type_shuffle),
+                      ]
+                  )
+
+          summary = pd.DataFrame(rows)
+          summary.to_csv("results/generated/flyvis_type_pair_heldout_horizon_summary.csv", index=False)
+          geometry = (
+              frame[frame.rule != "local"]
+              .groupby(["rule", "horizon"])[
+                  ["weight_cosine_to_local", "weight_relative_distance_to_local"]
+              ]
+              .mean()
+              .reset_index()
+          )
+          geometry.to_csv("results/generated/flyvis_type_pair_heldout_horizon_geometry.csv", index=False)
+          print(summary.to_string(index=False))
+          print("\nGeometry means:")
+          print(geometry.to_string(index=False))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-type-pair-heldout-horizon-aggregate
+          path: |
+            results/generated/flyvis_type_pair_heldout_horizon.csv
+            results/generated/flyvis_type_pair_heldout_horizon_summary.csv
+            results/generated/flyvis_type_pair_heldout_horizon_geometry.csv
