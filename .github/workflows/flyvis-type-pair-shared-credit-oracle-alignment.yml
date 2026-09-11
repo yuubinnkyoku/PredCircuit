@@ -1,0 +1,129 @@
+name: FlyVis type-pair shared-credit oracle alignment
+
+on:
+  push:
+    paths:
+      - "scripts/diagnose_flyvis_type_pair_shared_credit_oracle_alignment.py"
+      - ".github/workflows/flyvis-type-pair-shared-credit-oracle-alignment.yml"
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [540, 541, 542, 543, 544, 545, 546, 547, 548, 549, 550, 551, 552, 553, 554, 555, 556, 557, 558, 559]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Measure shared-credit CE-oracle alignment
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run python scripts/diagnose_flyvis_type_pair_shared_credit_oracle_alignment.py \
+            --seed ${{ matrix.seed }} \
+            --shuffle-seed $((880000 + ${{ matrix.seed }})) \
+            --out results/generated/flyvis_type_pair_shared_credit_oracle_alignment_seed${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: type-pair-shared-credit-oracle-alignment-seed${{ matrix.seed }}
+          path: results/generated/flyvis_type_pair_shared_credit_oracle_alignment_seed${{ matrix.seed }}.csv
+
+  aggregate:
+    needs: diagnose
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: type-pair-shared-credit-oracle-alignment-seed*
+          path: artifacts
+          merge-multiple: true
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Aggregate shared-credit CE-oracle alignment
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run --with scipy python - <<'PY'
+          from pathlib import Path
+
+          import numpy as np
+          import pandas as pd
+          from scipy import stats
+
+          frame = pd.concat(
+              [pd.read_csv(path) for path in sorted(Path("artifacts").glob("*.csv"))],
+              ignore_index=True,
+          )
+          if len(frame) != 40:
+              raise RuntimeError(f"expected 40 rows, got {len(frame)}")
+          if not frame["finite"].all():
+              raise RuntimeError("non-finite shared-credit oracle-alignment run detected")
+          frame.to_csv(
+              "results/generated/flyvis_type_pair_shared_credit_oracle_alignment.csv",
+              index=False,
+          )
+
+          type_rows = frame[frame.grouping == "type"].set_index("seed")
+          shuffle_rows = frame[frame.grouping == "shuffle"].set_index("seed").loc[type_rows.index]
+
+          def paired_row(label, delta):
+              delta = np.asarray(delta, dtype=float)
+              n = len(delta)
+              mean = float(np.mean(delta))
+              std = float(np.std(delta, ddof=1))
+              ci = stats.t.interval(0.95, n - 1, loc=mean, scale=std / np.sqrt(n))
+              try:
+                  wp = float(stats.wilcoxon(delta).pvalue)
+              except ValueError:
+                  wp = 1.0
+              return {
+                  "comparison": label,
+                  "n": n,
+                  "mean_gain": mean,
+                  "ci95_low": float(ci[0]),
+                  "ci95_high": float(ci[1]),
+                  "improved_seeds": int(np.sum(delta > 0)),
+                  "paired_t_p": float(stats.ttest_1samp(delta, 0.0).pvalue),
+                  "wilcoxon_p": wp,
+                  "cohen_dz": mean / std if std > 0 else float("nan"),
+              }
+
+          metrics = (
+              "coarse_oracle_cosine",
+              "coarse_oracle_projection_coefficient",
+              "residual_oracle_edge_cosine",
+              "mixed_oracle_cosine",
+              "mixed_oracle_projection_coefficient",
+              "mixed_cosine_gain_vs_raw",
+              "coarse_norm_fraction",
+              "residual_norm_fraction",
+              "mixed_relative_change",
+          )
+          rows = [
+              paired_row(
+                  f"type_vs_shuffle:{metric}",
+                  type_rows[metric].to_numpy() - shuffle_rows[metric].to_numpy(),
+              )
+              for metric in metrics
+          ]
+          summary = pd.DataFrame(rows)
+          summary.to_csv(
+              "results/generated/flyvis_type_pair_shared_credit_oracle_alignment_summary.csv",
+              index=False,
+          )
+          print(summary.to_string(index=False))
+          print("\nCondition means:")
+          print(frame.groupby("grouping")[list(metrics)].mean().to_string())
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-type-pair-shared-credit-oracle-alignment-aggregate
+          path: |
+            results/generated/flyvis_type_pair_shared_credit_oracle_alignment.csv
+            results/generated/flyvis_type_pair_shared_credit_oracle_alignment_summary.csv
