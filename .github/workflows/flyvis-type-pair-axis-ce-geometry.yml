@@ -1,0 +1,145 @@
+name: FlyVis type-pair axis CE geometry
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "scripts/diagnose_flyvis_type_pair_axis_ce_geometry.py"
+      - ".github/workflows/flyvis-type-pair-axis-ce-geometry.yml"
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [240, 241, 242, 243, 244, 245, 246, 247, 248, 249]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Measure exact CE gradient geometry on local checkpoints
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run python scripts/diagnose_flyvis_type_pair_axis_ce_geometry.py \
+            --seed ${{ matrix.seed }} \
+            --shuffle-seed $((740000 + ${{ matrix.seed }})) \
+            --out results/generated/flyvis_type_pair_axis_ce_geometry_seed${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: type-pair-axis-ce-geometry-seed${{ matrix.seed }}
+          path: results/generated/flyvis_type_pair_axis_ce_geometry_seed${{ matrix.seed }}.csv
+
+  aggregate:
+    needs: diagnose
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: type-pair-axis-ce-geometry-seed*
+          path: artifacts
+          merge-multiple: true
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Aggregate paired geometry
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run --with scipy python - <<'PY'
+          from pathlib import Path
+
+          import numpy as np
+          import pandas as pd
+          from scipy import stats
+
+          frame = pd.concat(
+              [pd.read_csv(path) for path in sorted(Path("artifacts").glob("*.csv"))],
+              ignore_index=True,
+          )
+          expected = 10 * 3 * 5 * 2
+          if len(frame) != expected:
+              raise RuntimeError(f"expected {expected} rows, got {len(frame)}")
+          numeric = frame.select_dtypes(include=[np.number])
+          if not np.isfinite(numeric.to_numpy()).all():
+              raise RuntimeError("non-finite geometry detected")
+          frame.to_csv("results/generated/flyvis_type_pair_axis_ce_geometry.csv", index=False)
+
+          metrics = (
+              "full_cosine",
+              "full_projection_coefficient",
+              "edge_cosine",
+              "edge_projection_coefficient",
+          )
+          comparisons = (
+              ("type_neg", "shuffle_angle_neg"),
+              ("type_pos", "shuffle_angle_pos"),
+              ("type_neg", "local"),
+              ("type_pos", "local"),
+          )
+          rows = []
+          for checkpoint in (0, 20, 100):
+              for oracle in ("final_ce_oracle", "temporal_ce_oracle"):
+                  subset = frame[
+                      (frame["checkpoint"] == checkpoint)
+                      & (frame["oracle_objective"] == oracle)
+                  ]
+                  wide = subset.pivot(index="seed", columns="condition")
+                  for treatment, reference in comparisons:
+                      for metric in metrics:
+                          delta = (
+                              wide[metric][treatment].to_numpy()
+                              - wide[metric][reference].to_numpy()
+                          )
+                          n = len(delta)
+                          mean = float(np.mean(delta))
+                          std = float(np.std(delta, ddof=1))
+                          ci = stats.t.interval(
+                              0.95,
+                              n - 1,
+                              loc=mean,
+                              scale=std / np.sqrt(n),
+                          )
+                          try:
+                              wilcoxon_p = float(stats.wilcoxon(delta).pvalue)
+                          except ValueError:
+                              wilcoxon_p = 1.0
+                          rows.append(
+                              {
+                                  "checkpoint": checkpoint,
+                                  "oracle_objective": oracle,
+                                  "treatment": treatment,
+                                  "reference": reference,
+                                  "metric": metric,
+                                  "n": n,
+                                  "mean_delta": mean,
+                                  "ci95_low": float(ci[0]),
+                                  "ci95_high": float(ci[1]),
+                                  "positive_seeds": int(np.sum(delta > 0)),
+                                  "paired_t_p": float(stats.ttest_1samp(delta, 0.0).pvalue),
+                                  "wilcoxon_p": wilcoxon_p,
+                                  "cohen_dz": mean / std if std > 0 else float("nan"),
+                              }
+                          )
+          summary = pd.DataFrame(rows)
+          summary.to_csv(
+              "results/generated/flyvis_type_pair_axis_ce_geometry_summary.csv",
+              index=False,
+          )
+          print(
+              summary[
+                  (summary["oracle_objective"] == "final_ce_oracle")
+                  & (summary["metric"].isin(["edge_cosine", "edge_projection_coefficient"]))
+              ].to_string(index=False)
+          )
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-type-pair-axis-ce-geometry-aggregate
+          path: |
+            results/generated/flyvis_type_pair_axis_ce_geometry.csv
+            results/generated/flyvis_type_pair_axis_ce_geometry_summary.csv
