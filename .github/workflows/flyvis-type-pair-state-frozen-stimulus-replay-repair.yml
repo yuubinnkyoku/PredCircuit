@@ -1,0 +1,175 @@
+name: FlyVis state-frozen stimulus replay aggregate repair
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/flyvis-type-pair-state-frozen-stimulus-replay-repair.yml"
+
+jobs:
+  aggregate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: state-frozen-stimulus-replay-seed*
+          path: artifacts
+          merge-multiple: true
+          run-id: 34631510953
+          github-token: ${{ github.token }}
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Aggregate state-frozen stimulus replay
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run --with scipy python - <<'PY'
+          from pathlib import Path
+
+          import numpy as np
+          import pandas as pd
+          from scipy import stats
+
+          frame = pd.concat(
+              [pd.read_csv(path) for path in sorted(Path("artifacts").glob("*.csv"))],
+              ignore_index=True,
+          )
+          if len(frame) != 1080:
+              raise RuntimeError(f"expected 1080 rows, got {len(frame)}")
+          if not frame["finite"].all():
+              raise RuntimeError("non-finite state-frozen replay run detected")
+          numeric = frame.select_dtypes(include=[np.number])
+          if not np.isfinite(numeric.to_numpy()).all():
+              raise RuntimeError("non-finite state-frozen replay metric detected")
+          frame.to_csv(
+              "results/generated/flyvis_type_pair_state_frozen_stimulus_replay_holdout.csv",
+              index=False,
+          )
+
+          treatment = frame[frame["mode"] != "local"].copy()
+          wide = treatment.pivot(index="seed", columns=["horizon", "mode", "condition"])
+
+          def paired_row(label, delta):
+              delta = np.asarray(delta, dtype=float)
+              n = len(delta)
+              mean = float(np.mean(delta))
+              std = float(np.std(delta, ddof=1))
+              if std == 0.0:
+                  ci = (mean, mean)
+                  tp = 1.0 if mean == 0.0 else 0.0
+                  wp = 1.0
+                  dz = float("nan")
+              else:
+                  ci = stats.t.interval(0.95, n - 1, loc=mean, scale=std / np.sqrt(n))
+                  tp = float(stats.ttest_1samp(delta, 0.0).pvalue)
+                  try:
+                      wp = float(stats.wilcoxon(delta).pvalue)
+                  except ValueError:
+                      wp = 1.0
+                  dz = mean / std
+              return {
+                  "comparison": label,
+                  "n": n,
+                  "mean_gain": mean,
+                  "ci95_low": float(ci[0]),
+                  "ci95_high": float(ci[1]),
+                  "improved_seeds": int(np.sum(delta > 0)),
+                  "paired_t_p": tp,
+                  "wilcoxon_p": wp,
+                  "cohen_dz": dz,
+              }
+
+          def values(metric, horizon, mode, condition):
+              return wide[metric][(horizon, mode, condition)].to_numpy()
+
+          interactions = {metric: {} for metric in ("cross_entropy", "margin", "accuracy")}
+          rows = []
+          for horizon in (0, 1, 2, 5, 10, 25):
+              for mode in ("live", "state_frozen_replay"):
+                  ce_type = (
+                      values("cross_entropy", horizon, mode, "type_receives_shuffle")
+                      - values("cross_entropy", horizon, mode, "type_donor")
+                  )
+                  ce_shuffle = (
+                      values("cross_entropy", horizon, mode, "shuffle_donor")
+                      - values("cross_entropy", horizon, mode, "shuffle_receives_type")
+                  )
+                  interactions["cross_entropy"][(horizon, mode)] = ce_type - ce_shuffle
+                  rows.append(
+                      paired_row(
+                          f"state_x_credit_ce:{mode}:horizon{horizon}",
+                          interactions["cross_entropy"][(horizon, mode)],
+                      )
+                  )
+                  for metric in ("margin", "accuracy"):
+                      type_benefit = (
+                          values(metric, horizon, mode, "type_donor")
+                          - values(metric, horizon, mode, "type_receives_shuffle")
+                      )
+                      shuffle_benefit = (
+                          values(metric, horizon, mode, "shuffle_receives_type")
+                          - values(metric, horizon, mode, "shuffle_donor")
+                      )
+                      interactions[metric][(horizon, mode)] = type_benefit - shuffle_benefit
+                      rows.append(
+                          paired_row(
+                              f"state_x_credit_{metric}:{mode}:horizon{horizon}",
+                              interactions[metric][(horizon, mode)],
+                          )
+                      )
+
+              for metric in ("cross_entropy", "margin", "accuracy"):
+                  rows.append(
+                      paired_row(
+                          f"live_minus_state_frozen_{metric}:horizon{horizon}",
+                          interactions[metric][(horizon, "live")]
+                          - interactions[metric][(horizon, "state_frozen_replay")],
+                      )
+                  )
+
+          for metric in ("cross_entropy", "margin", "accuracy"):
+              rows.append(
+                  paired_row(
+                      f"primary_live_minus_state_frozen_{metric}_growth:h25-h1",
+                      (
+                          interactions[metric][(25, "live")]
+                          - interactions[metric][(1, "live")]
+                      )
+                      - (
+                          interactions[metric][(25, "state_frozen_replay")]
+                          - interactions[metric][(1, "state_frozen_replay")]
+                      ),
+                  )
+              )
+
+          summary = pd.DataFrame(rows)
+          summary.to_csv(
+              "results/generated/flyvis_type_pair_state_frozen_stimulus_replay_holdout_summary.csv",
+              index=False,
+          )
+          print(summary.to_string(index=False))
+          print("\nGeometry by horizon/mode/condition:")
+          print(
+              treatment.groupby(["horizon", "mode", "condition"])[
+                  [
+                      "weight_cosine_to_local",
+                      "weight_relative_distance_to_local",
+                      "mean_postburst_source_cosine_to_live",
+                      "mean_postburst_source_relative_distance_to_live",
+                      "mean_burst_angle_match_error",
+                      "mean_post_weight_norm_error",
+                      "mean_post_bias_vector_error",
+                  ]
+              ]
+              .mean()
+              .to_string()
+          )
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-type-pair-state-frozen-stimulus-replay-repaired-aggregate
+          path: |
+            results/generated/flyvis_type_pair_state_frozen_stimulus_replay_holdout.csv
+            results/generated/flyvis_type_pair_state_frozen_stimulus_replay_holdout_summary.csv
