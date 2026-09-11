@@ -1,0 +1,207 @@
+name: FlyVis type-pair state-credit interaction holdout
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/flyvis-type-pair-state-credit-interaction-holdout.yml"
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [400, 401, 402, 403, 404, 405, 406, 407, 408, 409, 410, 411, 412, 413, 414, 415, 416, 417, 418, 419]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Measure state-credit interaction holdout
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run python scripts/diagnose_flyvis_type_pair_axis_postburst_donor_transfer.py \
+            --seed ${{ matrix.seed }} \
+            --shuffle-seed $((870000 + ${{ matrix.seed }})) \
+            --out results/generated/flyvis_type_pair_state_credit_interaction_seed${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: type-pair-state-credit-interaction-seed${{ matrix.seed }}
+          path: results/generated/flyvis_type_pair_state_credit_interaction_seed${{ matrix.seed }}.csv
+
+  aggregate:
+    needs: diagnose
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: type-pair-state-credit-interaction-seed*
+          path: artifacts
+          merge-multiple: true
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Aggregate state-credit interaction holdout
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run --with scipy python - <<'PY'
+          from pathlib import Path
+
+          import numpy as np
+          import pandas as pd
+          from scipy import stats
+
+          frame = pd.concat(
+              [pd.read_csv(path) for path in sorted(Path("artifacts").glob("*.csv"))],
+              ignore_index=True,
+          )
+          if len(frame) != 400:
+              raise RuntimeError(f"expected 400 rows, got {len(frame)}")
+          if not frame["finite"].all():
+              raise RuntimeError("non-finite state-credit interaction run detected")
+          if not np.isfinite(frame.select_dtypes(include=[np.number]).to_numpy()).all():
+              raise RuntimeError("non-finite state-credit interaction metric detected")
+          frame.to_csv(
+              "results/generated/flyvis_type_pair_state_credit_interaction_holdout.csv",
+              index=False,
+          )
+          wide = frame.pivot(index="seed", columns=["epoch", "condition"])
+
+          def paired_row(label, delta):
+              delta = np.asarray(delta, dtype=float)
+              n = len(delta)
+              mean = float(np.mean(delta))
+              std = float(np.std(delta, ddof=1))
+              if std == 0.0:
+                  ci = (mean, mean)
+                  paired_t_p = 1.0 if mean == 0.0 else 0.0
+                  wilcoxon_p = 1.0 if mean == 0.0 else float(stats.wilcoxon(delta).pvalue)
+                  dz = float("nan")
+              else:
+                  ci = stats.t.interval(0.95, n - 1, loc=mean, scale=std / np.sqrt(n))
+                  paired_t_p = float(stats.ttest_1samp(delta, 0.0).pvalue)
+                  try:
+                      wilcoxon_p = float(stats.wilcoxon(delta).pvalue)
+                  except ValueError:
+                      wilcoxon_p = 1.0
+                  dz = mean / std
+              return {
+                  "comparison": label,
+                  "n": n,
+                  "mean_gain": mean,
+                  "ci95_low": float(ci[0]),
+                  "ci95_high": float(ci[1]),
+                  "improved_seeds": int(np.sum(delta > 0)),
+                  "paired_t_p": paired_t_p,
+                  "wilcoxon_p": wilcoxon_p,
+                  "cohen_dz": dz,
+              }
+
+          rows = []
+          for epoch in (80, 90, 100):
+              type_state_type_credit_ce = wide["cross_entropy"][(epoch, "type_donor")].to_numpy()
+              type_state_shuffle_credit_ce = wide["cross_entropy"][(epoch, "type_receives_shuffle")].to_numpy()
+              shuffle_state_type_credit_ce = wide["cross_entropy"][(epoch, "shuffle_receives_type")].to_numpy()
+              shuffle_state_shuffle_credit_ce = wide["cross_entropy"][(epoch, "shuffle_donor")].to_numpy()
+              type_credit_benefit_in_type_state_ce = (
+                  type_state_shuffle_credit_ce - type_state_type_credit_ce
+              )
+              type_credit_benefit_in_shuffle_state_ce = (
+                  shuffle_state_shuffle_credit_ce - shuffle_state_type_credit_ce
+              )
+              ce_interaction = (
+                  type_credit_benefit_in_type_state_ce
+                  - type_credit_benefit_in_shuffle_state_ce
+              )
+              rows.append(
+                  paired_row(
+                      f"primary_state_x_credit_interaction_ce:epoch{epoch}",
+                      ce_interaction,
+                  )
+              )
+              rows.append(
+                  paired_row(
+                      f"type_credit_benefit_in_type_state_ce:epoch{epoch}",
+                      type_credit_benefit_in_type_state_ce,
+                  )
+              )
+              rows.append(
+                  paired_row(
+                      f"type_credit_benefit_in_shuffle_state_ce:epoch{epoch}",
+                      type_credit_benefit_in_shuffle_state_ce,
+                  )
+              )
+
+              for metric in ("margin", "accuracy"):
+                  type_state_type_credit = wide[metric][(epoch, "type_donor")].to_numpy()
+                  type_state_shuffle_credit = wide[metric][
+                      (epoch, "type_receives_shuffle")
+                  ].to_numpy()
+                  shuffle_state_type_credit = wide[metric][
+                      (epoch, "shuffle_receives_type")
+                  ].to_numpy()
+                  shuffle_state_shuffle_credit = wide[metric][(epoch, "shuffle_donor")].to_numpy()
+                  type_credit_benefit_in_type_state = (
+                      type_state_type_credit - type_state_shuffle_credit
+                  )
+                  type_credit_benefit_in_shuffle_state = (
+                      shuffle_state_type_credit - shuffle_state_shuffle_credit
+                  )
+                  interaction = (
+                      type_credit_benefit_in_type_state - type_credit_benefit_in_shuffle_state
+                  )
+                  rows.append(
+                      paired_row(
+                          f"primary_state_x_credit_interaction_{metric}:epoch{epoch}",
+                          interaction,
+                      )
+                  )
+
+          epoch = 100
+          local_ce = wide["cross_entropy"][(epoch, "local")].to_numpy()
+          type_ce = wide["cross_entropy"][(epoch, "type_donor")].to_numpy()
+          rows.append(paired_row("type_donor_vs_local_ce:epoch100", local_ce - type_ce))
+          for metric in ("margin", "accuracy"):
+              rows.append(
+                  paired_row(
+                      f"type_donor_vs_local_{metric}:epoch100",
+                      wide[metric][(epoch, "type_donor")].to_numpy()
+                      - wide[metric][(epoch, "local")].to_numpy(),
+                  )
+              )
+
+          summary = pd.DataFrame(rows)
+          summary.to_csv(
+              "results/generated/flyvis_type_pair_state_credit_interaction_holdout_summary.csv",
+              index=False,
+          )
+          print(summary.to_string(index=False))
+          print("\nEpoch-100 geometry:")
+          print(
+              frame[(frame["epoch"] == 100) & (frame["condition"] != "local")]
+              .groupby("condition")[
+                  [
+                      "weight_cosine_to_local",
+                      "weight_relative_distance_to_local",
+                      "mean_postburst_own_credit_cosine_to_local",
+                      "mean_postburst_own_credit_relative_distance_to_local",
+                      "mean_postburst_applied_credit_cosine_to_local",
+                      "mean_postburst_applied_credit_relative_distance_to_local",
+                      "mean_burst_angle_match_error",
+                  ]
+              ]
+              .mean()
+              .to_string()
+          )
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-type-pair-state-credit-interaction-holdout-aggregate
+          path: |
+            results/generated/flyvis_type_pair_state_credit_interaction_holdout.csv
+            results/generated/flyvis_type_pair_state_credit_interaction_holdout_summary.csv
