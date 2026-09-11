@@ -1,0 +1,203 @@
+name: FlyVis type-pair state-credit one-step holdout
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "scripts/diagnose_flyvis_type_pair_state_credit_one_step.py"
+      - ".github/workflows/flyvis-type-pair-state-credit-one-step.yml"
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [420, 421, 422, 423, 424, 425, 426, 427, 428, 429, 430, 431, 432, 433, 434, 435, 436, 437, 438, 439]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Measure one-step state-credit compatibility
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run python scripts/diagnose_flyvis_type_pair_state_credit_one_step.py \
+            --seed ${{ matrix.seed }} \
+            --shuffle-seed $((890000 + ${{ matrix.seed }})) \
+            --out results/generated/flyvis_type_pair_state_credit_one_step_seed${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: type-pair-state-credit-one-step-seed${{ matrix.seed }}
+          path: results/generated/flyvis_type_pair_state_credit_one_step_seed${{ matrix.seed }}.csv
+
+  aggregate:
+    needs: diagnose
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: type-pair-state-credit-one-step-seed*
+          path: artifacts
+          merge-multiple: true
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Aggregate one-step state-credit compatibility
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run --with scipy python - <<'PY'
+          from pathlib import Path
+
+          import numpy as np
+          import pandas as pd
+          from scipy import stats
+
+          frame = pd.concat(
+              [pd.read_csv(path) for path in sorted(Path("artifacts").glob("*.csv"))],
+              ignore_index=True,
+          )
+          if len(frame) != 640:
+              raise RuntimeError(f"expected 640 rows, got {len(frame)}")
+          if not frame["finite"].all():
+              raise RuntimeError("non-finite one-step state-credit run detected")
+          if not np.isfinite(frame.select_dtypes(include=[np.number]).to_numpy()).all():
+              raise RuntimeError("non-finite one-step state-credit metric detected")
+          frame.to_csv(
+              "results/generated/flyvis_type_pair_state_credit_one_step_holdout.csv",
+              index=False,
+          )
+          wide = frame.pivot(
+              index="seed",
+              columns=["epoch", "mode", "state", "credit_source"],
+          )
+
+          def paired_row(label, delta):
+              delta = np.asarray(delta, dtype=float)
+              n = len(delta)
+              mean = float(np.mean(delta))
+              std = float(np.std(delta, ddof=1))
+              if std == 0.0:
+                  ci = (mean, mean)
+                  paired_t_p = 1.0 if mean == 0.0 else 0.0
+                  wilcoxon_p = 1.0 if mean == 0.0 else float(stats.wilcoxon(delta).pvalue)
+                  dz = float("nan")
+              else:
+                  ci = stats.t.interval(0.95, n - 1, loc=mean, scale=std / np.sqrt(n))
+                  paired_t_p = float(stats.ttest_1samp(delta, 0.0).pvalue)
+                  try:
+                      wilcoxon_p = float(stats.wilcoxon(delta).pvalue)
+                  except ValueError:
+                      wilcoxon_p = 1.0
+                  dz = mean / std
+              return {
+                  "comparison": label,
+                  "n": n,
+                  "mean_gain": mean,
+                  "ci95_low": float(ci[0]),
+                  "ci95_high": float(ci[1]),
+                  "improved_seeds": int(np.sum(delta > 0)),
+                  "paired_t_p": paired_t_p,
+                  "wilcoxon_p": wilcoxon_p,
+                  "cohen_dz": dz,
+              }
+
+          rows = []
+          ce_interactions = {}
+          for epoch in (75, 80, 90, 100):
+              for mode in ("raw", "norm_matched"):
+                  def values(metric, state, credit_source):
+                      return wide[metric][
+                          (epoch, mode, state, credit_source)
+                      ].to_numpy()
+
+                  type_benefit_ce = (
+                      values("cross_entropy_after", "type", "shuffle")
+                      - values("cross_entropy_after", "type", "type")
+                  )
+                  shuffle_benefit_ce = (
+                      values("cross_entropy_after", "shuffle", "shuffle")
+                      - values("cross_entropy_after", "shuffle", "type")
+                  )
+                  interaction_ce = type_benefit_ce - shuffle_benefit_ce
+                  ce_interactions[(epoch, mode)] = interaction_ce
+                  rows.append(
+                      paired_row(
+                          f"primary_one_step_state_x_credit_ce:{mode}:epoch{epoch}",
+                          interaction_ce,
+                      )
+                  )
+                  rows.append(
+                      paired_row(
+                          f"one_step_type_credit_benefit_in_type_state_ce:{mode}:epoch{epoch}",
+                          type_benefit_ce,
+                      )
+                  )
+                  rows.append(
+                      paired_row(
+                          f"one_step_type_credit_benefit_in_shuffle_state_ce:{mode}:epoch{epoch}",
+                          shuffle_benefit_ce,
+                      )
+                  )
+
+                  for metric in ("margin_after", "accuracy_after"):
+                      type_benefit = (
+                          values(metric, "type", "type")
+                          - values(metric, "type", "shuffle")
+                      )
+                      shuffle_benefit = (
+                          values(metric, "shuffle", "type")
+                          - values(metric, "shuffle", "shuffle")
+                      )
+                      rows.append(
+                          paired_row(
+                              f"primary_one_step_state_x_credit_{metric}:{mode}:epoch{epoch}",
+                              type_benefit - shuffle_benefit,
+                          )
+                      )
+
+              rows.append(
+                  paired_row(
+                      f"one_step_ce_interaction_raw_minus_norm_matched:epoch{epoch}",
+                      ce_interactions[(epoch, "raw")]
+                      - ce_interactions[(epoch, "norm_matched")],
+                  )
+              )
+
+          summary = pd.DataFrame(rows)
+          summary.to_csv(
+              "results/generated/flyvis_type_pair_state_credit_one_step_holdout_summary.csv",
+              index=False,
+          )
+          print(summary.to_string(index=False))
+          print("\nProbe geometry by epoch/mode/state/credit:")
+          print(
+              frame.groupby(["epoch", "mode", "state", "credit_source"])[
+                  [
+                      "credit_norm",
+                      "credit_cosine_to_local",
+                      "credit_relative_distance_to_local",
+                      "credit_type_shuffle_cosine",
+                      "edge_clip_fraction",
+                      "weight_step_relative_distance",
+                      "post_weight_norm_error",
+                      "post_bias_vector_error",
+                      "state_weight_cosine_to_local",
+                      "state_weight_relative_distance_to_local",
+                      "mean_burst_angle_match_error",
+                  ]
+              ]
+              .mean()
+              .to_string()
+          )
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-type-pair-state-credit-one-step-holdout-aggregate
+          path: |
+            results/generated/flyvis_type_pair_state_credit_one_step_holdout.csv
+            results/generated/flyvis_type_pair_state_credit_one_step_holdout_summary.csv
