@@ -2,11 +2,6 @@ name: FlyVis type-pair cross-stimulus coherence
 
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-      - "scripts/diagnose_flyvis_type_pair_cross_stimulus_coherence.py"
-      - ".github/workflows/flyvis-type-pair-cross-stimulus-coherence.yml"
 
 jobs:
   diagnose:
