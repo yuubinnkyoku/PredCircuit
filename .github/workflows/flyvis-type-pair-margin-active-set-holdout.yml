@@ -1,0 +1,164 @@
+name: FlyVis type-pair margin active-set holdout
+
+on:
+  push:
+    paths:
+      - ".github/triggers/run-type-pair-margin-active-set-640-659"
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [640, 641, 642, 643, 644, 645, 646, 647, 648, 649, 650, 651, 652, 653, 654, 655, 656, 657, 658, 659]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Track margin active set for seed ${{ matrix.seed }}
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run python scripts/diagnose_flyvis_type_pair_margin_active_set.py \
+            --seed ${{ matrix.seed }} \
+            --shuffle-seed $((950000 + ${{ matrix.seed }})) \
+            --out results/generated/flyvis_type_pair_margin_active_set_seed${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: type-pair-margin-active-set-seed${{ matrix.seed }}
+          path: results/generated/flyvis_type_pair_margin_active_set_seed${{ matrix.seed }}.csv
+
+  aggregate:
+    needs: diagnose
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: type-pair-margin-active-set-seed*
+          path: artifacts
+          merge-multiple: true
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Aggregate margin active-set results
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run --with scipy python - <<'PY'
+          from pathlib import Path
+          import numpy as np
+          import pandas as pd
+          from scipy import stats
+
+          frame = pd.concat(
+              [pd.read_csv(path) for path in sorted(Path("artifacts").glob("*.csv"))],
+              ignore_index=True,
+          )
+          if len(frame) != 1560:
+              raise RuntimeError(f"expected 1560 rows, got {len(frame)}")
+          if not frame["finite"].all():
+              raise RuntimeError("non-finite margin active-set run detected")
+          frame.to_csv(
+              "results/generated/flyvis_type_pair_margin_active_set.csv",
+              index=False,
+          )
+
+          def summary_row(label, horizon, delta):
+              delta = np.asarray(delta, dtype=float)
+              n = len(delta)
+              mean = float(delta.mean())
+              std = float(delta.std(ddof=1))
+              ci = stats.t.interval(0.95, n - 1, loc=mean, scale=std / np.sqrt(n))
+              try:
+                  wp = float(stats.wilcoxon(delta).pvalue)
+              except ValueError:
+                  wp = 1.0
+              return {
+                  "comparison": label,
+                  "horizon": horizon,
+                  "n": n,
+                  "mean_gain": mean,
+                  "ci95_low": float(ci[0]),
+                  "ci95_high": float(ci[1]),
+                  "positive_seeds": int((delta > 0).sum()),
+                  "paired_t_p": float(stats.ttest_1samp(delta, 0.0).pvalue),
+                  "wilcoxon_p": wp,
+                  "cohen_dz": mean / std if std > 0 else float("nan"),
+              }
+
+          metrics = [
+              "cross_entropy",
+              "hard_margin",
+              "soft_margin",
+              "accuracy",
+              "active_gap",
+              "runner_up_switch_from_previous",
+              "runner_up_switch_from_base",
+              "weight_relative_distance_from_base",
+          ]
+          rows = []
+          for horizon in range(26):
+              part = frame[frame.horizon == horizon]
+              local = part[part.rule == "local"].set_index("seed").sort_index()
+              type_ = part[part.rule == "type"].set_index("seed").loc[local.index]
+              shuffle = part[part.rule == "shuffle"].set_index("seed").loc[local.index]
+              for metric in metrics:
+                  if metric == "cross_entropy":
+                      type_local = local[metric] - type_[metric]
+                      type_shuffle = shuffle[metric] - type_[metric]
+                  else:
+                      type_local = type_[metric] - local[metric]
+                      type_shuffle = type_[metric] - shuffle[metric]
+                  rows.extend(
+                      [
+                          summary_row(f"type_vs_local:{metric}", horizon, type_local),
+                          summary_row(f"type_vs_shuffle:{metric}", horizon, type_shuffle),
+                      ]
+                  )
+
+              if horizon > 0:
+                  previous = frame[frame.horizon == horizon - 1]
+                  prev_local = previous[previous.rule == "local"].set_index("seed").loc[
+                      local.index
+                  ]
+                  prev_type = previous[previous.rule == "type"].set_index("seed").loc[
+                      local.index
+                  ]
+                  prev_shuffle = previous[previous.rule == "shuffle"].set_index("seed").loc[
+                      local.index
+                  ]
+                  type_step = type_["hard_margin"] - prev_type["hard_margin"]
+                  local_step = local["hard_margin"] - prev_local["hard_margin"]
+                  shuffle_step = shuffle["hard_margin"] - prev_shuffle["hard_margin"]
+                  rows.extend(
+                      [
+                          summary_row(
+                              "type_vs_local:hard_margin_step_gain",
+                              horizon,
+                              type_step - local_step,
+                          ),
+                          summary_row(
+                              "type_vs_shuffle:hard_margin_step_gain",
+                              horizon,
+                              type_step - shuffle_step,
+                          ),
+                      ]
+                  )
+
+          summary = pd.DataFrame(rows)
+          summary.to_csv(
+              "results/generated/flyvis_type_pair_margin_active_set_summary.csv",
+              index=False,
+          )
+          print(summary.to_string(index=False))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-type-pair-margin-active-set-aggregate
+          path: |
+            results/generated/flyvis_type_pair_margin_active_set.csv
+            results/generated/flyvis_type_pair_margin_active_set_summary.csv
