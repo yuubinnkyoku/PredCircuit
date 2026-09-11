@@ -125,9 +125,7 @@ def run_seed(
                     "margin": metrics["margin"],
                     "accuracy": metrics["accuracy"],
                     "weight_norm": float(torch.linalg.vector_norm(model.weight)),
-                    "weight_cosine_to_local": _cosine(
-                        model.weight.detach(), local_weight
-                    ),
+                    "weight_cosine_to_local": _cosine(model.weight.detach(), local_weight),
                     "weight_relative_distance_to_local": _relative_distance(
                         model.weight.detach(), local_weight
                     ),
