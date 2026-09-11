@@ -1,0 +1,2 @@
+seed_range=560-579
+purpose=independent holdout for finite-step CE and second-order geometry
