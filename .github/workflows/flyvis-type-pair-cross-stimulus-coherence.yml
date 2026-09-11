@@ -1,0 +1,137 @@
+name: FlyVis type-pair cross-stimulus coherence
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "scripts/diagnose_flyvis_type_pair_cross_stimulus_coherence.py"
+      - ".github/workflows/flyvis-type-pair-cross-stimulus-coherence.yml"
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [520, 521, 522, 523, 524, 525, 526, 527, 528, 529, 530, 531, 532, 533, 534, 535, 536, 537, 538, 539]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Measure cross-stimulus coherence
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run python scripts/diagnose_flyvis_type_pair_cross_stimulus_coherence.py \
+            --seed ${{ matrix.seed }} \
+            --shuffle-seed $((860000 + ${{ matrix.seed }})) \
+            --out results/generated/flyvis_type_pair_cross_stimulus_coherence_seed${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: type-pair-cross-stimulus-coherence-seed${{ matrix.seed }}
+          path: results/generated/flyvis_type_pair_cross_stimulus_coherence_seed${{ matrix.seed }}.csv
+
+  aggregate:
+    needs: diagnose
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: type-pair-cross-stimulus-coherence-seed*
+          path: artifacts
+          merge-multiple: true
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Aggregate cross-stimulus coherence
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run --with scipy python - <<'PY'
+          from pathlib import Path
+
+          import numpy as np
+          import pandas as pd
+          from scipy import stats
+
+          frame = pd.concat(
+              [pd.read_csv(path) for path in sorted(Path("artifacts").glob("*.csv"))],
+              ignore_index=True,
+          )
+          if len(frame) != 60:
+              raise RuntimeError(f"expected 60 rows, got {len(frame)}")
+          if not frame["finite"].all():
+              raise RuntimeError("non-finite cross-stimulus coherence run detected")
+          frame.to_csv(
+              "results/generated/flyvis_type_pair_cross_stimulus_coherence.csv",
+              index=False,
+          )
+
+          type_rows = frame[frame.grouping == "type"].set_index("seed")
+          shuffle_rows = frame[frame.grouping == "shuffle"].set_index("seed").loc[type_rows.index]
+
+          def paired_row(label, delta):
+              delta = np.asarray(delta, dtype=float)
+              n = len(delta)
+              mean = float(np.mean(delta))
+              std = float(np.std(delta, ddof=1))
+              ci = stats.t.interval(0.95, n - 1, loc=mean, scale=std / np.sqrt(n))
+              try:
+                  wp = float(stats.wilcoxon(delta).pvalue)
+              except ValueError:
+                  wp = 1.0
+              return {
+                  "comparison": label,
+                  "n": n,
+                  "mean_gain": mean,
+                  "ci95_low": float(ci[0]),
+                  "ci95_high": float(ci[1]),
+                  "improved_seeds": int(np.sum(delta > 0)),
+                  "paired_t_p": float(stats.ttest_1samp(delta, 0.0).pvalue),
+                  "wilcoxon_p": wp,
+                  "cohen_dz": mean / std if std > 0 else float("nan"),
+              }
+
+          rows = []
+          for metric, higher_is_better in (
+              ("mean_pairwise_cosine", True),
+              ("mean_leave_one_out_cosine_to_raw_mean", True),
+              ("mean_relative_distance_to_own_mean", False),
+              ("mean_coarse_norm_fraction", True),
+              ("mean_transformed_relative_change", True),
+          ):
+              delta = type_rows[metric].to_numpy() - shuffle_rows[metric].to_numpy()
+              if not higher_is_better:
+                  delta = -delta
+              rows.append(paired_row(f"type_vs_shuffle:{metric}", delta))
+
+          summary = pd.DataFrame(rows)
+          summary.to_csv(
+              "results/generated/flyvis_type_pair_cross_stimulus_coherence_summary.csv",
+              index=False,
+          )
+          print(summary.to_string(index=False))
+          print("\nCondition means:")
+          print(
+              frame.groupby("grouping")[
+                  [
+                      "mean_pairwise_cosine",
+                      "mean_leave_one_out_cosine_to_raw_mean",
+                      "mean_relative_distance_to_own_mean",
+                      "mean_coarse_norm_fraction",
+                      "mean_transformed_relative_change",
+                  ]
+              ]
+              .mean()
+              .to_string()
+          )
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-type-pair-cross-stimulus-coherence-aggregate
+          path: |
+            results/generated/flyvis_type_pair_cross_stimulus_coherence.csv
+            results/generated/flyvis_type_pair_cross_stimulus_coherence_summary.csv
