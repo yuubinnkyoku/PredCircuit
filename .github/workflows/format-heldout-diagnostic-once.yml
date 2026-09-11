@@ -1,0 +1,21 @@
+name: One-shot format heldout diagnostic
+
+on:
+  push:
+    paths:
+      - ".github/triggers/format-heldout-diagnostic-once"
+  workflow_dispatch:
+
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync --extra malecns
+      - run: uv run ruff format scripts/diagnose_flyvis_type_pair_heldout_horizon.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ruff-formatted-heldout-diagnostic
+          path: scripts/diagnose_flyvis_type_pair_heldout_horizon.py
