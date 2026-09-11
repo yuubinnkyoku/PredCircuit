@@ -1,0 +1,144 @@
+name: FlyVis type-pair axis burst trajectory
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "scripts/diagnose_flyvis_type_pair_axis_burst_trajectory.py"
+      - ".github/workflows/flyvis-type-pair-axis-burst-trajectory.yml"
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [330, 331, 332, 333, 334, 335, 336, 337, 338, 339]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Measure burst trajectory
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run python scripts/diagnose_flyvis_type_pair_axis_burst_trajectory.py \
+            --seed ${{ matrix.seed }} \
+            --shuffle-seed $((830000 + ${{ matrix.seed }})) \
+            --out results/generated/flyvis_type_pair_axis_burst_trajectory_seed${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: type-pair-axis-burst-trajectory-seed${{ matrix.seed }}
+          path: results/generated/flyvis_type_pair_axis_burst_trajectory_seed${{ matrix.seed }}.csv
+
+  aggregate:
+    needs: diagnose
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: type-pair-axis-burst-trajectory-seed*
+          path: artifacts
+          merge-multiple: true
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Aggregate burst trajectory
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run --with scipy python - <<'PY'
+          from pathlib import Path
+
+          import numpy as np
+          import pandas as pd
+          from scipy import stats
+
+          frame = pd.concat(
+              [pd.read_csv(path) for path in sorted(Path("artifacts").glob("*.csv"))],
+              ignore_index=True,
+          )
+          if len(frame) != 390:
+              raise RuntimeError(f"expected 390 rows, got {len(frame)}")
+          if not frame["finite"].all():
+              raise RuntimeError("non-finite burst-trajectory run detected")
+          frame.to_csv(
+              "results/generated/flyvis_type_pair_axis_burst_trajectory.csv",
+              index=False,
+          )
+
+          def paired_row(epoch, metric, delta):
+              n = len(delta)
+              mean = float(np.mean(delta))
+              std = float(np.std(delta, ddof=1))
+              ci = stats.t.interval(0.95, n - 1, loc=mean, scale=std / np.sqrt(n))
+              try:
+                  wilcoxon_p = float(stats.wilcoxon(delta).pvalue)
+              except ValueError:
+                  wilcoxon_p = 1.0
+              return {
+                  "epoch": epoch,
+                  "metric": metric,
+                  "n": n,
+                  "mean_gain": mean,
+                  "ci95_low": float(ci[0]),
+                  "ci95_high": float(ci[1]),
+                  "improved_seeds": int(np.sum(delta > 0)),
+                  "paired_t_p": float(stats.ttest_1samp(delta, 0.0).pvalue),
+                  "wilcoxon_p": wilcoxon_p,
+                  "cohen_dz": mean / std if std > 0 else float("nan"),
+              }
+
+          rows = []
+          for epoch in sorted(frame["epoch"].unique()):
+              checkpoint = frame[frame["epoch"] == epoch].pivot(index="seed", columns="condition")
+              ce_gain = (
+                  checkpoint["cross_entropy"]["shuffle"].to_numpy()
+                  - checkpoint["cross_entropy"]["type"].to_numpy()
+              )
+              margin_gain = (
+                  checkpoint["margin"]["type"].to_numpy()
+                  - checkpoint["margin"]["shuffle"].to_numpy()
+              )
+              accuracy_gain = (
+                  checkpoint["accuracy"]["type"].to_numpy()
+                  - checkpoint["accuracy"]["shuffle"].to_numpy()
+              )
+              rows.append(paired_row(epoch, "ce", ce_gain))
+              rows.append(paired_row(epoch, "margin", margin_gain))
+              rows.append(paired_row(epoch, "accuracy", accuracy_gain))
+
+          summary = pd.DataFrame(rows)
+          summary.to_csv(
+              "results/generated/flyvis_type_pair_axis_burst_trajectory_summary.csv",
+              index=False,
+          )
+          print(summary.to_string(index=False))
+
+          geometry = (
+              frame[frame["condition"] != "local"]
+              .groupby(["epoch", "condition"])[
+                  [
+                      "pulse_count",
+                      "weight_cosine_to_local",
+                      "weight_relative_distance_to_local",
+                      "weight_cosine_type_shuffle",
+                      "mean_pulse_relative_direction_change",
+                      "mean_pulse_angle_match_error",
+                      "mean_shuffle_effective_gain",
+                  ]
+              ]
+              .mean()
+          )
+          print("\nGeometry trajectory:")
+          print(geometry.to_string())
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-type-pair-axis-burst-trajectory-aggregate
+          path: |
+            results/generated/flyvis_type_pair_axis_burst_trajectory.csv
+            results/generated/flyvis_type_pair_axis_burst_trajectory_summary.csv
