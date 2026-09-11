@@ -1,0 +1,186 @@
+name: FlyVis type-pair axis post-burst feedback
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "scripts/diagnose_flyvis_type_pair_axis_postburst_feedback.py"
+      - ".github/workflows/flyvis-type-pair-axis-postburst-feedback.yml"
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [340, 341, 342, 343, 344, 345, 346, 347, 348, 349, 350, 351, 352, 353, 354, 355, 356, 357, 358, 359]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Measure post-burst credit feedback
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run python scripts/diagnose_flyvis_type_pair_axis_postburst_feedback.py \
+            --seed ${{ matrix.seed }} \
+            --shuffle-seed $((840000 + ${{ matrix.seed }})) \
+            --out results/generated/flyvis_type_pair_axis_postburst_feedback_seed${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: type-pair-axis-postburst-feedback-seed${{ matrix.seed }}
+          path: results/generated/flyvis_type_pair_axis_postburst_feedback_seed${{ matrix.seed }}.csv
+
+  aggregate:
+    needs: diagnose
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: type-pair-axis-postburst-feedback-seed*
+          path: artifacts
+          merge-multiple: true
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Aggregate post-burst feedback holdout
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run --with scipy python - <<'PY'
+          from pathlib import Path
+
+          import numpy as np
+          import pandas as pd
+          from scipy import stats
+
+          frame = pd.concat(
+              [pd.read_csv(path) for path in sorted(Path("artifacts").glob("*.csv"))],
+              ignore_index=True,
+          )
+          if len(frame) != 400:
+              raise RuntimeError(f"expected 400 rows, got {len(frame)}")
+          if not frame["finite"].all():
+              raise RuntimeError("non-finite post-burst feedback run detected")
+          numeric = frame[
+              [
+                  "cross_entropy",
+                  "accuracy",
+                  "margin",
+                  "weight_cosine_to_local",
+                  "weight_relative_distance_to_local",
+                  "mean_postburst_own_credit_cosine_to_local",
+                  "mean_postburst_own_credit_relative_distance_to_local",
+                  "mean_burst_angle_match_error",
+              ]
+          ]
+          if not np.isfinite(numeric.to_numpy()).all():
+              raise RuntimeError("non-finite post-burst feedback metric detected")
+          frame.to_csv(
+              "results/generated/flyvis_type_pair_axis_postburst_feedback.csv",
+              index=False,
+          )
+
+          def paired_row(label, delta):
+              n = len(delta)
+              mean = float(np.mean(delta))
+              std = float(np.std(delta, ddof=1))
+              if std == 0.0:
+                  ci = (mean, mean)
+                  t_p = 1.0 if mean == 0.0 else 0.0
+                  w_p = 1.0
+                  dz = float("nan")
+              else:
+                  ci = stats.t.interval(0.95, n - 1, loc=mean, scale=std / np.sqrt(n))
+                  t_p = float(stats.ttest_1samp(delta, 0.0).pvalue)
+                  try:
+                      w_p = float(stats.wilcoxon(delta).pvalue)
+                  except ValueError:
+                      w_p = 1.0
+                  dz = mean / std
+              return {
+                  "comparison": label,
+                  "n": n,
+                  "mean_gain": mean,
+                  "ci95_low": float(ci[0]),
+                  "ci95_high": float(ci[1]),
+                  "improved_seeds": int(np.sum(delta > 0)),
+                  "paired_t_p": t_p,
+                  "wilcoxon_p": w_p,
+                  "cohen_dz": dz,
+              }
+
+          wide = frame.pivot(index="seed", columns=["epoch", "condition"])
+          rows = []
+          axis_ce = {}
+          axis_margin = {}
+          for epoch in (75, 80, 90, 100):
+              for continuation in ("endogenous", "common"):
+                  type_name = f"type_{continuation}"
+                  shuffle_name = f"shuffle_{continuation}"
+                  ce = (
+                      wide["cross_entropy"][(epoch, shuffle_name)].to_numpy()
+                      - wide["cross_entropy"][(epoch, type_name)].to_numpy()
+                  )
+                  margin = (
+                      wide["margin"][(epoch, type_name)].to_numpy()
+                      - wide["margin"][(epoch, shuffle_name)].to_numpy()
+                  )
+                  acc = (
+                      wide["accuracy"][(epoch, type_name)].to_numpy()
+                      - wide["accuracy"][(epoch, shuffle_name)].to_numpy()
+                  )
+                  axis_ce[(epoch, continuation)] = ce
+                  axis_margin[(epoch, continuation)] = margin
+                  rows.append(paired_row(f"axis_ce:{continuation}:epoch{epoch}", ce))
+                  rows.append(paired_row(f"axis_margin:{continuation}:epoch{epoch}", margin))
+                  rows.append(paired_row(f"axis_accuracy:{continuation}:epoch{epoch}", acc))
+
+          for metric_name, values in (("ce", axis_ce), ("margin", axis_margin)):
+              for continuation in ("endogenous", "common"):
+                  amplification = values[(100, continuation)] - values[(75, continuation)]
+                  rows.append(
+                      paired_row(
+                          f"postburst_amplification_{metric_name}:{continuation}",
+                          amplification,
+                      )
+                  )
+              did = (
+                  values[(100, "endogenous")]
+                  - values[(75, "endogenous")]
+                  - values[(100, "common")]
+                  + values[(75, "common")]
+              )
+              rows.append(paired_row(f"feedback_did_{metric_name}:endogenous-common", did))
+
+          summary = pd.DataFrame(rows)
+          summary.to_csv(
+              "results/generated/flyvis_type_pair_axis_postburst_feedback_summary.csv",
+              index=False,
+          )
+          print(summary.to_string(index=False))
+          print("\nPost-burst credit geometry at epoch 100:")
+          print(
+              frame[(frame["epoch"] == 100) & (frame["condition"] != "local")]
+              .groupby("condition")[
+                  [
+                      "weight_cosine_to_local",
+                      "weight_relative_distance_to_local",
+                      "mean_postburst_own_credit_cosine_to_local",
+                      "mean_postburst_own_credit_relative_distance_to_local",
+                      "mean_burst_angle_match_error",
+                  ]
+              ]
+              .mean()
+              .to_string()
+          )
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-type-pair-axis-postburst-feedback-aggregate
+          path: |
+            results/generated/flyvis_type_pair_axis_postburst_feedback.csv
+            results/generated/flyvis_type_pair_axis_postburst_feedback_summary.csv
