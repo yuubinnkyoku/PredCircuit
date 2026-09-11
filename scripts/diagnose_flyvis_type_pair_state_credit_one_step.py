@@ -116,9 +116,7 @@ def run_seed(
                 weight_decay=0.0,
                 max_update=max_update,
             )
-            model.weight.mul_(
-                target_norm / torch.linalg.vector_norm(model.weight).clamp_min(1e-30)
-            )
+            model.weight.mul_(target_norm / torch.linalg.vector_norm(model.weight).clamp_min(1e-30))
             model.bias.copy_(local_model.bias)
 
         completed_epoch = epoch + 1
@@ -184,8 +182,7 @@ def run_seed(
                         max_update=max_update,
                     )
                     probe.weight.mul_(
-                        probe_target_norm
-                        / torch.linalg.vector_norm(probe.weight).clamp_min(1e-30)
+                        probe_target_norm / torch.linalg.vector_norm(probe.weight).clamp_min(1e-30)
                     )
                     probe.bias.copy_(local_probe.bias)
                     after = evaluate(probe, circuit, seed)
@@ -218,10 +215,7 @@ def run_seed(
                                 start_weight,
                             ),
                             "post_weight_norm_error": float(
-                                (
-                                    torch.linalg.vector_norm(probe.weight)
-                                    - probe_target_norm
-                                ).abs()
+                                (torch.linalg.vector_norm(probe.weight) - probe_target_norm).abs()
                                 / probe_target_norm.clamp_min(1e-30)
                             ),
                             "post_bias_vector_error": float(
