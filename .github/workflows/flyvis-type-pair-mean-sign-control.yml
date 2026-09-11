@@ -1,0 +1,154 @@
+name: FlyVis type-pair mean-sign control
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "scripts/run_flyvis_type_pair_mean_sign_control.py"
+      - ".github/workflows/flyvis-type-pair-mean-sign-control.yml"
+
+jobs:
+  train:
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [160, 161, 162, 163, 164, 165, 166, 167, 168, 169, 170, 171, 172, 173, 174, 175, 176, 177, 178, 179]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          enable-cache: false
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Train paired mean-sign control
+        run: >-
+          uv run python scripts/run_flyvis_type_pair_mean_sign_control.py
+          --seed ${{ matrix.seed }}
+          --learning-rate 160
+          --out results/generated/mean_sign_seed${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mean-sign-seed${{ matrix.seed }}
+          path: results/generated/mean_sign_seed${{ matrix.seed }}.csv
+
+  aggregate:
+    needs: train
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: mean-sign-seed*
+          path: artifacts
+          merge-multiple: true
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          enable-cache: false
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Aggregate paired mean-sign control
+        run: |
+          mkdir -p results/generated
+          uv run --with scipy python - <<'PY'
+          from pathlib import Path
+          import math
+          import pandas as pd
+          import scipy.stats as stats
+
+          frame = pd.concat(
+              [pd.read_csv(path) for path in sorted(Path("artifacts").glob("*.csv"))],
+              ignore_index=True,
+          )
+          if len(frame) != 60:
+              raise RuntimeError(f"expected 60 rows, got {len(frame)}")
+          if not bool(frame["finite"].all()):
+              raise RuntimeError("non-finite mean-sign result")
+
+          indexed = {
+              rule: frame[frame.rule == rule].set_index("seed").sort_index()
+              for rule in ("local", "positive_shared", "negative_shared")
+          }
+          if not indexed["local"].index.equals(indexed["positive_shared"].index):
+              raise RuntimeError("positive paired seed mismatch")
+          if not indexed["local"].index.equals(indexed["negative_shared"].index):
+              raise RuntimeError("negative paired seed mismatch")
+
+          rows = []
+          comparisons = (
+              ("positive_vs_local", "positive_shared", "local"),
+              ("negative_vs_local", "negative_shared", "local"),
+              ("positive_vs_negative", "positive_shared", "negative_shared"),
+          )
+          for comparison, treatment_name, reference_name in comparisons:
+              treatment = indexed[treatment_name]
+              reference = indexed[reference_name]
+              for metric, higher_is_better in (
+                  ("cross_entropy_after", False),
+                  ("accuracy_after", True),
+                  ("margin_after", True),
+              ):
+                  raw = treatment[metric] - reference[metric]
+                  delta = raw if higher_is_better else -raw
+                  n = len(delta)
+                  mean = float(delta.mean())
+                  sd = float(delta.std(ddof=1))
+                  se = sd / math.sqrt(n)
+                  tcrit = float(stats.t.ppf(0.975, n - 1))
+                  try:
+                      wilcoxon_p = float(stats.wilcoxon(delta).pvalue)
+                  except ValueError:
+                      wilcoxon_p = float("nan")
+                  rows.append({
+                      "comparison": comparison,
+                      "metric": metric,
+                      "n": n,
+                      "mean_gain": mean,
+                      "median_gain": float(delta.median()),
+                      "ci95_low": mean - tcrit * se,
+                      "ci95_high": mean + tcrit * se,
+                      "improved_seeds": int((delta > 0).sum()),
+                      "paired_t_p": float(stats.ttest_rel(treatment[metric], reference[metric]).pvalue),
+                      "wilcoxon_p": wilcoxon_p,
+                      "cohen_dz": mean / sd if sd > 0 else float("nan"),
+                  })
+
+          summary = pd.DataFrame(rows)
+          max_weight_error = max(
+              float((indexed[name].weight_norm - indexed["local"].weight_norm).abs().max())
+              for name in ("positive_shared", "negative_shared")
+          )
+          max_bias_error = max(
+              float((indexed[name].bias_norm - indexed["local"].bias_norm).abs().max())
+              for name in ("positive_shared", "negative_shared")
+          )
+          if max_weight_error > 2e-5:
+              raise RuntimeError(f"weight norm mismatch too large: {max_weight_error}")
+          if max_bias_error > 2e-6:
+              raise RuntimeError(f"bias norm mismatch too large: {max_bias_error}")
+
+          frame.to_csv("results/generated/flyvis_type_pair_mean_sign_control.csv", index=False)
+          summary.to_csv("results/generated/flyvis_type_pair_mean_sign_control_summary.csv", index=False)
+          print(summary.to_string(index=False))
+          print("\nRule means:")
+          print(frame.groupby("rule")[[
+              "cross_entropy_after",
+              "accuracy_after",
+              "margin_after",
+              "weight_norm",
+              "bias_norm",
+              "mean_relative_direction_change",
+              "mean_post_weight_norm_error",
+              "mean_post_bias_vector_error",
+              "mean_edge_clip_fraction",
+          ]].mean().to_string())
+          print("\nMax final paired weight norm error:", max_weight_error)
+          print("Max final paired bias norm error:", max_bias_error)
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-type-pair-mean-sign-control-aggregate
+          path: |
+            results/generated/flyvis_type_pair_mean_sign_control.csv
+            results/generated/flyvis_type_pair_mean_sign_control_summary.csv
