@@ -1,11 +1,6 @@
 name: FlyVis type-pair axis post-burst donor transfer
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - "scripts/diagnose_flyvis_type_pair_axis_postburst_donor_transfer.py"
-      - ".github/workflows/flyvis-type-pair-axis-postburst-donor-transfer.yml"
   workflow_dispatch:
 
 jobs:
