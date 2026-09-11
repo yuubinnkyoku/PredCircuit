@@ -1,0 +1,129 @@
+name: FlyVis type-pair gain-curve control
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "scripts/run_flyvis_type_pair_gain_curve_control.py"
+      - ".github/workflows/flyvis-type-pair-gain-curve-control.yml"
+
+jobs:
+  train:
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [180, 181, 182, 183, 184, 185, 186, 187, 188, 189]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          enable-cache: true
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Train strict gain curve
+        run: >-
+          uv run python scripts/run_flyvis_type_pair_gain_curve_control.py
+          --seed ${{ matrix.seed }}
+          --coarse-gains -4 -2 0 2 4 6
+          --learning-rate 160
+          --max-update 0.05
+          --out results/generated/type_pair_gain_curve_seed${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gain-curve-seed${{ matrix.seed }}
+          path: results/generated/type_pair_gain_curve_seed${{ matrix.seed }}.csv
+
+  aggregate:
+    needs: train
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: gain-curve-seed*
+          path: artifacts
+          merge-multiple: true
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Aggregate strict gain curve
+        run: |
+          mkdir -p results/generated
+          uv run python - <<'PY'
+          from pathlib import Path
+
+          import numpy as np
+          import pandas as pd
+          from scipy import stats
+
+          frame = pd.concat(
+              [pd.read_csv(path) for path in sorted(Path("artifacts").glob("*.csv"))],
+              ignore_index=True,
+          )
+          if len(frame) != 70:
+              raise RuntimeError(f"expected 70 rows, got {len(frame)}")
+          if not frame["finite"].all():
+              raise RuntimeError("non-finite run detected")
+          frame.to_csv("results/generated/flyvis_type_pair_gain_curve_control.csv", index=False)
+
+          local = frame[frame["rule"] == "local"].set_index("seed")
+          rows = []
+          for gain, group in frame[frame["rule"] == "shared"].groupby("coarse_gain"):
+              shared = group.set_index("seed").loc[local.index]
+              for metric in ("cross_entropy_after", "accuracy_after", "margin_after"):
+                  delta = (
+                      local[metric].to_numpy() - shared[metric].to_numpy()
+                      if metric == "cross_entropy_after"
+                      else shared[metric].to_numpy() - local[metric].to_numpy()
+                  )
+                  n = len(delta)
+                  mean = float(np.mean(delta))
+                  std = float(np.std(delta, ddof=1))
+                  sem = std / np.sqrt(n)
+                  ci = stats.t.interval(0.95, n - 1, loc=mean, scale=sem)
+                  t_p = float(stats.ttest_1samp(delta, 0.0).pvalue)
+                  try:
+                      w_p = float(stats.wilcoxon(delta).pvalue)
+                  except ValueError:
+                      w_p = 1.0
+                  rows.append(
+                      {
+                          "coarse_gain": gain,
+                          "metric": metric,
+                          "n": n,
+                          "mean_gain": mean,
+                          "median_gain": float(np.median(delta)),
+                          "ci95_low": float(ci[0]),
+                          "ci95_high": float(ci[1]),
+                          "improved_seeds": int(np.sum(delta > 0)),
+                          "paired_t_p": t_p,
+                          "wilcoxon_p": w_p,
+                          "cohen_dz": mean / std if std > 0 else float("nan"),
+                      }
+                  )
+          summary = pd.DataFrame(rows)
+          summary.to_csv(
+              "results/generated/flyvis_type_pair_gain_curve_control_summary.csv", index=False
+          )
+          print(summary.to_string(index=False))
+          print("\nGeometry by gain:")
+          print(
+              frame[frame["rule"] == "shared"]
+              .groupby("coarse_gain")[[
+                  "mean_relative_direction_change",
+                  "mean_edge_clip_fraction",
+                  "mean_post_weight_norm_error",
+                  "mean_post_bias_vector_error",
+              ]]
+              .mean()
+              .to_string()
+          )
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-type-pair-gain-curve-control-aggregate
+          path: |
+            results/generated/flyvis_type_pair_gain_curve_control.csv
+            results/generated/flyvis_type_pair_gain_curve_control_summary.csv
