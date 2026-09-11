@@ -91,9 +91,7 @@ def run_seed(
             direction = match_norm(mixed, edge)
             treatment_edges[name] = direction
             edge_norm = torch.linalg.vector_norm(edge).clamp_min(1e-30)
-            direction_change[name] += float(
-                torch.linalg.vector_norm(direction - edge) / edge_norm
-            )
+            direction_change[name] += float(torch.linalg.vector_norm(direction - edge) / edge_norm)
             clip_fraction[name] += float(
                 (learning_rate * direction).abs().gt(max_update).float().mean()
             )
@@ -149,12 +147,8 @@ def run_seed(
                 "mean_relative_direction_change": 0.0
                 if is_local
                 else direction_change[name] / 100.0,
-                "mean_post_weight_norm_error": 0.0
-                if is_local
-                else post_weight_error[name] / 100.0,
-                "mean_post_bias_vector_error": 0.0
-                if is_local
-                else post_bias_error[name] / 100.0,
+                "mean_post_weight_norm_error": 0.0 if is_local else post_weight_error[name] / 100.0,
+                "mean_post_bias_vector_error": 0.0 if is_local else post_bias_error[name] / 100.0,
                 "mean_edge_clip_fraction": float("nan")
                 if is_local
                 else clip_fraction[name] / 100.0,
