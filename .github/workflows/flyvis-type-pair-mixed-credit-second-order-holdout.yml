@@ -1,0 +1,200 @@
+name: FlyVis type-pair mixed-credit second-order holdout
+
+on:
+  push:
+    paths:
+      - ".github/triggers/run-mixed-credit-second-order-560-579"
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [560, 561, 562, 563, 564, 565, 566, 567, 568, 569, 570, 571, 572, 573, 574, 575, 576, 577, 578, 579]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Measure finite-step CE and second-order geometry
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run python scripts/diagnose_flyvis_type_pair_mixed_credit_second_order.py \
+            --seed ${{ matrix.seed }} \
+            --shuffle-seed $((900000 + ${{ matrix.seed }})) \
+            --out results/generated/flyvis_type_pair_mixed_credit_second_order_seed${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: type-pair-mixed-credit-second-order-seed${{ matrix.seed }}
+          path: results/generated/flyvis_type_pair_mixed_credit_second_order_seed${{ matrix.seed }}.csv
+
+  aggregate:
+    needs: diagnose
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: type-pair-mixed-credit-second-order-seed*
+          path: artifacts
+          merge-multiple: true
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Aggregate second-order holdout
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run --with scipy python - <<'PY'
+          from pathlib import Path
+
+          import numpy as np
+          import pandas as pd
+          from scipy import stats
+
+          frame = pd.concat(
+              [pd.read_csv(path) for path in sorted(Path("artifacts").glob("*.csv"))],
+              ignore_index=True,
+          )
+          if len(frame) != 40:
+              raise RuntimeError(f"expected 40 rows, got {len(frame)}")
+          if not frame["finite"].all():
+              raise RuntimeError("non-finite mixed-credit second-order run detected")
+          frame.to_csv(
+              "results/generated/flyvis_type_pair_mixed_credit_second_order.csv",
+              index=False,
+          )
+
+          type_rows = frame[frame.grouping == "type"].set_index("seed").sort_index()
+          shuffle_rows = frame[frame.grouping == "shuffle"].set_index("seed").loc[type_rows.index]
+
+          def paired_row(label, delta, positive_means):
+              delta = np.asarray(delta, dtype=float)
+              n = len(delta)
+              mean = float(np.mean(delta))
+              std = float(np.std(delta, ddof=1))
+              ci = stats.t.interval(0.95, n - 1, loc=mean, scale=std / np.sqrt(n))
+              try:
+                  wp = float(stats.wilcoxon(delta).pvalue)
+              except ValueError:
+                  wp = 1.0
+              return {
+                  "comparison": label,
+                  "positive_means": positive_means,
+                  "n": n,
+                  "mean_gain": mean,
+                  "ci95_low": float(ci[0]),
+                  "ci95_high": float(ci[1]),
+                  "positive_seeds": int(np.sum(delta > 0)),
+                  "paired_t_p": float(stats.ttest_1samp(delta, 0.0).pvalue),
+                  "wilcoxon_p": wp,
+                  "cohen_dz": mean / std if std > 0 else float("nan"),
+              }
+
+          rows = []
+          lower_better = (
+              "actual_ce_delta",
+              "applied_first_order_delta",
+              "applied_second_order_term",
+              "applied_second_order_prediction",
+          )
+          for metric in lower_better:
+              rows.append(
+                  paired_row(
+                      f"type_advantage:{metric}",
+                      shuffle_rows[metric].to_numpy() - type_rows[metric].to_numpy(),
+                      "type has lower CE/change term",
+                  )
+              )
+
+          for metric in (
+              "direction_first_derivative",
+              "direction_curvature",
+              "applied_step_norm",
+              "edge_clip_fraction",
+          ):
+              rows.append(
+                  paired_row(
+                      f"type_minus_shuffle:{metric}",
+                      type_rows[metric].to_numpy() - shuffle_rows[metric].to_numpy(),
+                      "type value is larger",
+                  )
+              )
+
+          type_residual = (
+              type_rows["actual_ce_delta"].to_numpy()
+              - type_rows["applied_second_order_prediction"].to_numpy()
+          )
+          shuffle_residual = (
+              shuffle_rows["actual_ce_delta"].to_numpy()
+              - shuffle_rows["applied_second_order_prediction"].to_numpy()
+          )
+          rows.append(
+              paired_row(
+                  "type_minus_shuffle:taylor_residual",
+                  type_residual - shuffle_residual,
+                  "type has larger actual-minus-second-order residual",
+              )
+          )
+
+          actual_adv = (
+              shuffle_rows["actual_ce_delta"].to_numpy()
+              - type_rows["actual_ce_delta"].to_numpy()
+          )
+          first_adv = (
+              shuffle_rows["applied_first_order_delta"].to_numpy()
+              - type_rows["applied_first_order_delta"].to_numpy()
+          )
+          second_adv = (
+              shuffle_rows["applied_second_order_term"].to_numpy()
+              - type_rows["applied_second_order_term"].to_numpy()
+          )
+          predicted_adv = (
+              shuffle_rows["applied_second_order_prediction"].to_numpy()
+              - type_rows["applied_second_order_prediction"].to_numpy()
+          )
+          rows.extend(
+              [
+                  paired_row(
+                      "curvature_rescue_vs_first_order",
+                      predicted_adv - first_adv,
+                      "second-order curvature increases type advantage",
+                  ),
+                  paired_row(
+                      "second_order_prediction_error_on_advantage",
+                      actual_adv - predicted_adv,
+                      "actual type advantage exceeds second-order prediction",
+                  ),
+              ]
+          )
+
+          summary = pd.DataFrame(rows)
+          summary.to_csv(
+              "results/generated/flyvis_type_pair_mixed_credit_second_order_summary.csv",
+              index=False,
+          )
+          print(summary.to_string(index=False))
+          print("\nCondition means:")
+          metrics = [
+              "baseline_ce",
+              "post_update_ce",
+              "actual_ce_delta",
+              "direction_first_derivative",
+              "direction_curvature",
+              "applied_first_order_delta",
+              "applied_second_order_term",
+              "applied_second_order_prediction",
+              "applied_step_norm",
+              "edge_clip_fraction",
+          ]
+          print(frame.groupby("grouping")[metrics].mean().to_string())
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-type-pair-mixed-credit-second-order-aggregate
+          path: |
+            results/generated/flyvis_type_pair_mixed_credit_second_order.csv
+            results/generated/flyvis_type_pair_mixed_credit_second_order_summary.csv
