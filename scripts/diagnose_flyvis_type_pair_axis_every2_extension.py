@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
+from typing import Any, cast
 
 import pandas as pd
 import diagnose_flyvis_type_pair_axis_pulse_frequency as pulse_frequency
@@ -20,7 +21,7 @@ def main() -> None:
     parser.add_argument("--out", type=Path, required=True)
     args = parser.parse_args()
 
-    setattr(pulse_frequency, "PULSE_INTERVALS", (2,))
+    cast(Any, pulse_frequency).PULSE_INTERVALS = (2,)
     frame = pd.DataFrame(
         pulse_frequency.run_seed(
             seed=args.seed,
