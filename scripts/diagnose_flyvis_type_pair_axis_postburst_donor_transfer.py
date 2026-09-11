@@ -182,9 +182,7 @@ def run_seed(
                         name
                     ]
                     / denom,
-                    "mean_postburst_applied_credit_cosine_to_local": applied_credit_cosine_sum[
-                        name
-                    ]
+                    "mean_postburst_applied_credit_cosine_to_local": applied_credit_cosine_sum[name]
                     / denom,
                     "mean_postburst_applied_credit_relative_distance_to_local": applied_credit_distance_sum[
                         name
