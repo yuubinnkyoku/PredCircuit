@@ -1,0 +1,137 @@
+name: FlyVis type-pair held-out margin oracle holdout
+
+on:
+  push:
+    paths:
+      - ".github/triggers/run-type-pair-heldout-margin-oracle-620-639"
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [620, 621, 622, 623, 624, 625, 626, 627, 628, 629, 630, 631, 632, 633, 634, 635, 636, 637, 638, 639]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Measure held-out margin oracle geometry for seed ${{ matrix.seed }}
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run python scripts/diagnose_flyvis_type_pair_heldout_margin_oracle.py \
+            --seed ${{ matrix.seed }} \
+            --shuffle-seed $((940000 + ${{ matrix.seed }})) \
+            --out results/generated/flyvis_type_pair_heldout_margin_oracle_seed${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: type-pair-heldout-margin-oracle-seed${{ matrix.seed }}
+          path: results/generated/flyvis_type_pair_heldout_margin_oracle_seed${{ matrix.seed }}.csv
+
+  aggregate:
+    needs: diagnose
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: type-pair-heldout-margin-oracle-seed*
+          path: artifacts
+          merge-multiple: true
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Aggregate held-out margin oracle results
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run --with scipy python - <<'PY'
+          from pathlib import Path
+          import numpy as np
+          import pandas as pd
+          from scipy import stats
+
+          frame = pd.concat(
+              [pd.read_csv(path) for path in sorted(Path("artifacts").glob("*.csv"))],
+              ignore_index=True,
+          )
+          if len(frame) != 300:
+              raise RuntimeError(f"expected 300 rows, got {len(frame)}")
+          if not frame["finite"].all():
+              raise RuntimeError("non-finite held-out margin oracle run detected")
+          frame.to_csv(
+              "results/generated/flyvis_type_pair_heldout_margin_oracle.csv",
+              index=False,
+          )
+
+          metrics = [
+              "margin_oracle_cosine",
+              "margin_oracle_projection_coefficient",
+              "ce_oracle_cosine",
+              "ce_oracle_projection_coefficient",
+          ]
+          seed_means = (
+              frame.groupby(["seed", "rule"], as_index=False)[metrics]
+              .mean()
+              .sort_values(["seed", "rule"])
+          )
+          seed_means.to_csv(
+              "results/generated/flyvis_type_pair_heldout_margin_oracle_seed_means.csv",
+              index=False,
+          )
+
+          def summary_row(label, delta):
+              delta = np.asarray(delta, dtype=float)
+              n = len(delta)
+              mean = float(delta.mean())
+              std = float(delta.std(ddof=1))
+              ci = stats.t.interval(0.95, n - 1, loc=mean, scale=std / np.sqrt(n))
+              try:
+                  wp = float(stats.wilcoxon(delta).pvalue)
+              except ValueError:
+                  wp = 1.0
+              return {
+                  "comparison": label,
+                  "n": n,
+                  "mean_gain": mean,
+                  "ci95_low": float(ci[0]),
+                  "ci95_high": float(ci[1]),
+                  "positive_seeds": int((delta > 0).sum()),
+                  "paired_t_p": float(stats.ttest_1samp(delta, 0.0).pvalue),
+                  "wilcoxon_p": wp,
+                  "cohen_dz": mean / std if std > 0 else float("nan"),
+              }
+
+          local = seed_means[seed_means.rule == "local"].set_index("seed").sort_index()
+          type_ = seed_means[seed_means.rule == "type"].set_index("seed").loc[local.index]
+          shuffle = seed_means[seed_means.rule == "shuffle"].set_index("seed").loc[local.index]
+          rows = []
+          for metric in metrics:
+              rows.extend(
+                  [
+                      summary_row(f"type_vs_local:{metric}", type_[metric] - local[metric]),
+                      summary_row(
+                          f"shuffle_vs_local:{metric}", shuffle[metric] - local[metric]
+                      ),
+                      summary_row(
+                          f"type_vs_shuffle:{metric}", type_[metric] - shuffle[metric]
+                      ),
+                  ]
+              )
+          summary = pd.DataFrame(rows)
+          summary.to_csv(
+              "results/generated/flyvis_type_pair_heldout_margin_oracle_summary.csv",
+              index=False,
+          )
+          print(summary.to_string(index=False))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-type-pair-heldout-margin-oracle-aggregate
+          path: |
+            results/generated/flyvis_type_pair_heldout_margin_oracle.csv
+            results/generated/flyvis_type_pair_heldout_margin_oracle_seed_means.csv
+            results/generated/flyvis_type_pair_heldout_margin_oracle_summary.csv
