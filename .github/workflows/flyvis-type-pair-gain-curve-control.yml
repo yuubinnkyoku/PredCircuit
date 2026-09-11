@@ -51,7 +51,7 @@ jobs:
       - name: Aggregate strict gain curve
         run: |
           mkdir -p results/generated
-          uv run python - <<'PY'
+          uv run --with scipy python - <<'PY'
           from pathlib import Path
 
           import numpy as np
