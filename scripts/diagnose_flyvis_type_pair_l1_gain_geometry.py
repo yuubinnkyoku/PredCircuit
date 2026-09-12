@@ -77,9 +77,9 @@ def _heldout_objectives(circuit, weight: torch.Tensor, bias: torch.Tensor):
 
 
 def _cosine(left: torch.Tensor, right: torch.Tensor) -> float:
-    denominator = (
-        torch.linalg.vector_norm(left) * torch.linalg.vector_norm(right)
-    ).clamp_min(1e-30)
+    denominator = (torch.linalg.vector_norm(left) * torch.linalg.vector_norm(right)).clamp_min(
+        1e-30
+    )
     return float(torch.dot(left, right) / denominator)
 
 
@@ -166,19 +166,27 @@ def run_seed(*, seed: int, learning_rate: float, max_update: float) -> pd.DataFr
                 "l1_raw_norm": float(raw_norm),
                 "l1_mean_norm": float(mean_norm),
                 "l1_residual_norm": float(residual_norm),
-                "l1_mean_energy_fraction": float(mean_norm.square() / raw_norm.square().clamp_min(1e-30)),
+                "l1_mean_energy_fraction": float(
+                    mean_norm.square() / raw_norm.square().clamp_min(1e-30)
+                ),
                 "l1_mean_to_residual_norm": float(mean_norm / residual_norm.clamp_min(1e-30)),
                 "gain1_gain3_direction_cosine": _cosine(direction_gain1, direction_gain3),
                 "gain3_extra_update_norm": float(extra_norm),
-                "gain3_extra_update_relative_norm": float(extra_norm / torch.linalg.vector_norm(update_gain1).clamp_min(1e-30)),
+                "gain3_extra_update_relative_norm": float(
+                    extra_norm / torch.linalg.vector_norm(update_gain1).clamp_min(1e-30)
+                ),
                 "gain1_l1_clip_fraction": float(gain1_clip.float().mean()),
                 "gain3_l1_clip_fraction": float(gain3_clip.float().mean()),
                 "heldout_ce": float(ce.detach()),
                 "heldout_hard_margin": float(hard_margin.detach()),
                 "heldout_soft_margin": float(soft_margin.detach()),
                 "ce_grad_dot_gain3_extra_update": float(torch.dot(grad_ce, extra_update)),
-                "hard_margin_grad_dot_gain3_extra_update": float(torch.dot(grad_hard, extra_update)),
-                "soft_margin_grad_dot_gain3_extra_update": float(torch.dot(grad_soft, extra_update)),
+                "hard_margin_grad_dot_gain3_extra_update": float(
+                    torch.dot(grad_hard, extra_update)
+                ),
+                "soft_margin_grad_dot_gain3_extra_update": float(
+                    torch.dot(grad_soft, extra_update)
+                ),
                 "ce_grad_cos_l1_mean": _cosine(grad_ce, mean_component),
                 "hard_margin_grad_cos_l1_mean": _cosine(grad_hard, mean_component),
                 "soft_margin_grad_cos_l1_mean": _cosine(grad_soft, mean_component),
