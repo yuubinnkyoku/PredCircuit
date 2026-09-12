@@ -132,9 +132,7 @@ def run_seed(
                     weight_decay=0.0,
                     max_update=max_update,
                 )
-                weight_error, bias_error = _match_local_state(
-                    models[rule], models["local"]
-                )
+                weight_error, bias_error = _match_local_state(models[rule], models["local"])
                 weight_error_sum[rule] += weight_error
                 bias_error_sum[rule] += bias_error
 
@@ -163,9 +161,7 @@ def run_seed(
                             "eval_rep": eval_rep,
                             "rule": rule,
                             "mean_relative_direction_change": (
-                                0.0
-                                if rule == "local"
-                                else direction_change_sum[rule] / step
+                                0.0 if rule == "local" else direction_change_sum[rule] / step
                             ),
                             "mean_clip_fraction": clip_sum[rule] / step,
                             "mean_weight_norm_error": (
