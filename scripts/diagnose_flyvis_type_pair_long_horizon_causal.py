@@ -7,11 +7,11 @@ from pathlib import Path
 
 import pandas as pd
 import torch
+from diagnose_flyvis_type_pair_horizon_causal import _match_local_state, _mixed_direction
 from diagnose_flyvis_type_pair_multi_eval_holdout import heldout_metrics
 from run_flyvis_temporal_coherence_gate import apply_local_credit
 from run_flyvis_type_pair_axis_identity_control import credit
 from run_flyvis_type_pair_consensus import type_pair_indices
-from run_flyvis_type_pair_horizon_causal import _match_local_state, _mixed_direction
 from run_flyvis_type_pair_shuffle_control import shuffled_groups_like
 
 from predcircuit.flyvis import load_flyvis_spec
