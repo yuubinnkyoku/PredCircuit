@@ -22,7 +22,9 @@ HORIZONS = (60, 80, 100)
 INIT_MODES = ("random", "biological_strength")
 
 
-def _clipped_update(direction: torch.Tensor, *, learning_rate: float, max_update: float) -> torch.Tensor:
+def _clipped_update(
+    direction: torch.Tensor, *, learning_rate: float, max_update: float
+) -> torch.Tensor:
     update = learning_rate * direction
     if max_update > 0.0:
         update = update.clamp(-max_update, max_update)
