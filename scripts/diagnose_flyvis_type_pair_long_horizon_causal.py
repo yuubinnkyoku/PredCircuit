@@ -58,9 +58,7 @@ def run_seed(
     for step in range(1, max(HORIZONS) + 1):
         epoch = step - 1
         local_edge, local_bias = credit(models["local"], circuit, seed=seed, epoch=epoch)
-        clip_sum["local"] += float(
-            (learning_rate * local_edge).abs().gt(max_update).float().mean()
-        )
+        clip_sum["local"] += float((learning_rate * local_edge).abs().gt(max_update).float().mean())
         apply_local_credit(
             models["local"],
             local_edge,
@@ -80,9 +78,7 @@ def run_seed(
             direction_change_sum[rule] += float(
                 torch.linalg.vector_norm(direction - raw_edge) / raw_norm
             )
-            clip_sum[rule] += float(
-                (learning_rate * direction).abs().gt(max_update).float().mean()
-            )
+            clip_sum[rule] += float((learning_rate * direction).abs().gt(max_update).float().mean())
             apply_local_credit(
                 models[rule],
                 direction,
