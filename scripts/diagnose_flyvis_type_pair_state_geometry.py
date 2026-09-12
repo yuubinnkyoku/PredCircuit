@@ -38,9 +38,9 @@ def _projection_fraction(vector: torch.Tensor, groups: list[torch.Tensor]) -> fl
 
 
 def _cosine(left: torch.Tensor, right: torch.Tensor) -> float:
-    denominator = (
-        torch.linalg.vector_norm(left) * torch.linalg.vector_norm(right)
-    ).clamp_min(1e-30)
+    denominator = (torch.linalg.vector_norm(left) * torch.linalg.vector_norm(right)).clamp_min(
+        1e-30
+    )
     return float(torch.dot(left, right) / denominator)
 
 
@@ -102,9 +102,7 @@ def run_seed(
                 "weight_biological_projection_fraction": _projection_fraction(
                     weight, biological_groups
                 ),
-                "weight_shuffle_projection_fraction": _projection_fraction(
-                    weight, shuffled_groups
-                ),
+                "weight_shuffle_projection_fraction": _projection_fraction(weight, shuffled_groups),
                 "weight_cosine_to_local": (
                     1.0 if rule == "local" else _cosine(weight, local_weight)
                 ),
@@ -115,9 +113,7 @@ def run_seed(
                     else _projection_fraction(displacement, biological_groups)
                 ),
                 "displacement_shuffle_projection_fraction": (
-                    0.0
-                    if rule == "local"
-                    else _projection_fraction(displacement, shuffled_groups)
+                    0.0 if rule == "local" else _projection_fraction(displacement, shuffled_groups)
                 ),
             }
 
