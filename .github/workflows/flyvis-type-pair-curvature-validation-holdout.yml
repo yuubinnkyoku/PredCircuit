@@ -1,0 +1,131 @@
+name: FlyVis type-pair curvature validation holdout
+
+on:
+  push:
+    paths:
+      - ".github/triggers/run-type-pair-curvature-validation-880-899"
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [880, 881, 882, 883, 884, 885, 886, 887, 888, 889, 890, 891, 892, 893, 894, 895, 896, 897, 898, 899]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Validate curvature prediction for seed ${{ matrix.seed }}
+        run: |
+          mkdir -p results/generated
+          uv run python scripts/diagnose_flyvis_type_pair_curvature_validation.py \
+            --seed ${{ matrix.seed }} \
+            --out results/generated/flyvis_type_pair_curvature_validation_seed${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: type-pair-curvature-validation-seed${{ matrix.seed }}
+          path: results/generated/flyvis_type_pair_curvature_validation_seed${{ matrix.seed }}.csv
+
+  aggregate:
+    needs: diagnose
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: type-pair-curvature-validation-seed*
+          path: artifacts
+          merge-multiple: true
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Aggregate curvature validation
+        run: |
+          mkdir -p results/generated
+          uv run --with scipy python - <<'PY'
+          from pathlib import Path
+          import numpy as np
+          import pandas as pd
+          from scipy import stats
+
+          paths = sorted(Path("artifacts").glob("*.csv"))
+          frame = pd.concat([pd.read_csv(path) for path in paths], ignore_index=True)
+          if len(paths) != 20:
+              raise RuntimeError(f"expected 20 seed artifacts, got {len(paths)}")
+          if len(frame) != 120:
+              raise RuntimeError(f"expected 120 rows, got {len(frame)}")
+          if not frame["finite"].all():
+              raise RuntimeError("non-finite curvature validation run detected")
+          frame.to_csv("results/generated/flyvis_type_pair_curvature_validation.csv", index=False)
+
+          seed_means = frame.groupby(["seed", "horizon"], as_index=False)[
+              ["predicted_synergy", "observed_synergy", "prediction_error"]
+          ].mean()
+          summary_rows = []
+          correlation_rows = []
+          for horizon in sorted(seed_means["horizon"].unique()):
+              subset = seed_means[seed_means.horizon == horizon]
+              for metric in ("predicted_synergy", "observed_synergy", "prediction_error"):
+                  values = subset[metric].to_numpy(float)
+                  mean = float(values.mean())
+                  std = float(values.std(ddof=1))
+                  ci_low, ci_high = stats.t.interval(
+                      0.95,
+                      len(values) - 1,
+                      loc=mean,
+                      scale=std / np.sqrt(len(values)),
+                  )
+                  summary_rows.append(
+                      {
+                          "horizon": int(horizon),
+                          "metric": metric,
+                          "n": len(values),
+                          "mean": mean,
+                          "ci_low": float(ci_low),
+                          "ci_high": float(ci_high),
+                          "positive": int((values > 0).sum()),
+                          "t_p": float(stats.ttest_1samp(values, 0.0).pvalue),
+                          "wilcoxon_p": float(stats.wilcoxon(values).pvalue),
+                          "cohen_dz": mean / std if std > 0 else float("nan"),
+                      }
+                  )
+
+              predicted = subset["predicted_synergy"].to_numpy(float)
+              observed = subset["observed_synergy"].to_numpy(float)
+              pearson = stats.pearsonr(predicted, observed)
+              spearman = stats.spearmanr(predicted, observed)
+              fit = stats.linregress(predicted, observed)
+              mae = float(np.mean(np.abs(predicted - observed)))
+              correlation_rows.append(
+                  {
+                      "horizon": int(horizon),
+                      "pearson_r": float(pearson.statistic),
+                      "pearson_p": float(pearson.pvalue),
+                      "spearman_r": float(spearman.statistic),
+                      "spearman_p": float(spearman.pvalue),
+                      "slope": float(fit.slope),
+                      "intercept": float(fit.intercept),
+                      "r_squared": float(fit.rvalue**2),
+                      "mae": mae,
+                  }
+              )
+
+          pd.DataFrame(summary_rows).to_csv(
+              "results/generated/flyvis_type_pair_curvature_validation_summary.csv",
+              index=False,
+          )
+          pd.DataFrame(correlation_rows).to_csv(
+              "results/generated/flyvis_type_pair_curvature_validation_correlations.csv",
+              index=False,
+          )
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-type-pair-curvature-validation-aggregate
+          path: |
+            results/generated/flyvis_type_pair_curvature_validation.csv
+            results/generated/flyvis_type_pair_curvature_validation_summary.csv
+            results/generated/flyvis_type_pair_curvature_validation_correlations.csv
