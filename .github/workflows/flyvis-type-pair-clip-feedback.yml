@@ -1,0 +1,188 @@
+name: FlyVis type-pair clip-feedback holdout
+
+on:
+  push:
+    paths:
+      - ".github/triggers/run-type-pair-clip-feedback-1730-1749"
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        seed:
+          - 1730
+          - 1731
+          - 1732
+          - 1733
+          - 1734
+          - 1735
+          - 1736
+          - 1737
+          - 1738
+          - 1739
+          - 1740
+          - 1741
+          - 1742
+          - 1743
+          - 1744
+          - 1745
+          - 1746
+          - 1747
+          - 1748
+          - 1749
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Run clip-feedback holdout for seed ${{ matrix.seed }}
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run python scripts/diagnose_flyvis_type_pair_clip_feedback.py \
+            --seed ${{ matrix.seed }} \
+            --init-scales 0.12,0.14,0.16 \
+            --horizons 80,120,160,180,200 \
+            --eval-jitter-base 10960000 \
+            --base-coefficient 2.5 \
+            --clip-threshold 0.03 \
+            --out results/generated/flyvis_type_pair_clip_feedback_seed${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: type-pair-clip-feedback-seed${{ matrix.seed }}
+          path: results/generated/flyvis_type_pair_clip_feedback_seed${{ matrix.seed }}.csv
+
+  aggregate:
+    needs: diagnose
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: type-pair-clip-feedback-seed*
+          path: artifacts
+          merge-multiple: true
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Aggregate clip-feedback holdout
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run --with scipy python - <<'PY'
+          from pathlib import Path
+
+          import numpy as np
+          import pandas as pd
+          from scipy import stats
+
+          paths = sorted(Path("artifacts").glob("*.csv"))
+          if len(paths) != 20:
+              raise RuntimeError(f"expected 20 seed artifacts, got {len(paths)}")
+          frame = pd.concat([pd.read_csv(path) for path in paths], ignore_index=True)
+          if len(frame) != 4800:
+              raise RuntimeError(f"expected 4800 rows, got {len(frame)}")
+          if not frame["finite"].all():
+              raise RuntimeError("non-finite clip-feedback result detected")
+          if frame["seed"].nunique() != 20:
+              raise RuntimeError("expected 20 unique seeds")
+          frame.to_csv(
+              "results/generated/flyvis_type_pair_clip_feedback.csv",
+              index=False,
+          )
+
+          metrics = (
+              "cross_entropy",
+              "accuracy",
+              "hard_margin",
+              "soft_margin",
+              "weight_norm",
+          )
+          diagnostics = (
+              "mean_shared_coefficient",
+              "gated_step_fraction",
+              "prospective_clip_fraction",
+              "actual_clip_fraction",
+              "last_shared_coefficient",
+          )
+          per_seed = frame.groupby(
+              ["seed", "init_scale", "rule", "horizon"],
+              as_index=False,
+          )[list(metrics + diagnostics)].mean()
+          per_seed.to_csv(
+              "results/generated/flyvis_type_pair_clip_feedback_per_seed.csv",
+              index=False,
+          )
+
+          paired_rows = []
+          for scale in sorted(per_seed["init_scale"].unique()):
+              for horizon in sorted(per_seed["horizon"].unique()):
+                  subset = per_seed[
+                      (per_seed["init_scale"] == scale)
+                      & (per_seed["horizon"] == horizon)
+                  ]
+                  for baseline_rule in ("local", "fixed25"):
+                      baseline = (
+                          subset[subset["rule"] == baseline_rule]
+                          .set_index("seed")
+                          .sort_index()
+                      )
+                      if len(baseline) != 20:
+                          raise RuntimeError(f"missing baseline {baseline_rule}")
+                      for rule in sorted(subset["rule"].unique()):
+                          if rule == baseline_rule:
+                              continue
+                          lhs = subset[subset["rule"] == rule].set_index("seed").sort_index()
+                          if not lhs.index.equals(baseline.index) or len(lhs) != 20:
+                              raise RuntimeError("paired seed mismatch")
+                          for metric in metrics:
+                              left = lhs[metric].to_numpy(float)
+                              right = baseline[metric].to_numpy(float)
+                              diff = left - right
+                              mean = float(diff.mean())
+                              std = float(diff.std(ddof=1))
+                              if std > 0.0:
+                                  ci_low, ci_high = stats.t.interval(
+                                      0.95,
+                                      len(diff) - 1,
+                                      loc=mean,
+                                      scale=std / np.sqrt(len(diff)),
+                                  )
+                                  p_value = float(stats.ttest_rel(left, right).pvalue)
+                                  dz = mean / std
+                              else:
+                                  ci_low = ci_high = mean
+                                  p_value = 1.0
+                                  dz = 0.0
+                              paired_rows.append(
+                                  {
+                                      "init_scale": float(scale),
+                                      "horizon": int(horizon),
+                                      "rule": rule,
+                                      "baseline_rule": baseline_rule,
+                                      "metric": metric,
+                                      "n": len(diff),
+                                      "mean_difference": mean,
+                                      "ci_low": float(ci_low),
+                                      "ci_high": float(ci_high),
+                                      "p_value": p_value,
+                                      "cohen_dz": float(dz),
+                                      "positive_seeds": int((diff > 0).sum()),
+                                      "negative_seeds": int((diff < 0).sum()),
+                                  }
+                              )
+          pd.DataFrame(paired_rows).to_csv(
+              "results/generated/flyvis_type_pair_clip_feedback_paired.csv",
+              index=False,
+          )
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-type-pair-clip-feedback-aggregate
+          path: |
+            results/generated/flyvis_type_pair_clip_feedback.csv
+            results/generated/flyvis_type_pair_clip_feedback_per_seed.csv
+            results/generated/flyvis_type_pair_clip_feedback_paired.csv
