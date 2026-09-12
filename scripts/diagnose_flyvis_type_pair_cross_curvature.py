@@ -61,9 +61,9 @@ def _heldout_ce(
 
 
 def _cosine(left: torch.Tensor, right: torch.Tensor) -> float:
-    denominator = (
-        torch.linalg.vector_norm(left) * torch.linalg.vector_norm(right)
-    ).clamp_min(1e-30)
+    denominator = (torch.linalg.vector_norm(left) * torch.linalg.vector_norm(right)).clamp_min(
+        1e-30
+    )
     return float(torch.dot(left, right) / denominator)
 
 
