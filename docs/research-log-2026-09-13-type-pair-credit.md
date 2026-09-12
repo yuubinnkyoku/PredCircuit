@@ -58,7 +58,49 @@ Suppression fractions @ step=20, bio: threshold 0.347, local_power 0.366 (added 
 - **Finite**: 800/800 True
 - **Design**: train from **epoch 0**, rules `local` (m+r), `standard` (4m+r), `threshold` (rho05), `local_power`, `delta_norm`. Both inits. Save at 20/40/60/80/100. 4 eval reps. Locked thresholds 0.5 / 0.35 / 5e-8 / 0.002.
 - **Artifact**: `results/artifacts/full-horizon-1500-1519/`
-- **Replication 1520-1539**: run 34704834673 in progress at log write time.
+- **Replication 1520-1539**: run 34704834673 success (5m43s), 20/20 finite.
+
+### 2b. Combined 40-seed full-horizon (1500-1539)
+
+Pooled holdout + replication. n=40 paired seeds. t_crit≈2.023.
+
+**local_power vs rho05, biological_strength:**
+
+| h | CE Δ (dz) | acc Δ (dz) | hard Δ (dz) | soft Δ (dz) |
+|---:|---|---|---|---|
+| 20 | −0.000009 (−0.22) | +0.00260 (+0.29) | +0.000008 (+0.18) | +0.000012 (+0.22) |
+| 40 | +0.000053* (+1.31) | −0.00117 (−0.18) | +0.000006 (+0.05) | −0.000072* (−1.30) |
+| 60 | +0.000252* (+4.18) | +0.00456 (+0.25) | +0.000057 (+0.15) | −0.000339* (−4.18) |
+| 80 | +0.000361* (+4.76) | +0.00482 (+0.19) | +0.000242* (+0.51) | −0.000488* (−4.73) |
+| 100 | +0.000393* (+3.55) | +0.01146* (+0.64) | +0.000597* (+1.11) | −0.000539* (−3.59) |
+
+h=100 sign counts: CE 40/0, acc 29/8, hard 35/5, soft 0/40. All four metrics significant.
+
+**local_power vs delta_norm, biological_strength:**
+
+| h | CE Δ | acc Δ | hard Δ | soft Δ |
+|---:|---|---|---|---|
+| 20 | +0.000029* | +0.00104 | **−0.000017*** | −0.000038* |
+| 40 | +0.000059* | +0.00065 | **−0.000023*** | −0.000080* |
+| 60 | +0.000061* | +0.00378* | **+0.000054*** | −0.000083* |
+| 80 | +0.000068* | +0.00404* | **+0.000125*** | −0.000093* |
+| 100 | +0.000098* | +0.00521* | **+0.000326*** | −0.000136* |
+
+Hard-margin crossover vs the update-norm control occurs between h=40 and h=60 and then grows. CE/soft are worse at every horizon.
+
+**Absolute means, biological_strength, combined 40 seeds, h=100:**
+
+| rule | CE | acc | hard | soft |
+|---|---:|---:|---:|---:|
+| local | 1.37256 | **0.61211** | −0.00012 | −1.08017 |
+| standard | 1.36540 | 0.52044 | −0.00647 | −1.07030 |
+| threshold | 1.36987 | 0.58099 | −0.00033 | −1.07652 |
+| local_power | 1.37027 | 0.59245 | **+0.00026** | −1.07706 |
+| delta_norm | 1.37017 | 0.58724 | −0.00006 | −1.07693 |
+
+local_power is the only rule with a **positive** mean hard margin at h=100. Plain local still has the best accuracy.
+
+**Random init, h=100:** all local_power−rho05 effects |dz| ≤ 0.24, non-significant.
 
 **Absolute means, biological_strength:**
 
@@ -156,26 +198,30 @@ Suppression fractions @ step=20, bio: threshold 0.347, local_power 0.366 (added 
 
 | Hypothesis | Status | Evidence |
 |---|---|---|
-| local_power is a selective local rule beyond update-norm control | **Falsified / not supported** | 1480-1499: local_power ≈ delta_norm on hard_margin; CE/soft slightly worse |
-| local_power improves hard_margin over rho05 on biological init | **Supported (with cost)** | full-horizon h=100: Δhard +0.00077, dz=1.63, 19/1; CE and soft_margin significantly worse |
-| Shared type-pair credit (4m+r or gated) helps from epoch 0 | **Partially supported, horizon-dependent** | Big accuracy win at h=40 (~0.73 vs local 0.60), advantage decays; at h=100 local is best |
-| local_power destroys random init | **Falsified** | random-init effects ~0 |
+| local_power is a selective local rule beyond update-norm control | **Weakly supported on hard_margin/acc, not on CE/soft** | 40-seed h=100: hard +0.000326* (dz=0.75, 33/7), acc +0.0052* vs delta_norm; CE/soft worse at every horizon |
+| local_power improves hard_margin over rho05 on biological init | **Supported (with cost)** | 40-seed h=100: Δhard +0.000597, dz=1.11, 35/5; CE and soft_margin significantly worse (40/0 and 0/40) |
+| Shared type-pair credit (4m+r or gated) helps from epoch 0 | **Partially supported, horizon-dependent** | Big accuracy win at h=40 (~0.73 vs local 0.60), advantage decays; at h=100 local is best (0.612) |
+| local_power destroys random init | **Falsified** | random-init effects |dz|≤0.24, all n.s. |
 | rho alone identifies harmful groups | **Falsified** | AUROC 0.511 |
 | mean(w*c) is a good harmful-group identifier | **Weakly supported at sparse operating point** | 80.8% precision among 1.4% hits; AUROC only 0.523 overall |
 | A simple local proxy clearly dominates local_power | **Not supported** | cov_w_c better AUROC but tied at matched suppression rate |
 
 ## Verdict on local_power as "有力候補"
 
-Against the user's six minimum conditions:
+Against the user's six minimum conditions (using the combined 40-seed confirmation):
 
-1. **bio hard_margin > rho05 on independent hold-out** — YES at h=100 (and growing from h=20).
-2. **≥ update-norm control, not "just suppress large updates"** — **NO / marginal.** Hard margin only slightly above delta_norm; CE/soft not better.
-3. **does not clearly destroy random init** — YES.
-4. **all seeds finite** — YES (800 + 800 + 72360 rows finite).
-5. **CE / soft-margin cost quantified** — YES: CE +0.00038, soft −0.00052 vs rho05 @ h=100 (both significant).
-6. **explainable on the time axis, not an epoch-100 accident** — PARTIAL: advantage over rho05 is present and grows, but *all* shared-credit rules peak ~h=40 and decay; by h=100 plain local has the best accuracy.
+1. **bio hard_margin > rho05 on independent hold-out** — **YES.** Δhard +0.000597, CI excludes 0, 35/40 positive, growing with horizon.
+2. **≥ update-norm control, not "just suppress large updates"** — **MARGINAL YES on hard_margin/acc, NO on CE/soft.** Hard margin and accuracy are significantly above delta_norm from h=60 onward, but CE and soft_margin are worse at every horizon. The gain is not *only* update-norm suppression, but it is not free either.
+3. **does not clearly destroy random init** — **YES.**
+4. **all seeds finite** — **YES** (1600 + 72360 rows finite).
+5. **CE / soft-margin cost quantified** — **YES.** vs rho05 @ h=100: CE +0.000393 (40/0), soft −0.000539 (0/40). vs delta_norm: CE +0.000098, soft −0.000136.
+6. **explainable on the time axis** — **YES for the hard-margin story.** vs delta_norm the hard-margin sign flips between h=40 and h=60 and then grows monotonically. The accuracy advantage over rho05 also grows. However the *absolute* accuracy of every shared-credit rule still peaks ~h=40 and decays toward (or below) plain local by h=100.
 
-**Conclusion: local_power is NOT promoted to "有力候補."** It is a sparse, high-precision harmful-group filter whose hard-margin gain over rho05 is real but is explained largely by update-norm suppression and is paid for in CE/soft_margin. The more important finding is the **horizon-dependent collapse of every shared-credit rule relative to plain local** when training starts at epoch 0.
+**Revised conclusion:** local_power meets conditions 1, 3, 4, 6 and marginally 2. It does **not** get a free lunch on CE/soft_margin. It is best described as:
+
+> a sparse (≈1–2% of groups), high-precision (≈81%) harmful-group filter that buys hard-margin and a small accuracy gain over rho05 and over the update-norm control, paid for by a small but highly consistent CE and soft-margin cost. It is the only rule with positive mean hard margin at epoch 100, but plain local still wins on accuracy.
+
+It is **not** a general replacement for local credit. The dominant structural finding remains that *all* shared-credit rules are transient under epoch-0 training.
 
 ## Most concise current local learning-rule candidate
 
