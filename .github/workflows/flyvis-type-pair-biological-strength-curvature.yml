@@ -1,0 +1,172 @@
+name: FlyVis biological-strength curvature attribution
+
+on:
+  push:
+    paths:
+      - ".github/triggers/run-type-pair-biological-strength-curvature-1020-1039"
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [1020, 1021, 1022, 1023, 1024, 1025, 1026, 1027, 1028, 1029, 1030, 1031, 1032, 1033, 1034, 1035, 1036, 1037, 1038, 1039]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Attribute biological-strength curvature for seed ${{ matrix.seed }}
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run python scripts/diagnose_flyvis_type_pair_biological_strength_curvature.py \
+            --seed ${{ matrix.seed }} \
+            --out results/generated/flyvis_type_pair_biological_strength_curvature_seed${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: biological-strength-curvature-seed${{ matrix.seed }}
+          path: results/generated/flyvis_type_pair_biological_strength_curvature_seed${{ matrix.seed }}.csv
+
+  aggregate:
+    needs: diagnose
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: biological-strength-curvature-seed*
+          path: artifacts
+          merge-multiple: true
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Aggregate biological-strength curvature attribution
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run --with scipy python - <<'PY'
+          from pathlib import Path
+          import numpy as np
+          import pandas as pd
+          from scipy import stats
+
+          paths = sorted(Path("artifacts").glob("*.csv"))
+          if len(paths) != 20:
+              raise RuntimeError(f"expected 20 seed artifacts, got {len(paths)}")
+          frame = pd.concat([pd.read_csv(path) for path in paths], ignore_index=True)
+          if not frame["finite"].all():
+              raise RuntimeError("non-finite biological-strength curvature run detected")
+          frame.to_csv(
+              "results/generated/flyvis_type_pair_biological_strength_curvature.csv",
+              index=False,
+          )
+
+          seed_group = frame.groupby(
+              ["seed", "horizon", "group_id", "source_type", "target_type", "edge_count"],
+              as_index=False,
+          )["group_synergy_contribution"].mean()
+
+          pair_rows = []
+          for keys, group in seed_group.groupby(
+              ["horizon", "group_id", "source_type", "target_type", "edge_count"]
+          ):
+              horizon, group_id, source_type, target_type, edge_count = keys
+              values = group["group_synergy_contribution"].to_numpy(float)
+              mean = float(values.mean())
+              std = float(values.std(ddof=1))
+              ci_low, ci_high = stats.t.interval(
+                  0.95,
+                  len(values) - 1,
+                  loc=mean,
+                  scale=std / np.sqrt(len(values)),
+              )
+              pair_rows.append(
+                  {
+                      "horizon": int(horizon),
+                      "group_id": int(group_id),
+                      "source_type": source_type,
+                      "target_type": target_type,
+                      "edge_count": int(edge_count),
+                      "n": len(values),
+                      "mean_contribution": mean,
+                      "ci_low": float(ci_low),
+                      "ci_high": float(ci_high),
+                      "positive": int((values > 0).sum()),
+                      "t_p": float(stats.ttest_1samp(values, 0.0).pvalue),
+                      "cohen_dz": mean / std if std > 0 else float("nan"),
+                  }
+              )
+          pair_frame = pd.DataFrame(pair_rows)
+          pair_frame.to_csv(
+              "results/generated/flyvis_type_pair_biological_strength_curvature_pairs.csv",
+              index=False,
+          )
+
+          target_seed = seed_group.groupby(
+              ["seed", "horizon", "target_type"], as_index=False
+          )["group_synergy_contribution"].sum()
+          target_rows = []
+          for (horizon, target_type), group in target_seed.groupby(["horizon", "target_type"]):
+              values = group["group_synergy_contribution"].to_numpy(float)
+              mean = float(values.mean())
+              std = float(values.std(ddof=1))
+              ci_low, ci_high = stats.t.interval(
+                  0.95,
+                  len(values) - 1,
+                  loc=mean,
+                  scale=std / np.sqrt(len(values)),
+              )
+              target_rows.append(
+                  {
+                      "horizon": int(horizon),
+                      "target_type": target_type,
+                      "n": len(values),
+                      "mean_contribution": mean,
+                      "ci_low": float(ci_low),
+                      "ci_high": float(ci_high),
+                      "positive": int((values > 0).sum()),
+                      "t_p": float(stats.ttest_1samp(values, 0.0).pvalue),
+                      "cohen_dz": mean / std if std > 0 else float("nan"),
+                  }
+              )
+          pd.DataFrame(target_rows).to_csv(
+              "results/generated/flyvis_type_pair_biological_strength_curvature_targets.csv",
+              index=False,
+          )
+
+          concentration_rows = []
+          for (seed, horizon), group in seed_group.groupby(["seed", "horizon"]):
+              values = group["group_synergy_contribution"].to_numpy(float)
+              absolute = np.abs(values)
+              absolute_total = float(absolute.sum())
+              ordered = np.sort(absolute)[::-1]
+              shares = absolute / absolute_total if absolute_total > 0 else np.zeros_like(absolute)
+              concentration_rows.append(
+                  {
+                      "seed": int(seed),
+                      "horizon": int(horizon),
+                      "total_synergy": float(values.sum()),
+                      "absolute_mass": absolute_total,
+                      "top1_abs_fraction": float(ordered[:1].sum() / absolute_total),
+                      "top5_abs_fraction": float(ordered[:5].sum() / absolute_total),
+                      "top10_abs_fraction": float(ordered[:10].sum() / absolute_total),
+                      "effective_group_count": float(1.0 / np.square(shares).sum()),
+                  }
+              )
+          concentration = pd.DataFrame(concentration_rows)
+          concentration.to_csv(
+              "results/generated/flyvis_type_pair_biological_strength_curvature_concentration.csv",
+              index=False,
+          )
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-type-pair-biological-strength-curvature-aggregate
+          path: |
+            results/generated/flyvis_type_pair_biological_strength_curvature.csv
+            results/generated/flyvis_type_pair_biological_strength_curvature_pairs.csv
+            results/generated/flyvis_type_pair_biological_strength_curvature_targets.csv
+            results/generated/flyvis_type_pair_biological_strength_curvature_concentration.csv
