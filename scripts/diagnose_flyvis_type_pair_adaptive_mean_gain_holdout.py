@@ -7,12 +7,12 @@ from pathlib import Path
 
 import pandas as pd
 import torch
+
 from diagnose_flyvis_type_pair_biological_logit_balance import _heldout_readout, _metrics
 from diagnose_flyvis_type_pair_horizon_causal import _match_local_state
 from diagnose_flyvis_type_pair_mi9_causal import _named_groups
 from run_flyvis_temporal_coherence_gate import apply_local_credit
 from run_flyvis_type_pair_axis_identity_control import credit
-
 from predcircuit.flyvis import load_flyvis_spec
 from predcircuit.flyvis_retinotopy import graph_from_flyvis_retinotopy
 from predcircuit.model import PredictiveCodingGraph
