@@ -3,7 +3,7 @@
 Session date: 2026-09-12/13 (UTC+9)
 Branch: main
 Starting SHA: `0bffcfc`
-Ending SHA: (updated at close)
+Ending SHA: see `git log` head at close (research-log commits through `b5ae482` and later)
 
 ## CI / infrastructure
 
@@ -12,8 +12,8 @@ Ending SHA: (updated at close)
 | Starting main SHA | `0bffcfc` "Run local power norm-control trajectory 1480-1499" |
 | CI at start | **RED** — ruff format on `diagnose_flyvis_type_pair_local_power_norm_control_trajectory.py` |
 | Format fix | `a607aa5` (rebased/applied) |
-| CI after format fix | **GREEN** |
-| Experiment workflows this session | local-proxy mechanism (success); full-horizon holdout 1500-1519 (success, parallel agent); full-horizon replication 1520-1539 (in progress at close) |
+| CI after format fix | **GREEN** (verified on subsequent pushes) |
+| Experiment workflows this session | mechanism 1540-1559 success; full-horizon holdout 1500-1519 success; replication 1520-1539 success; 200-epoch 1560-1579 success |
 | Implementation bugs found | none in this session's scripts |
 | CI failures other than format | none |
 
@@ -225,22 +225,101 @@ It is **not** a general replacement for local credit. The dominant structural fi
 
 ## Most concise current local learning-rule candidate
 
+**After the 200-epoch reversal, the recommendation changes:**
+
 ```
-local (m+r) is the safest default from epoch 0.
-If shared type-pair mean credit is used at all, gate it:
-  suppress (extra gain 3→1) when ρ = ||m||/||r|| ≥ 0.5
-  and additionally when 0.35 ≤ ρ < 0.5 and mean(w·c) > 5e-8
-but expect an early accuracy peak (~epoch 40) and later decay,
-and expect a CE / soft-margin cost relative to rho05 alone.
+For short-to-medium horizons (≲120 epochs): plain local m+r is
+competitive or best; gating shared mean credit (rho05) helps accuracy
+in the early peak but the advantage is gone by ~epoch 100.
+
+For long horizons (≥180 epochs): ungated shared type-pair mean credit
+(standard 4m+r = +3·mean on every group) is clearly best —
+accuracy 0.79, hard margin +0.22, CE 1.13 at epoch 200.
+
+local_power's extra mean(w·c) gate helps only inside the mid-training
+valley (h≈80–140) and becomes harmful after the recovery starts.
+Do not use it as a long-horizon rule.
+
+Open mechanism question: the ρ≥0.5 gate that defines rho05/local_power
+appears to remove the groups whose shared mean credit drives the late
+margin explosion. The gate is a brake on the recovery.
 ```
 
-No simpler or stronger local proxy than `mean(w·c)` was confirmed.
+No simpler or stronger local proxy than `mean(w·c)` was confirmed for the valley window, and none is needed once the 200-epoch result is in hand.
 
 ## Implementation / CI notes
 
 - Only CI issue: ruff format of the norm-control trajectory script. Fixed; CI green after `a607aa5`.
 - A duplicate 40-seed full-horizon workflow (`flyvis-type-pair-full-horizon-rules`, seeds 1500-1539) was started this session and then **cancelled** after discovering a parallel agent's 20-seed holdout on the same seeds. No science lost; the 20-seed holdout + 20-seed replication covers the 40-seed requirement.
 - Mechanism discovery uses held-out hard-margin gradient strictly as a diagnostic oracle. It is never written back into any training direction.
+
+## 200-epoch extension (1560-1579) — MAJOR REVERSAL
+
+- **Workflow run**: 34705564171 (success, 8m19s)
+- **Seeds**: 1560-1579 (20/20), finite 1600/1600
+- **Design**: same five rules, epoch 0→200, save every 20. Fresh seeds and a **different eval jitter base** (9_100_000 vs 6_900_000), so this is also a mild jitter hold-out.
+- **Artifact**: `results/artifacts/full-horizon-200-1560-1579/`
+
+### Accuracy trajectory, biological_strength
+
+| h | local | standard | rho05 | local_power | delta_norm |
+|---:|---:|---:|---:|---:|---:|
+| 20 | 0.663 | 0.687 | 0.691 | 0.690 | 0.690 |
+| 40 | 0.554 | 0.637 | 0.657 | 0.657 | 0.655 |
+| 60 | 0.585 | 0.632 | 0.674 | 0.678 | 0.677 |
+| 80 | 0.596 | 0.552 | 0.602 | 0.620 | 0.616 |
+| 100 | 0.610 | 0.501 | 0.556 | 0.568 | 0.561 |
+| 120 | 0.601 | 0.517 | 0.540 | 0.551 | 0.543 |
+| 140 | 0.631 | 0.534 | 0.583 | 0.588 | 0.579 |
+| 160 | 0.572 | 0.614 | 0.496 | 0.499 | 0.498 |
+| 180 | 0.541 | **0.712** | 0.569 | 0.549 | 0.568 |
+| 200 | 0.505 | **0.790** | 0.671 | 0.644 | 0.667 |
+
+### Hard margin / CE at h=200, bio
+
+| rule | CE | acc | hard | soft |
+|---|---:|---:|---:|---:|
+| local | 1.3699 | 0.505 | −0.0120 | −1.0763 |
+| **standard** | **1.1309** | **0.790** | **+0.2204** | **−0.7295** |
+| threshold | 1.2995 | 0.671 | +0.0453 | −0.9789 |
+| local_power | 1.3096 | 0.644 | +0.0350 | −0.9930 |
+| delta_norm | 1.3014 | 0.667 | +0.0425 | −0.9816 |
+
+**Standard 4m+r is the clear winner at epoch 200 on every metric.** The h=80–140 "collapse" is a valley, not a permanent failure. CE improves from ~1.37 to 1.13; hard margin goes from ~0 to +0.22; accuracy reaches 79%.
+
+### local_power vs rho05, bio (selected horizons)
+
+| h | CE Δ | acc Δ | hard Δ | soft Δ |
+|---:|---|---|---|---|
+| 80 | +0.00031* | +0.018* | +0.00056* | −0.00042* |
+| 100 | +0.00034* | +0.012 | +0.00073* | −0.00046* |
+| 120 | +0.00046* | +0.012* | +0.00060 | −0.00063* |
+| 140 | +0.00070* | +0.005 | +0.00022 | −0.00096* |
+| 160 | +0.00152* | +0.003 | +0.00021 | −0.00210* |
+| 180 | +0.00475* | −0.020 | −0.00439 | −0.00644* |
+| 200 | +0.01008* | **−0.027*** | **−0.01038*** | −0.01407* |
+
+The local_power hard-margin and accuracy advantage over rho05 **peaks around h=80–120 and then reverses**. By h=200 local_power is worse than rho05 on all four metrics. The extra `mean(w·c)` suppression is a medium-horizon regularizer that becomes harmful in the long run.
+
+### Revised scientific picture
+
+1. Shared type-pair mean credit (4m+r) has a **U-shaped / multi-phase** accuracy trajectory: early peak (~h=20–60), a deep valley (~h=80–160), then a strong late recovery that by h=200 far exceeds plain local.
+2. The h=100 snapshot that made plain local look best was **sampling the valley**. Any claim about "which rule is better" that stops at epoch 100 is unreliable.
+3. local_power's selective extra suppression helps in the valley (h=80–140) and hurts after the recovery begins (h≥180). It is not a durable improvement over rho05.
+4. Absolute hard margin of standard 4m+r reaches +0.22 at h=200 — the first time any rule produces a clearly positive margin in this series.
+
+### Verdict update on local_power
+
+local_power is **demoted further**. Against the six conditions:
+
+1. bio hard > rho05 — YES only in the h=80–140 window; **NO at h=200** (−0.010, 1/19).
+2. ≥ update-norm control — NO at h=200 (worse on all metrics).
+3. random init safe — still YES.
+4. finite — YES.
+5. CE/soft cost — YES, and the cost **grows** with horizon (CE +0.010 at h=200).
+6. time-axis story — the story is now "helps in the valley, hurts in the recovery," which is the opposite of a durable learning-rule improvement.
+
+**Final position this session:** the interesting object is no longer local_power. It is the **U-shaped shared-credit trajectory** itself, and in particular why plain 4m+r recovers so strongly after epoch 160 while the gated rules (rho05 / local_power / delta_norm) recover less. Gating the shared mean credit appears to **delay or damp the late recovery**.
 
 ## Temporal Jaccard of selected type-pair groups (from mechanism 1540-1559)
 
@@ -264,9 +343,9 @@ Consecutive-run lengths of power-band membership: n=570 runs, **mean 1.15**, med
 
 ## Next single experiment
 
-**200-epoch extension** (in flight at close: run 34705564171, seeds 1560-1579, jitter base 9_100_000 — also serves as a mild jitter hold-out vs the 6_900_000 base of the 100-epoch block). Question: does the h=40 accuracy peak of shared-credit rules recover, reverse, or keep decaying through 200; does hard margin stay positive; does the CE/soft cost of local_power saturate?
+**Explain the late recovery of ungated 4m+r.** Concretely: on the 1560-1579 (or a fresh) 200-epoch block, log at each horizon (a) the fraction of type-pair groups with ρ ≥ 0.5, (b) the mean/extra-gain actually applied, (c) weight-norm growth per rule, and (d) the hard-margin gradient alignment of the shared-mean component. The working hypothesis is that the ρ≥0.5 gate *removes* the very groups whose shared mean credit drives the late-phase margin explosion, so the gate that helps in the valley becomes a brake in the recovery.
 
-Secondary after that: biological-strength scale perturbation; a true far-jitter hold-out that re-evaluates the same weights under a disjoint jitter base.
+Also still open: a true far-jitter hold-out that re-evaluates saved weights under a disjoint jitter base; biological-strength scale perturbation.
 
 ## Artifact index (local)
 
@@ -274,8 +353,9 @@ Secondary after that: biological-strength scale perturbation; a true far-jitter 
 results/artifacts/norm-control-1480-1499/
 results/artifacts/full-horizon-1500-1519/
 results/artifacts/full-horizon-1520-1539/
+results/artifacts/full-horizon-200-1560-1579/     # U-turn discovery
 results/artifacts/boundary-geometry-1420-1439/
 results/artifacts/mechanism-1540-1559/
-results/artifacts/branched-1460-1479/           # hard-margin growth vs threshold consistent
-results/artifacts/local-power-holdout-1440-1459/ # one-step holdout consistent
+results/artifacts/branched-1460-1479/
+results/artifacts/local-power-holdout-1440-1459/
 ```
