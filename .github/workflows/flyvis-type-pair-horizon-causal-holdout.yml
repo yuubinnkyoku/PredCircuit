@@ -1,0 +1,156 @@
+name: FlyVis type-pair horizon causal holdout
+
+on:
+  push:
+    paths:
+      - ".github/triggers/run-type-pair-horizon-causal-740-759"
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [740, 741, 742, 743, 744, 745, 746, 747, 748, 749, 750, 751, 752, 753, 754, 755, 756, 757, 758, 759]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Trace strict causal horizon for seed ${{ matrix.seed }}
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run python scripts/diagnose_flyvis_type_pair_horizon_causal.py \
+            --seed ${{ matrix.seed }} \
+            --shuffle-seed $((995000 + ${{ matrix.seed }})) \
+            --out results/generated/flyvis_type_pair_horizon_causal_seed${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: type-pair-horizon-causal-seed${{ matrix.seed }}
+          path: results/generated/flyvis_type_pair_horizon_causal_seed${{ matrix.seed }}.csv
+
+  aggregate:
+    needs: diagnose
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: type-pair-horizon-causal-seed*
+          path: artifacts
+          merge-multiple: true
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Aggregate strict causal horizon
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run --with scipy python - <<'PY'
+          from pathlib import Path
+          import numpy as np
+          import pandas as pd
+          from scipy import stats
+
+          paths = sorted(Path("artifacts").glob("*.csv"))
+          frame = pd.concat([pd.read_csv(path) for path in paths], ignore_index=True)
+          if len(paths) != 20:
+              raise RuntimeError(f"expected 20 seed artifacts, got {len(paths)}")
+          if len(frame) != 3840:
+              raise RuntimeError(f"expected 3840 rows, got {len(frame)}")
+          if not frame["finite"].all():
+              raise RuntimeError("non-finite horizon causal run detected")
+          if frame["after_margin_identity_error"].max() > 1e-6:
+              raise RuntimeError("margin decomposition identity failed")
+          if frame["mean_weight_norm_error"].max() > 1e-5:
+              raise RuntimeError("weight-norm matching failed")
+          if frame["mean_bias_error"].max() > 1e-7:
+              raise RuntimeError("bias matching failed")
+          frame.to_csv(
+              "results/generated/flyvis_type_pair_horizon_causal.csv",
+              index=False,
+          )
+
+          frame["ce_improvement"] = (
+              frame["before_cross_entropy"] - frame["after_cross_entropy"]
+          )
+          frame["accuracy_gain"] = frame["after_accuracy"] - frame["before_accuracy"]
+          frame["hard_margin_gain"] = (
+              frame["after_hard_margin"] - frame["before_hard_margin"]
+          )
+          metrics = ["ce_improvement", "accuracy_gain", "hard_margin_gain"]
+          seed_means = frame.groupby(
+              ["seed", "checkpoint", "horizon", "rule"], as_index=False
+          )[metrics].mean()
+
+          rows = []
+          for checkpoint in sorted(seed_means["checkpoint"].unique()):
+              for horizon in sorted(seed_means["horizon"].unique()):
+                  subset = seed_means[
+                      (seed_means.checkpoint == checkpoint)
+                      & (seed_means.horizon == horizon)
+                  ]
+                  local = subset[subset.rule == "local"].set_index("seed").sort_index()
+                  type_ = subset[subset.rule == "type"].set_index("seed").loc[local.index]
+                  shuffle = subset[subset.rule == "shuffle"].set_index("seed").loc[local.index]
+                  for comparison, left, right in (
+                      ("type_minus_local", type_, local),
+                      ("type_minus_shuffle", type_, shuffle),
+                      ("shuffle_minus_local", shuffle, local),
+                  ):
+                      for metric in metrics:
+                          delta = (left[metric] - right[metric]).to_numpy(float)
+                          mean = float(delta.mean())
+                          std = float(delta.std(ddof=1))
+                          ci_low, ci_high = stats.t.interval(
+                              0.95,
+                              len(delta) - 1,
+                              loc=mean,
+                              scale=std / np.sqrt(len(delta)),
+                          )
+                          rows.append(
+                              {
+                                  "checkpoint": int(checkpoint),
+                                  "horizon": int(horizon),
+                                  "comparison": comparison,
+                                  "metric": metric,
+                                  "n": len(delta),
+                                  "mean": mean,
+                                  "ci_low": float(ci_low),
+                                  "ci_high": float(ci_high),
+                                  "positive": int((delta > 0).sum()),
+                                  "t_p": float(stats.ttest_1samp(delta, 0.0).pvalue),
+                                  "wilcoxon_p": float(stats.wilcoxon(delta).pvalue),
+                                  "cohen_dz": mean / std if std > 0 else float("nan"),
+                              }
+                          )
+          summary = pd.DataFrame(rows)
+          summary.to_csv(
+              "results/generated/flyvis_type_pair_horizon_causal_summary.csv",
+              index=False,
+          )
+          geometry = frame.groupby(
+              ["checkpoint", "horizon", "rule"], as_index=False
+          )[
+              [
+                  "mean_relative_direction_change",
+                  "mean_clip_fraction",
+                  "mean_weight_norm_error",
+                  "mean_bias_error",
+              ]
+          ].mean()
+          geometry.to_csv(
+              "results/generated/flyvis_type_pair_horizon_causal_geometry.csv",
+              index=False,
+          )
+          print(summary.to_string(index=False))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-type-pair-horizon-causal-aggregate
+          path: |
+            results/generated/flyvis_type_pair_horizon_causal.csv
+            results/generated/flyvis_type_pair_horizon_causal_summary.csv
+            results/generated/flyvis_type_pair_horizon_causal_geometry.csv
