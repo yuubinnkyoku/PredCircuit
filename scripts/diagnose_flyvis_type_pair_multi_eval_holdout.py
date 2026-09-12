@@ -85,9 +85,7 @@ def heldout_metrics(
         "active_gap": float((max_wrong - second_wrong).mean()),
         "wrong_tail_pressure": float(tail_pressure.mean()),
         "wrong_logit_std": float(wrong_values.std(dim=1, correction=0).mean()),
-        "margin_identity_error": float(
-            (soft_margin - (hard_margin - tail_pressure)).abs().max()
-        ),
+        "margin_identity_error": float((soft_margin - (hard_margin - tail_pressure)).abs().max()),
     }
 
 
