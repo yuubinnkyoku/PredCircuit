@@ -1,0 +1,171 @@
+name: FlyVis type-pair biological scale fine sweep
+
+on:
+  push:
+    paths:
+      - ".github/triggers/run-type-pair-biological-scale-fine-1630-1649"
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        seed:
+          - 1630
+          - 1631
+          - 1632
+          - 1633
+          - 1634
+          - 1635
+          - 1636
+          - 1637
+          - 1638
+          - 1639
+          - 1640
+          - 1641
+          - 1642
+          - 1643
+          - 1644
+          - 1645
+          - 1646
+          - 1647
+          - 1648
+          - 1649
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Run fine biological scale sweep for seed ${{ matrix.seed }}
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run python scripts/diagnose_flyvis_type_pair_biological_scale.py \
+            --seed ${{ matrix.seed }} \
+            --init-scales 0.06,0.08,0.10,0.12,0.14 \
+            --horizons 100,160,200 \
+            --eval-jitter-base 10800000 \
+            --out results/generated/flyvis_type_pair_biological_scale_fine_seed${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: type-pair-biological-scale-fine-seed${{ matrix.seed }}
+          path: results/generated/flyvis_type_pair_biological_scale_fine_seed${{ matrix.seed }}.csv
+
+  aggregate:
+    needs: diagnose
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: type-pair-biological-scale-fine-seed*
+          path: artifacts
+          merge-multiple: true
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Aggregate fine biological scale sweep
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run --with scipy python - <<'PY'
+          from pathlib import Path
+          import numpy as np
+          import pandas as pd
+          from scipy import stats
+
+          paths = sorted(Path("artifacts").glob("*.csv"))
+          if len(paths) != 20:
+              raise RuntimeError(f"expected 20 seed artifacts, got {len(paths)}")
+          frame = pd.concat([pd.read_csv(path) for path in paths], ignore_index=True)
+          if len(frame) != 2400:
+              raise RuntimeError(f"expected 2400 rows, got {len(frame)}")
+          if not frame["finite"].all():
+              raise RuntimeError("non-finite fine biological scale result detected")
+          if frame["seed"].nunique() != 20:
+              raise RuntimeError("expected 20 unique seeds")
+          frame.to_csv(
+              "results/generated/flyvis_type_pair_biological_scale_fine.csv",
+              index=False,
+          )
+
+          metrics = (
+              "cross_entropy",
+              "accuracy",
+              "hard_margin",
+              "soft_margin",
+              "weight_norm",
+          )
+          per_seed = frame.groupby(
+              ["seed", "init_scale", "rule", "horizon"], as_index=False
+          )[list(metrics)].mean()
+          rows = []
+          for scale in sorted(per_seed["init_scale"].unique()):
+              for horizon in sorted(per_seed["horizon"].unique()):
+                  local = (
+                      per_seed[
+                          (per_seed["init_scale"] == scale)
+                          & (per_seed["horizon"] == horizon)
+                          & (per_seed["rule"] == "local")
+                      ]
+                      .set_index("seed")
+                      .sort_index()
+                  )
+                  standard = (
+                      per_seed[
+                          (per_seed["init_scale"] == scale)
+                          & (per_seed["horizon"] == horizon)
+                          & (per_seed["rule"] == "standard")
+                      ]
+                      .set_index("seed")
+                      .sort_index()
+                  )
+                  if not local.index.equals(standard.index) or len(local) != 20:
+                      raise RuntimeError("paired seed mismatch")
+                  for metric in metrics:
+                      diff = standard[metric].to_numpy(float) - local[metric].to_numpy(float)
+                      mean = float(diff.mean())
+                      std = float(diff.std(ddof=1))
+                      se = std / np.sqrt(len(diff))
+                      if std > 0.0:
+                          ci_low, ci_high = stats.t.interval(
+                              0.95, len(diff) - 1, loc=mean, scale=se
+                          )
+                          t_result = stats.ttest_rel(
+                              standard[metric].to_numpy(float),
+                              local[metric].to_numpy(float),
+                          )
+                          p_value = float(t_result.pvalue)
+                          dz = mean / std
+                      else:
+                          ci_low = ci_high = mean
+                          p_value = 1.0
+                          dz = 0.0
+                      rows.append(
+                          {
+                              "init_scale": float(scale),
+                              "horizon": int(horizon),
+                              "metric": metric,
+                              "n": len(diff),
+                              "standard_minus_local_mean": mean,
+                              "ci_low": float(ci_low),
+                              "ci_high": float(ci_high),
+                              "p_value": p_value,
+                              "cohen_dz": float(dz),
+                              "positive_seeds": int((diff > 0).sum()),
+                              "negative_seeds": int((diff < 0).sum()),
+                          }
+                      )
+          pd.DataFrame(rows).to_csv(
+              "results/generated/flyvis_type_pair_biological_scale_fine_paired.csv",
+              index=False,
+          )
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-type-pair-biological-scale-fine-aggregate
+          path: |
+            results/generated/flyvis_type_pair_biological_scale_fine.csv
+            results/generated/flyvis_type_pair_biological_scale_fine_paired.csv
