@@ -1,0 +1,168 @@
+name: FlyVis type-pair logit decomposition holdout
+
+on:
+  push:
+    paths:
+      - ".github/triggers/run-type-pair-logit-decomposition-660-679"
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [660, 661, 662, 663, 664, 665, 666, 667, 668, 669, 670, 671, 672, 673, 674, 675, 676, 677, 678, 679]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Decompose held-out logits for seed ${{ matrix.seed }}
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run python scripts/diagnose_flyvis_type_pair_logit_decomposition.py \
+            --seed ${{ matrix.seed }} \
+            --shuffle-seed $((960000 + ${{ matrix.seed }})) \
+            --out results/generated/flyvis_type_pair_logit_decomposition_seed${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: type-pair-logit-decomposition-seed${{ matrix.seed }}
+          path: results/generated/flyvis_type_pair_logit_decomposition_seed${{ matrix.seed }}.csv
+
+  aggregate:
+    needs: diagnose
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: type-pair-logit-decomposition-seed*
+          path: artifacts
+          merge-multiple: true
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Aggregate logit-decomposition results
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run --with scipy python - <<'PY'
+          from pathlib import Path
+          import numpy as np
+          import pandas as pd
+          from scipy import stats
+
+          frame = pd.concat(
+              [pd.read_csv(path) for path in sorted(Path("artifacts").glob("*.csv"))],
+              ignore_index=True,
+          )
+          if len(frame) != 1560:
+              raise RuntimeError(f"expected 1560 rows, got {len(frame)}")
+          if not frame["finite"].all():
+              raise RuntimeError("non-finite logit-decomposition run detected")
+          if frame["margin_identity_error"].max() > 1e-6:
+              raise RuntimeError(
+                  "hard/soft/tail identity failed: "
+                  f"max error={frame['margin_identity_error'].max()}"
+              )
+          frame.to_csv(
+              "results/generated/flyvis_type_pair_logit_decomposition.csv",
+              index=False,
+          )
+
+          def summary_row(label, horizon, delta):
+              delta = np.asarray(delta, dtype=float)
+              n = len(delta)
+              mean = float(delta.mean())
+              std = float(delta.std(ddof=1))
+              ci = stats.t.interval(0.95, n - 1, loc=mean, scale=std / np.sqrt(n))
+              try:
+                  wp = float(stats.wilcoxon(delta).pvalue)
+              except ValueError:
+                  wp = 1.0
+              return {
+                  "comparison": label,
+                  "horizon": horizon,
+                  "n": n,
+                  "mean_gain": mean,
+                  "ci95_low": float(ci[0]),
+                  "ci95_high": float(ci[1]),
+                  "positive_seeds": int((delta > 0).sum()),
+                  "paired_t_p": float(stats.ttest_1samp(delta, 0.0).pvalue),
+                  "wilcoxon_p": wp,
+                  "cohen_dz": mean / std if std > 0 else float("nan"),
+              }
+
+          raw_metrics = [
+              "hard_margin",
+              "soft_margin",
+              "correct_logit",
+              "max_wrong_logit",
+              "second_wrong_logit",
+              "wrong_logsumexp",
+              "active_gap",
+              "wrong_tail_pressure",
+              "wrong_logit_std",
+              "accuracy",
+              "weight_relative_distance_from_base",
+          ]
+          rows = []
+          for horizon in range(26):
+              part = frame[frame.horizon == horizon]
+              local = part[part.rule == "local"].set_index("seed").sort_index()
+              type_ = part[part.rule == "type"].set_index("seed").loc[local.index]
+              shuffle = part[part.rule == "shuffle"].set_index("seed").loc[local.index]
+
+              for reference_name, reference in (("local", local), ("shuffle", shuffle)):
+                  ce_gain = reference["cross_entropy"] - type_["cross_entropy"]
+                  rows.append(
+                      summary_row(
+                          f"type_vs_{reference_name}:cross_entropy_improvement",
+                          horizon,
+                          ce_gain,
+                      )
+                  )
+                  for metric in raw_metrics:
+                      rows.append(
+                          summary_row(
+                              f"type_minus_{reference_name}:{metric}",
+                              horizon,
+                              type_[metric] - reference[metric],
+                          )
+                      )
+
+                  hard_delta = type_["hard_margin"] - reference["hard_margin"]
+                  correct_delta = type_["correct_logit"] - reference["correct_logit"]
+                  max_wrong_delta = type_["max_wrong_logit"] - reference["max_wrong_logit"]
+                  soft_delta = type_["soft_margin"] - reference["soft_margin"]
+                  wrong_lse_delta = (
+                      type_["wrong_logsumexp"] - reference["wrong_logsumexp"]
+                  )
+                  tail_delta = (
+                      type_["wrong_tail_pressure"] - reference["wrong_tail_pressure"]
+                  )
+                  hard_residual = hard_delta - (correct_delta - max_wrong_delta)
+                  soft_residual = soft_delta - (correct_delta - wrong_lse_delta)
+                  hard_soft_residual = soft_delta - (hard_delta - tail_delta)
+                  if np.max(np.abs(hard_residual)) > 1e-6:
+                      raise RuntimeError("hard-margin logit decomposition identity failed")
+                  if np.max(np.abs(soft_residual)) > 1e-6:
+                      raise RuntimeError("soft-margin logit decomposition identity failed")
+                  if np.max(np.abs(hard_soft_residual)) > 1e-6:
+                      raise RuntimeError("hard/soft tail decomposition identity failed")
+
+          summary = pd.DataFrame(rows)
+          summary.to_csv(
+              "results/generated/flyvis_type_pair_logit_decomposition_summary.csv",
+              index=False,
+          )
+          print(summary.to_string(index=False))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-type-pair-logit-decomposition-aggregate
+          path: |
+            results/generated/flyvis_type_pair_logit_decomposition.csv
+            results/generated/flyvis_type_pair_logit_decomposition_summary.csv
