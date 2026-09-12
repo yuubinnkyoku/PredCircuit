@@ -1,0 +1,149 @@
+name: FlyVis signed-band dense trajectory
+
+on:
+  push:
+    paths:
+      - ".github/triggers/run-type-pair-signed-band-dense-trajectory-1360-1379"
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [1360, 1361, 1362, 1363, 1364, 1365, 1366, 1367, 1368, 1369, 1370, 1371, 1372, 1373, 1374, 1375, 1376, 1377, 1378, 1379]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Run dense trajectory for seed ${{ matrix.seed }}
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run python scripts/diagnose_flyvis_type_pair_signed_band_dense_trajectory.py \
+            --seed ${{ matrix.seed }} \
+            --out results/generated/flyvis_type_pair_signed_band_dense_trajectory_seed${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: type-pair-signed-band-dense-trajectory-seed${{ matrix.seed }}
+          path: results/generated/flyvis_type_pair_signed_band_dense_trajectory_seed${{ matrix.seed }}.csv
+
+  aggregate:
+    needs: diagnose
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: type-pair-signed-band-dense-trajectory-seed*
+          path: artifacts
+          merge-multiple: true
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Aggregate dense trajectory
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run --with scipy python - <<'PY'
+          from pathlib import Path
+          import numpy as np
+          import pandas as pd
+          from scipy import stats
+
+          paths = sorted(Path("artifacts").glob("*.csv"))
+          if len(paths) != 20:
+              raise RuntimeError(f"expected 20 seed artifacts, got {len(paths)}")
+          frame = pd.concat([pd.read_csv(path) for path in paths], ignore_index=True)
+          if not frame["finite"].all():
+              raise RuntimeError("non-finite dense trajectory detected")
+          frame.to_csv(
+              "results/generated/flyvis_type_pair_signed_band_dense_trajectory.csv",
+              index=False,
+          )
+
+          metrics = (
+              "signed_minus_rho04_cross_entropy",
+              "signed_minus_rho04_accuracy",
+              "signed_minus_rho04_hard_margin",
+              "signed_minus_rho04_soft_margin",
+              "branch_weight_distance",
+              "branch_bias_distance",
+              "current_update_difference_norm",
+              "rho04_pre_mean_rho",
+              "signed_pre_mean_rho",
+              "rho04_pre_signed_only_group_fraction",
+              "signed_pre_signed_only_group_fraction",
+              "rho04_pre_rho04_only_group_fraction",
+              "signed_pre_rho04_only_group_fraction",
+          )
+          per_seed = frame.groupby(["seed", "branch_step"], as_index=False)[list(metrics)].mean()
+          rows = []
+          for branch_step in sorted(per_seed["branch_step"].unique()):
+              subset = per_seed[per_seed.branch_step == branch_step]
+              for metric in metrics:
+                  values = subset[metric].to_numpy(float)
+                  mean = float(values.mean())
+                  std = float(values.std(ddof=1))
+                  if std > 0.0:
+                      ci_low, ci_high = stats.t.interval(
+                          0.95,
+                          len(values) - 1,
+                          loc=mean,
+                          scale=std / np.sqrt(len(values)),
+                      )
+                      t_p = float(stats.ttest_1samp(values, 0.0).pvalue)
+                      dz = mean / std
+                  else:
+                      ci_low = mean
+                      ci_high = mean
+                      t_p = 1.0 if mean == 0.0 else 0.0
+                      dz = float("nan")
+                  rows.append(
+                      {
+                          "branch_step": int(branch_step),
+                          "metric": metric,
+                          "n": len(values),
+                          "mean": mean,
+                          "ci_low": float(ci_low),
+                          "ci_high": float(ci_high),
+                          "positive": int((values > 0).sum()),
+                          "t_p": t_p,
+                          "cohen_dz": dz,
+                      }
+                  )
+          pd.DataFrame(rows).to_csv(
+              "results/generated/flyvis_type_pair_signed_band_dense_trajectory_summary.csv",
+              index=False,
+          )
+
+          hard = per_seed.pivot(
+              index="seed",
+              columns="branch_step",
+              values="signed_minus_rho04_hard_margin",
+          )
+          increments = []
+          for step in range(1, 21):
+              values = (hard[step] - hard[step - 1]).to_numpy(float)
+              increments.append(
+                  {
+                      "branch_step": step,
+                      "mean_hard_margin_increment": float(values.mean()),
+                      "positive": int((values > 0).sum()),
+                      "t_p": float(stats.ttest_1samp(values, 0.0).pvalue),
+                  }
+              )
+          pd.DataFrame(increments).to_csv(
+              "results/generated/flyvis_type_pair_signed_band_dense_trajectory_increments.csv",
+              index=False,
+          )
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-type-pair-signed-band-dense-trajectory-aggregate
+          path: |
+            results/generated/flyvis_type_pair_signed_band_dense_trajectory.csv
+            results/generated/flyvis_type_pair_signed_band_dense_trajectory_summary.csv
+            results/generated/flyvis_type_pair_signed_band_dense_trajectory_increments.csv
