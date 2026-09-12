@@ -1,0 +1,141 @@
+name: FlyVis signed-band norm-matched random ensemble
+
+on:
+  push:
+    paths:
+      - ".github/triggers/run-type-pair-signed-band-norm-matched-random-ensemble-1400-1419"
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [1400, 1401, 1402, 1403, 1404, 1405, 1406, 1407, 1408, 1409, 1410, 1411, 1412, 1413, 1414, 1415, 1416, 1417, 1418, 1419]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Run norm-matched random ensemble for seed ${{ matrix.seed }}
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run python scripts/diagnose_flyvis_type_pair_signed_band_norm_matched_random_ensemble.py \
+            --seed ${{ matrix.seed }} \
+            --out results/generated/flyvis_type_pair_signed_band_norm_matched_random_ensemble_seed${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: type-pair-signed-band-norm-matched-random-ensemble-seed${{ matrix.seed }}
+          path: results/generated/flyvis_type_pair_signed_band_norm_matched_random_ensemble_seed${{ matrix.seed }}.csv
+
+  aggregate:
+    needs: diagnose
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: type-pair-signed-band-norm-matched-random-ensemble-seed*
+          path: artifacts
+          merge-multiple: true
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Aggregate norm-matched random ensemble
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run --with scipy python - <<'PY'
+          from pathlib import Path
+          import numpy as np
+          import pandas as pd
+          from scipy import stats
+
+          paths = sorted(Path("artifacts").glob("*.csv"))
+          if len(paths) != 20:
+              raise RuntimeError(f"expected 20 seed artifacts, got {len(paths)}")
+          frame = pd.concat([pd.read_csv(path) for path in paths], ignore_index=True)
+          if not frame["finite"].all():
+              raise RuntimeError("non-finite norm-matched ensemble detected")
+          frame.to_csv(
+              "results/generated/flyvis_type_pair_signed_band_norm_matched_random_ensemble.csv",
+              index=False,
+          )
+
+          diff_metrics = (
+              "signed_minus_control_cross_entropy",
+              "signed_minus_control_accuracy",
+              "signed_minus_control_hard_margin",
+              "signed_minus_control_soft_margin",
+          )
+          per_seed = frame.groupby(["seed", "horizon"], as_index=False)[list(diff_metrics)].mean()
+          win = (
+              frame.assign(signed_hard_better=frame["signed_minus_control_hard_margin"] > 0.0)
+              .groupby(["seed", "horizon"], as_index=False)["signed_hard_better"]
+              .mean()
+          )
+          per_seed = per_seed.merge(win, on=["seed", "horizon"])
+
+          rows = []
+          for horizon, subset in per_seed.groupby("horizon"):
+              for metric in (*diff_metrics, "signed_hard_better"):
+                  values = subset[metric].to_numpy(float)
+                  null = 0.5 if metric == "signed_hard_better" else 0.0
+                  centered = values - null
+                  mean = float(values.mean())
+                  std = float(centered.std(ddof=1))
+                  if std > 0.0:
+                      ci_low, ci_high = stats.t.interval(
+                          0.95,
+                          len(values) - 1,
+                          loc=mean,
+                          scale=values.std(ddof=1) / np.sqrt(len(values)),
+                      )
+                      t_p = float(stats.ttest_1samp(values, null).pvalue)
+                      dz = float(centered.mean() / std)
+                  else:
+                      ci_low = mean
+                      ci_high = mean
+                      t_p = 1.0 if float(centered.mean()) == 0.0 else 0.0
+                      dz = float("nan")
+                  rows.append(
+                      {
+                          "horizon": int(horizon),
+                          "metric": metric,
+                          "n": len(values),
+                          "mean": mean,
+                          "ci_low": float(ci_low),
+                          "ci_high": float(ci_high),
+                          "positive": int((centered > 0).sum()),
+                          "t_p": t_p,
+                          "cohen_dz": dz,
+                      }
+                  )
+          pd.DataFrame(rows).to_csv(
+              "results/generated/flyvis_type_pair_signed_band_norm_matched_random_ensemble_summary.csv",
+              index=False,
+          )
+
+          diagnostics = (
+              frame.groupby("horizon", as_index=False)
+              .agg(
+                  finite_fraction=("finite", "mean"),
+                  mean_relative_norm_error=("relative_norm_error", "mean"),
+                  max_relative_norm_error=("relative_norm_error", "max"),
+                  mean_selection_overlap=("selection_overlap_fraction", "mean"),
+              )
+          )
+          diagnostics.to_csv(
+              "results/generated/flyvis_type_pair_signed_band_norm_matched_random_ensemble_diagnostics.csv",
+              index=False,
+          )
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-type-pair-signed-band-norm-matched-random-ensemble-aggregate
+          path: |
+            results/generated/flyvis_type_pair_signed_band_norm_matched_random_ensemble.csv
+            results/generated/flyvis_type_pair_signed_band_norm_matched_random_ensemble_summary.csv
+            results/generated/flyvis_type_pair_signed_band_norm_matched_random_ensemble_diagnostics.csv
