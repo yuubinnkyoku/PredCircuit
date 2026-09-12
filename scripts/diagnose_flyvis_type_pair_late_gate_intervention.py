@@ -84,9 +84,7 @@ def _evaluate(
         for branch in BRANCHES:
             for metric in METRICS:
                 values[f"{branch}_{metric}"] = outputs[branch][metric]
-            values[f"{branch}_weight_norm"] = float(
-                torch.linalg.vector_norm(models[branch].weight)
-            )
+            values[f"{branch}_weight_norm"] = float(torch.linalg.vector_norm(models[branch].weight))
 
         for branch in BRANCHES:
             if branch == "standard":
