@@ -54,10 +54,7 @@ def _clamp_group_constant_state(
         / torch.linalg.vector_norm(local.weight).clamp_min(1e-30)
     )
     weight_norm_error = float(
-        (
-            torch.linalg.vector_norm(treatment.weight)
-            - torch.linalg.vector_norm(local.weight)
-        ).abs()
+        (torch.linalg.vector_norm(treatment.weight) - torch.linalg.vector_norm(local.weight)).abs()
         / torch.linalg.vector_norm(local.weight).clamp_min(1e-30)
     )
     return projection_error, weight_norm_error
