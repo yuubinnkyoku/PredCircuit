@@ -65,7 +65,9 @@ def frozen_geometry(
             matched = match_norm(mixed, raw_edge)
             values = {
                 "coarse_norm_fraction": float(torch.linalg.vector_norm(coarse) / raw_norm),
-                "mixed_relative_change": float(torch.linalg.vector_norm(matched - raw_edge) / raw_norm),
+                "mixed_relative_change": float(
+                    torch.linalg.vector_norm(matched - raw_edge) / raw_norm
+                ),
                 "mixed_cosine_to_raw": _cosine(matched, raw_edge),
                 "matched_clip_fraction": float(
                     (learning_rate * matched).abs().gt(max_update).float().mean()
