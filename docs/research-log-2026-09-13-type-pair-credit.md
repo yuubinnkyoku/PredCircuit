@@ -435,9 +435,35 @@ Effects grow monotonically with branch_step (0 → 1 → 5 → 10 → 20), a cle
 
 This is the causal counterpart of the correlational gradient-alignment result: the gate removes shared-mean credit that, in the late phase, is aligned with the held-out hard-margin gradient. The gate that regularizes the mid-training valley is a brake on the late recovery.
 
+## Late-gate switch dose–response (1590-1599)
+
+- **Workflow run**: 34708249983 (success, 4m41s)
+- **Seeds**: 1590-1599 (10/10), finite 1200/1200
+- **Design:** train as ungated standard 4m+r until a switch epoch ∈ {0, 100, 140, 160, 180, 200}, then apply the rho05 gate for the remainder. Eval at horizons 100/140/160/180/200. Jitter base 9_500_000.
+- **Artifact:** `results/artifacts/late-gate-switch-1590-1599/`
+
+### Hard margin at h=200 by switch epoch
+
+| switch | 0 (always gated) | 100 | 140 | 160 | 180 | 200 (never) |
+|---:|---:|---:|---:|---:|---:|---:|
+| hard | +0.057 | +0.176 | +0.243 | +0.287 | +0.287 | **+0.306** |
+| acc | 0.714 | 0.822 | 0.873 | **0.885** | 0.859 | 0.865 |
+| CE | 1.277 | 1.169 | 1.115 | 1.095 | 1.086 | **1.069** |
+| weight_norm | 49.0 | 58.9 | 63.3 | 65.8 | 67.9 | **70.0** |
+
+Monotone dose–response on hard margin, CE, and weight norm: every epoch of ungated shared credit before the gate is applied is recovered in the late metrics. Accuracy is noisier (peaks at switch=160) but the overall trend is the same.
+
+Together with the 180-then-branch intervention this completes the causal chain:
+
+```
+ungated 4m+r  →  weight-norm growth  →  late hard-margin explosion
+     ↑                                         ↑
+  gate removes this                      gate is a brake
+```
+
 ## Next single experiment
 
-**Biological-strength scale perturbation.** Train standard 4m+r and local to epoch 200 under `use_biological_strength` multipliers of roughly {0.5, 1.0, 1.5} (or an equivalent lighter/heavier init), and check whether the late recovery is specific to one init scale or is a generic property of shared mean credit. Also still open: a far-jitter hold-out that re-evaluates saved weights under a disjoint jitter base.
+**Biological-strength scale perturbation.** Train standard 4m+r and local to epoch 200 under lighter/heavier biological-strength init, and check whether the late recovery is specific to one init scale.
 
 ## Artifact index (local)
 
@@ -448,6 +474,7 @@ results/artifacts/full-horizon-1520-1539/
 results/artifacts/full-horizon-200-1560-1579/     # U-turn discovery
 results/artifacts/recovery-1580-1589/             # recovery mechanism
 results/artifacts/late-gate-intervention-1600-1619/ # causal late-gate brake
+results/artifacts/late-gate-switch-1590-1599/      # switch dose-response
 results/artifacts/boundary-geometry-1420-1439/
 results/artifacts/mechanism-1540-1559/
 results/artifacts/branched-1460-1479/
