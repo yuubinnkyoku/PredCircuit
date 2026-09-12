@@ -1,0 +1,116 @@
+name: FlyVis type-pair biological scale
+
+on:
+  push:
+    paths:
+      - ".github/triggers/run-type-pair-biological-scale-1620-1629"
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [1620, 1621, 1622, 1623, 1624, 1625, 1626, 1627, 1628, 1629]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Run biological scale for seed ${{ matrix.seed }}
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run python scripts/diagnose_flyvis_type_pair_biological_scale.py \
+            --seed ${{ matrix.seed }} \
+            --out results/generated/flyvis_type_pair_biological_scale_seed${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: type-pair-biological-scale-seed${{ matrix.seed }}
+          path: results/generated/flyvis_type_pair_biological_scale_seed${{ matrix.seed }}.csv
+
+  aggregate:
+    needs: diagnose
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: type-pair-biological-scale-seed*
+          path: artifacts
+          merge-multiple: true
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Aggregate biological scale
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run --with scipy python - <<'PY'
+          from pathlib import Path
+          import numpy as np
+          import pandas as pd
+          from scipy import stats
+
+          paths = sorted(Path("artifacts").glob("*.csv"))
+          if len(paths) != 10:
+              raise RuntimeError(f"expected 10 seed artifacts, got {len(paths)}")
+          frame = pd.concat([pd.read_csv(path) for path in paths], ignore_index=True)
+          if not frame["finite"].all():
+              raise RuntimeError("non-finite biological scale detected")
+          frame.to_csv(
+              "results/generated/flyvis_type_pair_biological_scale.csv",
+              index=False,
+          )
+
+          metric_names = (
+              "cross_entropy",
+              "accuracy",
+              "hard_margin",
+              "soft_margin",
+              "weight_norm",
+          )
+          per_seed = frame.groupby(
+              ["seed", "init_scale", "rule", "horizon"], as_index=False
+          )[list(metric_names)].mean()
+          rows = []
+          for (scale, rule, horizon), subset in per_seed.groupby(
+              ["init_scale", "rule", "horizon"]
+          ):
+              for metric in metric_names:
+                  values = subset[metric].to_numpy(float)
+                  mean = float(values.mean())
+                  std = float(values.std(ddof=1))
+                  if std > 0.0:
+                      ci_low, ci_high = stats.t.interval(
+                          0.95,
+                          len(values) - 1,
+                          loc=mean,
+                          scale=std / np.sqrt(len(values)),
+                      )
+                  else:
+                      ci_low = ci_high = mean
+                  rows.append(
+                      {
+                          "init_scale": float(scale),
+                          "rule": rule,
+                          "horizon": int(horizon),
+                          "metric": metric,
+                          "n": len(values),
+                          "mean": mean,
+                          "ci_low": float(ci_low),
+                          "ci_high": float(ci_high),
+                      }
+                  )
+          pd.DataFrame(rows).to_csv(
+              "results/generated/flyvis_type_pair_biological_scale_summary.csv",
+              index=False,
+          )
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-type-pair-biological-scale-aggregate
+          path: |
+            results/generated/flyvis_type_pair_biological_scale.csv
+            results/generated/flyvis_type_pair_biological_scale_summary.csv
