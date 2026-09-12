@@ -1,0 +1,195 @@
+name: FlyVis type-pair biological-strength robustness
+
+on:
+  push:
+    paths:
+      - ".github/triggers/run-type-pair-biological-strength-980-999"
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [980, 981, 982, 983, 984, 985, 986, 987, 988, 989, 990, 991, 992, 993, 994, 995, 996, 997, 998, 999]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Run biological-strength robustness for seed ${{ matrix.seed }}
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run python scripts/diagnose_flyvis_type_pair_biological_strength_robustness.py \
+            --seed ${{ matrix.seed }} \
+            --out results/generated/flyvis_type_pair_biological_strength_seed${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: type-pair-biological-strength-seed${{ matrix.seed }}
+          path: results/generated/flyvis_type_pair_biological_strength_seed${{ matrix.seed }}.csv
+
+  aggregate:
+    needs: diagnose
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: type-pair-biological-strength-seed*
+          path: artifacts
+          merge-multiple: true
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Aggregate biological-strength robustness
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run --with scipy python - <<'PY'
+          from pathlib import Path
+          import numpy as np
+          import pandas as pd
+          from scipy import stats
+
+          paths = sorted(Path("artifacts").glob("*.csv"))
+          if len(paths) != 20:
+              raise RuntimeError(f"expected 20 seed artifacts, got {len(paths)}")
+          frame = pd.concat([pd.read_csv(path) for path in paths], ignore_index=True)
+          if len(frame) != 1920:
+              raise RuntimeError(f"expected 1920 rows, got {len(frame)}")
+          if not frame["finite"].all():
+              raise RuntimeError("non-finite biological-strength run detected")
+          frame.to_csv(
+              "results/generated/flyvis_type_pair_biological_strength.csv",
+              index=False,
+          )
+
+          seed_means = frame.groupby(
+              ["seed", "horizon", "init_mode", "rule"], as_index=False
+          )[["cross_entropy", "accuracy", "hard_margin"]].mean()
+          comparisons = (
+              ("type_minus_local", "type", "local"),
+              ("mi9_only_minus_local", "mi9_only", "local"),
+              ("r7r8_minus_local", "r7r8_mi9", "local"),
+              ("r7r8_minus_type", "r7r8_mi9", "type"),
+              ("r7r8_minus_mi9_only", "r7r8_mi9", "mi9_only"),
+          )
+          rows = []
+          effects = []
+          for horizon in sorted(seed_means["horizon"].unique()):
+              for init_mode in sorted(seed_means["init_mode"].unique()):
+                  subset = seed_means[
+                      (seed_means.horizon == horizon) & (seed_means.init_mode == init_mode)
+                  ]
+                  indexed = {
+                      rule: subset[subset.rule == rule].set_index("seed").sort_index()
+                      for rule in seed_means["rule"].unique()
+                  }
+                  for comparison, treatment_name, baseline_name in comparisons:
+                      treatment = indexed[treatment_name]
+                      baseline = indexed[baseline_name].loc[treatment.index]
+                      for metric in ("cross_entropy", "accuracy", "hard_margin"):
+                          if metric == "cross_entropy":
+                              delta = (baseline[metric] - treatment[metric]).to_numpy(float)
+                          else:
+                              delta = (treatment[metric] - baseline[metric]).to_numpy(float)
+                          mean = float(delta.mean())
+                          std = float(delta.std(ddof=1))
+                          ci_low, ci_high = stats.t.interval(
+                              0.95,
+                              len(delta) - 1,
+                              loc=mean,
+                              scale=std / np.sqrt(len(delta)),
+                          )
+                          rows.append(
+                              {
+                                  "horizon": int(horizon),
+                                  "init_mode": init_mode,
+                                  "comparison": comparison,
+                                  "metric": metric,
+                                  "n": len(delta),
+                                  "mean_improvement": mean,
+                                  "ci_low": float(ci_low),
+                                  "ci_high": float(ci_high),
+                                  "positive": int((delta > 0).sum()),
+                                  "t_p": float(stats.ttest_1samp(delta, 0.0).pvalue),
+                                  "wilcoxon_p": float(stats.wilcoxon(delta).pvalue),
+                                  "cohen_dz": mean / std if std > 0 else float("nan"),
+                              }
+                          )
+                          if baseline_name == "local":
+                              effects.extend(
+                                  {
+                                      "seed": int(seed),
+                                      "horizon": int(horizon),
+                                      "init_mode": init_mode,
+                                      "rule": treatment_name,
+                                      "metric": metric,
+                                      "improvement": float(value),
+                                  }
+                                  for seed, value in zip(treatment.index, delta, strict=True)
+                              )
+          pd.DataFrame(rows).to_csv(
+              "results/generated/flyvis_type_pair_biological_strength_summary.csv",
+              index=False,
+          )
+
+          effects = pd.DataFrame(effects)
+          interaction_rows = []
+          for (horizon, rule, metric), group in effects.groupby(
+              ["horizon", "rule", "metric"]
+          ):
+              pivot = group.pivot(index="seed", columns="init_mode", values="improvement")
+              delta = (
+                  pivot["biological_strength"] - pivot["random"]
+              ).to_numpy(float)
+              mean = float(delta.mean())
+              std = float(delta.std(ddof=1))
+              ci_low, ci_high = stats.t.interval(
+                  0.95,
+                  len(delta) - 1,
+                  loc=mean,
+                  scale=std / np.sqrt(len(delta)),
+              )
+              interaction_rows.append(
+                  {
+                      "horizon": int(horizon),
+                      "rule": rule,
+                      "metric": metric,
+                      "n": len(delta),
+                      "biological_minus_random_effect": mean,
+                      "ci_low": float(ci_low),
+                      "ci_high": float(ci_high),
+                      "positive": int((delta > 0).sum()),
+                      "t_p": float(stats.ttest_1samp(delta, 0.0).pvalue),
+                      "wilcoxon_p": float(stats.wilcoxon(delta).pvalue),
+                      "cohen_dz": mean / std if std > 0 else float("nan"),
+                  }
+              )
+          pd.DataFrame(interaction_rows).to_csv(
+              "results/generated/flyvis_type_pair_biological_strength_interaction.csv",
+              index=False,
+          )
+
+          diagnostics = frame.groupby(
+              ["seed", "horizon", "init_mode", "rule"], as_index=False
+          )[[
+              "mean_relative_direction_change",
+              "mean_weight_norm_error",
+              "mean_bias_error",
+          ]].mean()
+          diagnostics.to_csv(
+              "results/generated/flyvis_type_pair_biological_strength_diagnostics.csv",
+              index=False,
+          )
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-type-pair-biological-strength-aggregate
+          path: |
+            results/generated/flyvis_type_pair_biological_strength.csv
+            results/generated/flyvis_type_pair_biological_strength_summary.csv
+            results/generated/flyvis_type_pair_biological_strength_interaction.csv
+            results/generated/flyvis_type_pair_biological_strength_diagnostics.csv
