@@ -65,9 +65,9 @@ def _adaptive_direction(
         ratios.append(ratio)
 
     weight_total = max(sum(weights), 1)
-    edge_weighted_gain = sum(
-        gain * weight for gain, weight in zip(gains, weights, strict=True)
-    ) / weight_total
+    edge_weighted_gain = (
+        sum(gain * weight for gain, weight in zip(gains, weights, strict=True)) / weight_total
+    )
     return result, {
         "adaptive_mean_extra_gain": float(sum(gains) / max(len(gains), 1)),
         "adaptive_edge_weighted_extra_gain": float(edge_weighted_gain),
@@ -89,16 +89,9 @@ def run_seed(*, seed: int, learning_rate: float, max_update: float) -> pd.DataFr
             use_biological_strength=True,
         ),
     }
-    models = {
-        mode: {rule: copy.deepcopy(base) for rule in RULES}
-        for mode, base in bases.items()
-    }
-    weight_error_sum = {
-        mode: {"standard": 0.0, "adaptive": 0.0} for mode in INIT_MODES
-    }
-    bias_error_sum = {
-        mode: {"standard": 0.0, "adaptive": 0.0} for mode in INIT_MODES
-    }
+    models = {mode: {rule: copy.deepcopy(base) for rule in RULES} for mode, base in bases.items()}
+    weight_error_sum = {mode: {"standard": 0.0, "adaptive": 0.0} for mode in INIT_MODES}
+    bias_error_sum = {mode: {"standard": 0.0, "adaptive": 0.0} for mode in INIT_MODES}
     adaptive_diag_sum = {
         mode: {
             "adaptive_mean_extra_gain": 0.0,
@@ -164,9 +157,7 @@ def run_seed(*, seed: int, learning_rate: float, max_update: float) -> pd.DataFr
             local = models[mode]["local"]
             for eval_rep in range(EVAL_REPS):
                 jitter_seed = EVAL_JITTER_BASE + eval_rep
-                local_readout, classes = _heldout_readout(
-                    local, circuit, jitter_seed=jitter_seed
-                )
+                local_readout, classes = _heldout_readout(local, circuit, jitter_seed=jitter_seed)
                 for rule in RULES:
                     model = models[mode][rule]
                     if rule == "local":
@@ -183,8 +174,7 @@ def run_seed(*, seed: int, learning_rate: float, max_update: float) -> pd.DataFr
                         mean_bias_error = bias_error_sum[mode][rule] / step
                     metrics = _metrics(readout, classes, local_readout=local_readout)
                     adaptive_diagnostics = {
-                        key: adaptive_diag_sum[mode][key] / step
-                        for key in adaptive_diag_sum[mode]
+                        key: adaptive_diag_sum[mode][key] / step for key in adaptive_diag_sum[mode]
                     }
                     finite = (
                         bool(torch.isfinite(model.weight).all())
@@ -192,10 +182,7 @@ def run_seed(*, seed: int, learning_rate: float, max_update: float) -> pd.DataFr
                         and all(math.isfinite(value) for value in metrics.values())
                         and math.isfinite(mean_weight_error)
                         and math.isfinite(mean_bias_error)
-                        and all(
-                            math.isfinite(value)
-                            for value in adaptive_diagnostics.values()
-                        )
+                        and all(math.isfinite(value) for value in adaptive_diagnostics.values())
                     )
                     rows.append(
                         {
