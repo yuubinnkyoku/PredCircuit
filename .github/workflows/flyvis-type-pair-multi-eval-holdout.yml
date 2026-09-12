@@ -1,0 +1,183 @@
+name: FlyVis type-pair multi-eval holdout
+
+on:
+  push:
+    paths:
+      - ".github/triggers/run-type-pair-multi-eval-680-699"
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [680, 681, 682, 683, 684, 685, 686, 687, 688, 689, 690, 691, 692, 693, 694, 695, 696, 697, 698, 699]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Evaluate common held-out jitters for seed ${{ matrix.seed }}
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run python scripts/diagnose_flyvis_type_pair_multi_eval_holdout.py \
+            --seed ${{ matrix.seed }} \
+            --shuffle-seed $((970000 + ${{ matrix.seed }})) \
+            --out results/generated/flyvis_type_pair_multi_eval_seed${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: type-pair-multi-eval-seed${{ matrix.seed }}
+          path: results/generated/flyvis_type_pair_multi_eval_seed${{ matrix.seed }}.csv
+
+  aggregate:
+    needs: diagnose
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: type-pair-multi-eval-seed*
+          path: artifacts
+          merge-multiple: true
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Aggregate multi-evaluation results
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run --with scipy python - <<'PY'
+          from pathlib import Path
+          import numpy as np
+          import pandas as pd
+          from scipy import stats
+
+          frame = pd.concat(
+              [pd.read_csv(path) for path in sorted(Path("artifacts").glob("*.csv"))],
+              ignore_index=True,
+          )
+          if len(frame) != 960:
+              raise RuntimeError(f"expected 960 rows, got {len(frame)}")
+          if not frame["finite"].all():
+              raise RuntimeError("non-finite multi-evaluation run detected")
+          if frame["margin_identity_error"].max() > 1e-6:
+              raise RuntimeError(
+                  "hard/soft/tail identity failed: "
+                  f"max error={frame['margin_identity_error'].max()}"
+              )
+          counts = frame.groupby(["seed", "rule"]).size()
+          if not (counts == 16).all():
+              raise RuntimeError("expected 16 evaluation replicates per seed and rule")
+          frame.to_csv(
+              "results/generated/flyvis_type_pair_multi_eval.csv",
+              index=False,
+          )
+
+          metrics = [
+              "cross_entropy",
+              "hard_margin",
+              "soft_margin",
+              "correct_logit",
+              "max_wrong_logit",
+              "second_wrong_logit",
+              "wrong_logsumexp",
+              "active_gap",
+              "wrong_tail_pressure",
+              "wrong_logit_std",
+              "accuracy",
+              "weight_relative_distance_from_base",
+          ]
+          seed_means = frame.groupby(["seed", "rule"], as_index=False)[metrics].mean()
+          seed_means.to_csv(
+              "results/generated/flyvis_type_pair_multi_eval_seed_means.csv",
+              index=False,
+          )
+
+          def summary_row(label, delta):
+              delta = np.asarray(delta, dtype=float)
+              n = len(delta)
+              mean = float(delta.mean())
+              std = float(delta.std(ddof=1))
+              ci = stats.t.interval(0.95, n - 1, loc=mean, scale=std / np.sqrt(n))
+              try:
+                  wp = float(stats.wilcoxon(delta).pvalue)
+              except ValueError:
+                  wp = 1.0
+              return {
+                  "comparison": label,
+                  "n": n,
+                  "mean_gain": mean,
+                  "ci95_low": float(ci[0]),
+                  "ci95_high": float(ci[1]),
+                  "positive_seeds": int((delta > 0).sum()),
+                  "paired_t_p": float(stats.ttest_1samp(delta, 0.0).pvalue),
+                  "wilcoxon_p": wp,
+                  "cohen_dz": mean / std if std > 0 else float("nan"),
+              }
+
+          local = seed_means[seed_means.rule == "local"].set_index("seed").sort_index()
+          type_ = seed_means[seed_means.rule == "type"].set_index("seed").loc[local.index]
+          shuffle = seed_means[seed_means.rule == "shuffle"].set_index("seed").loc[local.index]
+          rows = []
+          for reference_name, reference in (("local", local), ("shuffle", shuffle)):
+              rows.append(
+                  summary_row(
+                      f"type_vs_{reference_name}:cross_entropy_improvement",
+                      reference["cross_entropy"] - type_["cross_entropy"],
+                  )
+              )
+              for metric in metrics:
+                  if metric == "cross_entropy":
+                      continue
+                  rows.append(
+                      summary_row(
+                          f"type_minus_{reference_name}:{metric}",
+                          type_[metric] - reference[metric],
+                      )
+                  )
+
+          summary = pd.DataFrame(rows)
+          summary.to_csv(
+              "results/generated/flyvis_type_pair_multi_eval_summary.csv",
+              index=False,
+          )
+
+          eval_rows = []
+          for eval_rep in range(16):
+              part = frame[frame.eval_rep == eval_rep]
+              local_e = part[part.rule == "local"].set_index("seed").sort_index()
+              type_e = part[part.rule == "type"].set_index("seed").loc[local_e.index]
+              shuffle_e = part[part.rule == "shuffle"].set_index("seed").loc[local_e.index]
+              for reference_name, reference in (("local", local_e), ("shuffle", shuffle_e)):
+                  for metric in ("hard_margin", "soft_margin", "cross_entropy"):
+                      if metric == "cross_entropy":
+                          delta = reference[metric] - type_e[metric]
+                      else:
+                          delta = type_e[metric] - reference[metric]
+                      eval_rows.append(
+                          {
+                              "eval_rep": eval_rep,
+                              "comparison": f"type_vs_{reference_name}:{metric}",
+                              "mean_gain_across_seeds": float(delta.mean()),
+                              "positive_seeds": int((delta > 0).sum()),
+                          }
+                      )
+          eval_summary = pd.DataFrame(eval_rows)
+          eval_summary.to_csv(
+              "results/generated/flyvis_type_pair_multi_eval_by_eval_rep.csv",
+              index=False,
+          )
+          print(summary.to_string(index=False))
+          print("\nPer-evaluation-replicate summary:\n")
+          print(eval_summary.to_string(index=False))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-type-pair-multi-eval-aggregate
+          path: |
+            results/generated/flyvis_type_pair_multi_eval.csv
+            results/generated/flyvis_type_pair_multi_eval_seed_means.csv
+            results/generated/flyvis_type_pair_multi_eval_summary.csv
+            results/generated/flyvis_type_pair_multi_eval_by_eval_rep.csv
