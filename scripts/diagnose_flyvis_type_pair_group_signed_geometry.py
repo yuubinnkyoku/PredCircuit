@@ -7,11 +7,11 @@ from pathlib import Path
 
 import pandas as pd
 import torch
-
 from diagnose_flyvis_type_pair_l1_gain_geometry import _heldout_objectives
 from diagnose_flyvis_type_pair_mi9_causal import _named_groups
 from run_flyvis_temporal_coherence_gate import apply_local_credit
 from run_flyvis_type_pair_axis_identity_control import credit
+
 from predcircuit.flyvis import load_flyvis_spec
 from predcircuit.flyvis_retinotopy import graph_from_flyvis_retinotopy
 from predcircuit.model import PredictiveCodingGraph
