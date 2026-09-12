@@ -1,0 +1,113 @@
+name: FlyVis type-pair late-gate switch
+
+on:
+  push:
+    paths:
+      - ".github/triggers/run-type-pair-late-gate-switch-1590-1599"
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [1590, 1591, 1592, 1593, 1594, 1595, 1596, 1597, 1598, 1599]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Run late-gate switch for seed ${{ matrix.seed }}
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run python scripts/diagnose_flyvis_type_pair_late_gate_switch.py \
+            --seed ${{ matrix.seed }} \
+            --out results/generated/flyvis_type_pair_late_gate_switch_seed${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: type-pair-late-gate-switch-seed${{ matrix.seed }}
+          path: results/generated/flyvis_type_pair_late_gate_switch_seed${{ matrix.seed }}.csv
+
+  aggregate:
+    needs: diagnose
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: type-pair-late-gate-switch-seed*
+          path: artifacts
+          merge-multiple: true
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Aggregate late-gate switch
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run --with scipy python - <<'PY'
+          from pathlib import Path
+          import numpy as np
+          import pandas as pd
+          from scipy import stats
+
+          paths = sorted(Path("artifacts").glob("*.csv"))
+          if len(paths) != 10:
+              raise RuntimeError(f"expected 10 seed artifacts, got {len(paths)}")
+          frame = pd.concat([pd.read_csv(path) for path in paths], ignore_index=True)
+          if not frame["finite"].all():
+              raise RuntimeError("non-finite late-gate switch detected")
+          frame.to_csv(
+              "results/generated/flyvis_type_pair_late_gate_switch.csv",
+              index=False,
+          )
+
+          metric_names = (
+              "cross_entropy",
+              "accuracy",
+              "hard_margin",
+              "soft_margin",
+              "weight_norm",
+          )
+          per_seed = frame.groupby(
+              ["seed", "switch_epoch", "horizon"], as_index=False
+          )[list(metric_names)].mean()
+          rows = []
+          for (sw, horizon), subset in per_seed.groupby(["switch_epoch", "horizon"]):
+              for metric in metric_names:
+                  values = subset[metric].to_numpy(float)
+                  mean = float(values.mean())
+                  std = float(values.std(ddof=1))
+                  if std > 0.0:
+                      ci_low, ci_high = stats.t.interval(
+                          0.95,
+                          len(values) - 1,
+                          loc=mean,
+                          scale=std / np.sqrt(len(values)),
+                      )
+                  else:
+                      ci_low = ci_high = mean
+                  rows.append(
+                      {
+                          "switch_epoch": int(sw),
+                          "horizon": int(horizon),
+                          "metric": metric,
+                          "n": len(values),
+                          "mean": mean,
+                          "ci_low": float(ci_low),
+                          "ci_high": float(ci_high),
+                      }
+                  )
+          pd.DataFrame(rows).to_csv(
+              "results/generated/flyvis_type_pair_late_gate_switch_summary.csv",
+              index=False,
+          )
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-type-pair-late-gate-switch-aggregate
+          path: |
+            results/generated/flyvis_type_pair_late_gate_switch.csv
+            results/generated/flyvis_type_pair_late_gate_switch_summary.csv
