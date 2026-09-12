@@ -110,9 +110,7 @@ def run_seed(*, seed: int, learning_rate: float, max_update: float) -> pd.DataFr
                 max_update=max_update,
             )
 
-    branches = {
-        mode: {rule: copy.deepcopy(base) for rule in RULES} for mode, base in bases.items()
-    }
+    branches = {mode: {rule: copy.deepcopy(base) for rule in RULES} for mode, base in bases.items()}
     rows: list[dict[str, float | int | bool | str]] = []
     completed = 0
 
@@ -187,14 +185,11 @@ def run_seed(*, seed: int, learning_rate: float, max_update: float) -> pd.DataFr
                     for key, value in diag.items():
                         values[f"{rule}_state_{key}"] = float(value)
 
-                finite = (
-                    all(
-                        bool(torch.isfinite(branches[mode][rule].weight).all())
-                        and bool(torch.isfinite(branches[mode][rule].bias).all())
-                        for rule in RULES
-                    )
-                    and all(math.isfinite(float(value)) for value in values.values())
-                )
+                finite = all(
+                    bool(torch.isfinite(branches[mode][rule].weight).all())
+                    and bool(torch.isfinite(branches[mode][rule].bias).all())
+                    for rule in RULES
+                ) and all(math.isfinite(float(value)) for value in values.values())
                 rows.append(
                     {
                         "seed": seed,
