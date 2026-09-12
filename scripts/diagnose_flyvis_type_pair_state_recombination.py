@@ -55,8 +55,7 @@ def _recombine_state(
         / target_norm.clamp_min(1e-30)
     )
     norm_error = float(
-        (torch.linalg.vector_norm(result.weight) - target_norm).abs()
-        / target_norm.clamp_min(1e-30)
+        (torch.linalg.vector_norm(result.weight) - target_norm).abs() / target_norm.clamp_min(1e-30)
     )
     return result, projection_error, norm_error
 
