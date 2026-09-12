@@ -1,0 +1,201 @@
+name: FlyVis type-pair curvature attribution
+
+on:
+  push:
+    paths:
+      - ".github/triggers/run-type-pair-curvature-attribution-900-919"
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [900, 901, 902, 903, 904, 905, 906, 907, 908, 909, 910, 911, 912, 913, 914, 915, 916, 917, 918, 919]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Attribute curvature synergy for seed ${{ matrix.seed }}
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run python scripts/diagnose_flyvis_type_pair_curvature_attribution.py \
+            --seed ${{ matrix.seed }} \
+            --shuffle-seed $((998000 + ${{ matrix.seed }})) \
+            --out results/generated/flyvis_type_pair_curvature_attribution_seed${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: type-pair-curvature-attribution-seed${{ matrix.seed }}
+          path: results/generated/flyvis_type_pair_curvature_attribution_seed${{ matrix.seed }}.csv
+
+  aggregate:
+    needs: diagnose
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: type-pair-curvature-attribution-seed*
+          path: artifacts
+          merge-multiple: true
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Aggregate curvature attribution
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run --with scipy python - <<'PY'
+          from pathlib import Path
+          import numpy as np
+          import pandas as pd
+          from scipy import stats
+
+          paths = sorted(Path("artifacts").glob("*.csv"))
+          if len(paths) != 20:
+              raise RuntimeError(f"expected 20 seed artifacts, got {len(paths)}")
+          frame = pd.concat([pd.read_csv(path) for path in paths], ignore_index=True)
+          if not frame["finite"].all():
+              raise RuntimeError("non-finite curvature attribution run detected")
+          frame.to_csv(
+              "results/generated/flyvis_type_pair_curvature_attribution.csv",
+              index=False,
+          )
+
+          seed_group = frame.groupby(
+              [
+                  "seed",
+                  "horizon",
+                  "grouping",
+                  "group_id",
+                  "source_type",
+                  "target_type",
+                  "edge_count",
+              ],
+              as_index=False,
+          )["group_synergy_contribution"].mean()
+
+          pair_rows = []
+          for keys, group in seed_group.groupby(
+              [
+                  "horizon",
+                  "grouping",
+                  "group_id",
+                  "source_type",
+                  "target_type",
+                  "edge_count",
+              ]
+          ):
+              horizon, grouping, group_id, source_type, target_type, edge_count = keys
+              values = group["group_synergy_contribution"].to_numpy(float)
+              mean = float(values.mean())
+              std = float(values.std(ddof=1))
+              ci_low, ci_high = stats.t.interval(
+                  0.95,
+                  len(values) - 1,
+                  loc=mean,
+                  scale=std / np.sqrt(len(values)),
+              )
+              pair_rows.append(
+                  {
+                      "horizon": int(horizon),
+                      "grouping": grouping,
+                      "group_id": int(group_id),
+                      "source_type": source_type,
+                      "target_type": target_type,
+                      "edge_count": int(edge_count),
+                      "n": len(values),
+                      "mean_contribution": mean,
+                      "ci_low": float(ci_low),
+                      "ci_high": float(ci_high),
+                      "positive": int((values > 0).sum()),
+                      "t_p": float(stats.ttest_1samp(values, 0.0).pvalue),
+                      "cohen_dz": mean / std if std > 0 else float("nan"),
+                  }
+              )
+          pd.DataFrame(pair_rows).to_csv(
+              "results/generated/flyvis_type_pair_curvature_attribution_pairs.csv",
+              index=False,
+          )
+
+          concentration_rows = []
+          for (seed, horizon, grouping), group in seed_group.groupby(
+              ["seed", "horizon", "grouping"]
+          ):
+              values = group["group_synergy_contribution"].to_numpy(float)
+              abs_values = np.abs(values)
+              abs_total = float(abs_values.sum())
+              positive_total = float(np.clip(values, 0.0, None).sum())
+              negative_total = float(np.clip(-values, 0.0, None).sum())
+              shares = abs_values / abs_total if abs_total > 0 else np.zeros_like(abs_values)
+              ordered = np.sort(abs_values)[::-1]
+              concentration_rows.append(
+                  {
+                      "seed": int(seed),
+                      "horizon": int(horizon),
+                      "grouping": grouping,
+                      "total_synergy": float(values.sum()),
+                      "absolute_mass": abs_total,
+                      "positive_mass": positive_total,
+                      "negative_mass": negative_total,
+                      "cancellation_ratio": (
+                          1.0 - abs(float(values.sum())) / abs_total if abs_total > 0 else 0.0
+                      ),
+                      "top1_abs_fraction": float(ordered[:1].sum() / abs_total) if abs_total > 0 else 0.0,
+                      "top5_abs_fraction": float(ordered[:5].sum() / abs_total) if abs_total > 0 else 0.0,
+                      "top10_abs_fraction": float(ordered[:10].sum() / abs_total) if abs_total > 0 else 0.0,
+                      "effective_group_count": float(1.0 / np.square(shares).sum()) if abs_total > 0 else 0.0,
+                  }
+              )
+          concentration = pd.DataFrame(concentration_rows)
+          concentration.to_csv(
+              "results/generated/flyvis_type_pair_curvature_attribution_concentration.csv",
+              index=False,
+          )
+
+          summary_rows = []
+          for (horizon, grouping), group in concentration.groupby(["horizon", "grouping"]):
+              for metric in (
+                  "total_synergy",
+                  "cancellation_ratio",
+                  "top1_abs_fraction",
+                  "top5_abs_fraction",
+                  "top10_abs_fraction",
+                  "effective_group_count",
+              ):
+                  values = group[metric].to_numpy(float)
+                  mean = float(values.mean())
+                  std = float(values.std(ddof=1))
+                  ci_low, ci_high = stats.t.interval(
+                      0.95,
+                      len(values) - 1,
+                      loc=mean,
+                      scale=std / np.sqrt(len(values)),
+                  )
+                  summary_rows.append(
+                      {
+                          "horizon": int(horizon),
+                          "grouping": grouping,
+                          "metric": metric,
+                          "n": len(values),
+                          "mean": mean,
+                          "ci_low": float(ci_low),
+                          "ci_high": float(ci_high),
+                      }
+                  )
+          pd.DataFrame(summary_rows).to_csv(
+              "results/generated/flyvis_type_pair_curvature_attribution_summary.csv",
+              index=False,
+          )
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-type-pair-curvature-attribution-aggregate
+          path: |
+            results/generated/flyvis_type_pair_curvature_attribution.csv
+            results/generated/flyvis_type_pair_curvature_attribution_pairs.csv
+            results/generated/flyvis_type_pair_curvature_attribution_concentration.csv
+            results/generated/flyvis_type_pair_curvature_attribution_summary.csv
