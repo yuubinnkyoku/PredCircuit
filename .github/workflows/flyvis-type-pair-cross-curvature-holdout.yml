@@ -1,0 +1,124 @@
+name: FlyVis type-pair cross-curvature holdout
+
+on:
+  push:
+    paths:
+      - ".github/triggers/run-type-pair-cross-curvature-860-879"
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [860, 861, 862, 863, 864, 865, 866, 867, 868, 869, 870, 871, 872, 873, 874, 875, 876, 877, 878, 879]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Diagnose cross-curvature for seed ${{ matrix.seed }}
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run python scripts/diagnose_flyvis_type_pair_cross_curvature.py \
+            --seed ${{ matrix.seed }} \
+            --shuffle-seed $((997000 + ${{ matrix.seed }})) \
+            --out results/generated/flyvis_type_pair_cross_curvature_seed${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: type-pair-cross-curvature-seed${{ matrix.seed }}
+          path: results/generated/flyvis_type_pair_cross_curvature_seed${{ matrix.seed }}.csv
+
+  aggregate:
+    needs: diagnose
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: type-pair-cross-curvature-seed*
+          path: artifacts
+          merge-multiple: true
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Aggregate cross-curvature
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run --with scipy python - <<'PY'
+          from pathlib import Path
+          import numpy as np
+          import pandas as pd
+          from scipy import stats
+
+          paths = sorted(Path("artifacts").glob("*.csv"))
+          if len(paths) != 20:
+              raise RuntimeError(f"expected 20 seed artifacts, got {len(paths)}")
+          frame = pd.concat([pd.read_csv(path) for path in paths], ignore_index=True)
+          if len(frame) != 240:
+              raise RuntimeError(f"expected 240 rows, got {len(frame)}")
+          if not frame["finite"].all():
+              raise RuntimeError("non-finite cross-curvature result detected")
+          frame.to_csv("results/generated/flyvis_type_pair_cross_curvature.csv", index=False)
+
+          metrics = [
+              "baseline_ce",
+              "projection_norm",
+              "residual_norm",
+              "projection_residual_cosine",
+              "grad_dot_projection",
+              "grad_dot_residual",
+              "projection_curvature",
+              "residual_curvature",
+              "cross_curvature",
+              "predicted_ce_synergy",
+          ]
+          seed_means = frame.groupby(["seed", "horizon", "grouping"], as_index=False)[metrics].mean()
+          rows = []
+          for horizon in sorted(seed_means["horizon"].unique()):
+              subset = seed_means[seed_means.horizon == horizon]
+              bio = subset[subset.grouping == "bio"].set_index("seed").sort_index()
+              shuffle = subset[subset.grouping == "shuffle"].set_index("seed").loc[bio.index]
+              for metric in metrics:
+                  for contrast, values in (
+                      ("bio", bio[metric]),
+                      ("bio_minus_shuffle", bio[metric] - shuffle[metric]),
+                  ):
+                      delta = values.to_numpy(float)
+                      mean = float(delta.mean())
+                      std = float(delta.std(ddof=1))
+                      ci_low, ci_high = stats.t.interval(
+                          0.95,
+                          len(delta) - 1,
+                          loc=mean,
+                          scale=std / np.sqrt(len(delta)),
+                      )
+                      rows.append(
+                          {
+                              "horizon": int(horizon),
+                              "metric": metric,
+                              "contrast": contrast,
+                              "n": len(delta),
+                              "mean": mean,
+                              "ci_low": float(ci_low),
+                              "ci_high": float(ci_high),
+                              "positive": int((delta > 0).sum()),
+                              "t_p": float(stats.ttest_1samp(delta, 0.0).pvalue),
+                              "wilcoxon_p": float(stats.wilcoxon(delta).pvalue),
+                              "cohen_dz": mean / std if std > 0 else float("nan"),
+                          }
+                      )
+          pd.DataFrame(rows).to_csv(
+              "results/generated/flyvis_type_pair_cross_curvature_summary.csv",
+              index=False,
+          )
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-type-pair-cross-curvature-aggregate
+          path: |
+            results/generated/flyvis_type_pair_cross_curvature.csv
+            results/generated/flyvis_type_pair_cross_curvature_summary.csv
