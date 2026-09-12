@@ -57,15 +57,9 @@ def _threshold_direction(
             suppressed_edges += len(indices)
 
     return result, {
-        "threshold_suppressed_group_fraction": float(
-            suppressed_groups / max(len(ratios), 1)
-        ),
-        "threshold_suppressed_edge_fraction": float(
-            suppressed_edges / max(total_edges, 1)
-        ),
-        "threshold_mean_mean_to_residual_norm": float(
-            sum(ratios) / max(len(ratios), 1)
-        ),
+        "threshold_suppressed_group_fraction": float(suppressed_groups / max(len(ratios), 1)),
+        "threshold_suppressed_edge_fraction": float(suppressed_edges / max(total_edges, 1)),
+        "threshold_mean_mean_to_residual_norm": float(sum(ratios) / max(len(ratios), 1)),
     }
 
 
@@ -81,16 +75,9 @@ def run_seed(*, seed: int, learning_rate: float, max_update: float) -> pd.DataFr
             use_biological_strength=True,
         ),
     }
-    models = {
-        mode: {rule: copy.deepcopy(base) for rule in RULES}
-        for mode, base in bases.items()
-    }
-    weight_error_sum = {
-        mode: {"standard": 0.0, "threshold": 0.0} for mode in INIT_MODES
-    }
-    bias_error_sum = {
-        mode: {"standard": 0.0, "threshold": 0.0} for mode in INIT_MODES
-    }
+    models = {mode: {rule: copy.deepcopy(base) for rule in RULES} for mode, base in bases.items()}
+    weight_error_sum = {mode: {"standard": 0.0, "threshold": 0.0} for mode in INIT_MODES}
+    bias_error_sum = {mode: {"standard": 0.0, "threshold": 0.0} for mode in INIT_MODES}
     diag_sum = {
         mode: {
             "threshold_suppressed_group_fraction": 0.0,
@@ -153,9 +140,7 @@ def run_seed(*, seed: int, learning_rate: float, max_update: float) -> pd.DataFr
             local = models[mode]["local"]
             for eval_rep in range(EVAL_REPS):
                 jitter_seed = EVAL_JITTER_BASE + eval_rep
-                local_readout, classes = _heldout_readout(
-                    local, circuit, jitter_seed=jitter_seed
-                )
+                local_readout, classes = _heldout_readout(local, circuit, jitter_seed=jitter_seed)
                 for rule in RULES:
                     model = models[mode][rule]
                     if rule == "local":
@@ -171,9 +156,7 @@ def run_seed(*, seed: int, learning_rate: float, max_update: float) -> pd.DataFr
                         mean_weight_error = weight_error_sum[mode][rule] / step
                         mean_bias_error = bias_error_sum[mode][rule] / step
                     metrics = _metrics(readout, classes, local_readout=local_readout)
-                    diagnostics = {
-                        key: diag_sum[mode][key] / step for key in diag_sum[mode]
-                    }
+                    diagnostics = {key: diag_sum[mode][key] / step for key in diag_sum[mode]}
                     finite = (
                         bool(torch.isfinite(model.weight).all())
                         and bool(torch.isfinite(model.bias).all())
