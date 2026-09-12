@@ -68,17 +68,25 @@ def run_seed(*, seed: int, learning_rate: float, max_update: float) -> pd.DataFr
     rows: list[dict[str, float | int | bool]] = []
 
     for branch_step in BRANCH_STEPS:
-        epoch = BRANCH_HORIZON + branch_step
-        rho_raw, rho_bias = credit(rho_model, circuit, seed=seed, epoch=epoch)
-        signed_raw, signed_bias = credit(signed_model, circuit, seed=seed, epoch=epoch)
-        rho_geometry = _selection_geometry(rho_raw, rho_model.weight.detach(), named_groups)
-        signed_geometry = _selection_geometry(
-            signed_raw,
-            signed_model.weight.detach(),
-            named_groups,
-        )
-
         if branch_step > 0:
+            update_epoch = BRANCH_HORIZON + branch_step - 1
+            rho_raw, rho_bias = credit(rho_model, circuit, seed=seed, epoch=update_epoch)
+            signed_raw, signed_bias = credit(
+                signed_model,
+                circuit,
+                seed=seed,
+                epoch=update_epoch,
+            )
+            rho_geometry = _selection_geometry(
+                rho_raw,
+                rho_model.weight.detach(),
+                named_groups,
+            )
+            signed_geometry = _selection_geometry(
+                signed_raw,
+                signed_model.weight.detach(),
+                named_groups,
+            )
             rho_direction, _ = _rho04_direction(rho_raw, named_groups)
             signed_direction, _ = _signed_band_direction(
                 signed_raw,
@@ -103,6 +111,18 @@ def run_seed(*, seed: int, learning_rate: float, max_update: float) -> pd.DataFr
                 max_update=max_update,
             )
         else:
+            rho_raw, _ = credit(rho_model, circuit, seed=seed, epoch=BRANCH_HORIZON)
+            signed_raw, _ = credit(signed_model, circuit, seed=seed, epoch=BRANCH_HORIZON)
+            rho_geometry = _selection_geometry(
+                rho_raw,
+                rho_model.weight.detach(),
+                named_groups,
+            )
+            signed_geometry = _selection_geometry(
+                signed_raw,
+                signed_model.weight.detach(),
+                named_groups,
+            )
             update_difference_norm = 0.0
 
         weight_distance = float(torch.linalg.vector_norm(signed_model.weight - rho_model.weight))
@@ -121,7 +141,9 @@ def run_seed(*, seed: int, learning_rate: float, max_update: float) -> pd.DataFr
                 circuit,
                 jitter_seed=jitter_seed,
             )
-            if not torch.equal(classes, rho_classes) or not torch.equal(classes, signed_classes):
+            if not torch.equal(classes, rho_classes) or not torch.equal(
+                classes, signed_classes
+            ):
                 raise RuntimeError("held-out class mismatch")
             rho_metrics = _metrics(rho_readout, classes, local_readout=baseline_readout)
             signed_metrics = _metrics(signed_readout, classes, local_readout=baseline_readout)
