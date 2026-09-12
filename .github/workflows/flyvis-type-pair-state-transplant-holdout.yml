@@ -1,0 +1,126 @@
+name: FlyVis type-pair state transplant holdout
+
+on:
+  push:
+    paths:
+      - ".github/triggers/run-type-pair-state-transplant-820-839"
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [820, 821, 822, 823, 824, 825, 826, 827, 828, 829, 830, 831, 832, 833, 834, 835, 836, 837, 838, 839]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Diagnose state transplant for seed ${{ matrix.seed }}
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run python scripts/diagnose_flyvis_type_pair_state_transplant.py \
+            --seed ${{ matrix.seed }} \
+            --shuffle-seed $((997000 + ${{ matrix.seed }})) \
+            --out results/generated/flyvis_type_pair_state_transplant_seed${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: type-pair-state-transplant-seed${{ matrix.seed }}
+          path: results/generated/flyvis_type_pair_state_transplant_seed${{ matrix.seed }}.csv
+
+  aggregate:
+    needs: diagnose
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: type-pair-state-transplant-seed*
+          path: artifacts
+          merge-multiple: true
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Aggregate state transplant
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run --with scipy python - <<'PY'
+          from pathlib import Path
+          import numpy as np
+          import pandas as pd
+          from scipy import stats
+
+          paths = sorted(Path("artifacts").glob("*.csv"))
+          frame = pd.concat([pd.read_csv(path) for path in paths], ignore_index=True)
+          if len(paths) != 20:
+              raise RuntimeError(f"expected 20 seed artifacts, got {len(paths)}")
+          if len(frame) != 2400:
+              raise RuntimeError(f"expected 2400 rows, got {len(frame)}")
+          if not frame["finite"].all():
+              raise RuntimeError("non-finite state transplant run detected")
+          frame.to_csv("results/generated/flyvis_type_pair_state_transplant.csv", index=False)
+
+          seed_means = frame.groupby(["seed", "horizon", "rule"], as_index=False)[
+              ["cross_entropy", "accuracy", "hard_margin"]
+          ].mean()
+          rows = []
+          comparisons = (
+              ("type_minus_local", "type", "local"),
+              ("bio_transplant_minus_local", "bio_transplant", "local"),
+              ("shuffle_transplant_minus_local", "shuffle_transplant", "local"),
+              ("type_minus_bio_ablate", "type", "bio_ablate"),
+              ("type_minus_shuffle_ablate", "type", "shuffle_ablate"),
+          )
+          for horizon in sorted(seed_means["horizon"].unique()):
+              subset = seed_means[seed_means.horizon == horizon]
+              indexed = {
+                  rule: subset[subset.rule == rule].set_index("seed").sort_index()
+                  for rule in seed_means["rule"].unique()
+              }
+              for comparison, treatment_name, baseline_name in comparisons:
+                  treatment = indexed[treatment_name]
+                  baseline = indexed[baseline_name].loc[treatment.index]
+                  for metric in ("cross_entropy", "accuracy", "hard_margin"):
+                      if metric == "cross_entropy":
+                          delta = (baseline[metric] - treatment[metric]).to_numpy(float)
+                      else:
+                          delta = (treatment[metric] - baseline[metric]).to_numpy(float)
+                      mean = float(delta.mean())
+                      std = float(delta.std(ddof=1))
+                      ci_low, ci_high = stats.t.interval(
+                          0.95,
+                          len(delta) - 1,
+                          loc=mean,
+                          scale=std / np.sqrt(len(delta)),
+                      )
+                      rows.append(
+                          {
+                              "horizon": int(horizon),
+                              "comparison": comparison,
+                              "metric": metric,
+                              "n": len(delta),
+                              "mean_improvement": mean,
+                              "ci_low": float(ci_low),
+                              "ci_high": float(ci_high),
+                              "positive": int((delta > 0).sum()),
+                              "t_p": float(stats.ttest_1samp(delta, 0.0).pvalue),
+                              "wilcoxon_p": float(stats.wilcoxon(delta).pvalue),
+                              "cohen_dz": mean / std if std > 0 else float("nan"),
+                          }
+                      )
+
+          pd.DataFrame(rows).to_csv(
+              "results/generated/flyvis_type_pair_state_transplant_summary.csv",
+              index=False,
+          )
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-type-pair-state-transplant-aggregate
+          path: |
+            results/generated/flyvis_type_pair_state_transplant.csv
+            results/generated/flyvis_type_pair_state_transplant_summary.csv
