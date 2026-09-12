@@ -1,0 +1,153 @@
+name: FlyVis biological-strength logit balance
+
+on:
+  push:
+    paths:
+      - ".github/triggers/run-type-pair-biological-logit-balance-1080-1099"
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [1080, 1081, 1082, 1083, 1084, 1085, 1086, 1087, 1088, 1089, 1090, 1091, 1092, 1093, 1094, 1095, 1096, 1097, 1098, 1099]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Run biological logit balance for seed ${{ matrix.seed }}
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run python scripts/diagnose_flyvis_type_pair_biological_logit_balance.py \
+            --seed ${{ matrix.seed }} \
+            --out results/generated/flyvis_type_pair_biological_logit_balance_seed${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: type-pair-biological-logit-balance-seed${{ matrix.seed }}
+          path: results/generated/flyvis_type_pair_biological_logit_balance_seed${{ matrix.seed }}.csv
+
+  aggregate:
+    needs: diagnose
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: type-pair-biological-logit-balance-seed*
+          path: artifacts
+          merge-multiple: true
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Aggregate biological logit balance
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run --with scipy python - <<'PY'
+          from pathlib import Path
+          import numpy as np
+          import pandas as pd
+          from scipy import stats
+
+          paths = sorted(Path("artifacts").glob("*.csv"))
+          if len(paths) != 20:
+              raise RuntimeError(f"expected 20 seed artifacts, got {len(paths)}")
+          frame = pd.concat([pd.read_csv(path) for path in paths], ignore_index=True)
+          if not frame["finite"].all():
+              raise RuntimeError("non-finite biological logit-balance run detected")
+          frame.to_csv(
+              "results/generated/flyvis_type_pair_biological_logit_balance.csv",
+              index=False,
+          )
+
+          metric_specs = {
+              "cross_entropy": -1.0,
+              "accuracy": 1.0,
+              "hard_margin": 1.0,
+              "soft_margin": 1.0,
+              "correct_probability": 1.0,
+              "correct_logit": 1.0,
+              "max_wrong_logit": -1.0,
+              "wrong_tail_pressure": -1.0,
+              "ce_on_local_correct": -1.0,
+              "ce_on_local_wrong": -1.0,
+              "prob_on_local_correct": 1.0,
+              "prob_on_local_wrong": 1.0,
+              "margin_on_local_correct": 1.0,
+              "margin_on_local_wrong": 1.0,
+              "worst_class_ce": -1.0,
+              "worst_class_accuracy": 1.0,
+          }
+          seed_means = frame.groupby(["seed", "horizon", "rule"], as_index=False)[
+              list(metric_specs)
+              + ["wrong_to_correct_fraction", "correct_to_wrong_fraction"]
+          ].mean()
+          rows = []
+          for horizon in sorted(seed_means["horizon"].unique()):
+              subset = seed_means[seed_means.horizon == horizon]
+              local = subset[subset.rule == "local"].set_index("seed").sort_index()
+              for rule in ("l1_only", "non_l1_only", "type"):
+                  treatment = subset[subset.rule == rule].set_index("seed").sort_index()
+                  for metric, sign in metric_specs.items():
+                      delta = sign * (treatment[metric] - local[metric]).to_numpy(float)
+                      mean = float(delta.mean())
+                      std = float(delta.std(ddof=1))
+                      ci_low, ci_high = stats.t.interval(
+                          0.95,
+                          len(delta) - 1,
+                          loc=mean,
+                          scale=std / np.sqrt(len(delta)),
+                      )
+                      rows.append(
+                          {
+                              "horizon": int(horizon),
+                              "rule": rule,
+                              "metric": metric,
+                              "n": len(delta),
+                              "mean_improvement": mean,
+                              "ci_low": float(ci_low),
+                              "ci_high": float(ci_high),
+                              "positive": int((delta > 0).sum()),
+                              "t_p": float(stats.ttest_1samp(delta, 0.0).pvalue),
+                              "cohen_dz": mean / std if std > 0 else float("nan"),
+                          }
+                      )
+          pd.DataFrame(rows).to_csv(
+              "results/generated/flyvis_type_pair_biological_logit_balance_summary.csv",
+              index=False,
+          )
+
+          transitions = seed_means[
+              [
+                  "seed",
+                  "horizon",
+                  "rule",
+                  "wrong_to_correct_fraction",
+                  "correct_to_wrong_fraction",
+              ]
+          ]
+          transitions.to_csv(
+              "results/generated/flyvis_type_pair_biological_logit_balance_transitions.csv",
+              index=False,
+          )
+
+          diagnostics = frame.groupby(["seed", "horizon", "rule"], as_index=False)[
+              ["mean_weight_norm_error", "mean_bias_error"]
+          ].mean()
+          diagnostics.to_csv(
+              "results/generated/flyvis_type_pair_biological_logit_balance_diagnostics.csv",
+              index=False,
+          )
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-type-pair-biological-logit-balance-aggregate
+          path: |
+            results/generated/flyvis_type_pair_biological_logit_balance.csv
+            results/generated/flyvis_type_pair_biological_logit_balance_summary.csv
+            results/generated/flyvis_type_pair_biological_logit_balance_transitions.csv
+            results/generated/flyvis_type_pair_biological_logit_balance_diagnostics.csv
