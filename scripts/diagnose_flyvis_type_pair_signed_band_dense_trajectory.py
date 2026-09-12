@@ -141,9 +141,7 @@ def run_seed(*, seed: int, learning_rate: float, max_update: float) -> pd.DataFr
                 circuit,
                 jitter_seed=jitter_seed,
             )
-            if not torch.equal(classes, rho_classes) or not torch.equal(
-                classes, signed_classes
-            ):
+            if not torch.equal(classes, rho_classes) or not torch.equal(classes, signed_classes):
                 raise RuntimeError("held-out class mismatch")
             rho_metrics = _metrics(rho_readout, classes, local_readout=baseline_readout)
             signed_metrics = _metrics(signed_readout, classes, local_readout=baseline_readout)
