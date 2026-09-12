@@ -7,7 +7,6 @@ from pathlib import Path
 
 import pandas as pd
 import torch
-
 from diagnose_flyvis_type_pair_adaptive_mean_gain_holdout import _standard_direction
 from diagnose_flyvis_type_pair_biological_logit_balance import _heldout_readout, _metrics
 from diagnose_flyvis_type_pair_horizon_causal import _match_local_state
