@@ -1,0 +1,141 @@
+name: FlyVis L1 gain-1 independent holdout
+
+on:
+  push:
+    paths:
+      - ".github/triggers/run-type-pair-l1-gain1-holdout-1120-1139"
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [1120, 1121, 1122, 1123, 1124, 1125, 1126, 1127, 1128, 1129, 1130, 1131, 1132, 1133, 1134, 1135, 1136, 1137, 1138, 1139]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Run gain-1 holdout for seed ${{ matrix.seed }}
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run python scripts/diagnose_flyvis_type_pair_l1_gain1_holdout.py \
+            --seed ${{ matrix.seed }} \
+            --out results/generated/flyvis_type_pair_l1_gain1_holdout_seed${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: type-pair-l1-gain1-holdout-seed${{ matrix.seed }}
+          path: results/generated/flyvis_type_pair_l1_gain1_holdout_seed${{ matrix.seed }}.csv
+
+  aggregate:
+    needs: diagnose
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: type-pair-l1-gain1-holdout-seed*
+          path: artifacts
+          merge-multiple: true
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Aggregate gain-1 holdout
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run --with scipy python - <<'PY'
+          from pathlib import Path
+          import numpy as np
+          import pandas as pd
+          from scipy import stats
+
+          paths = sorted(Path("artifacts").glob("*.csv"))
+          if len(paths) != 20:
+              raise RuntimeError(f"expected 20 seed artifacts, got {len(paths)}")
+          frame = pd.concat([pd.read_csv(path) for path in paths], ignore_index=True)
+          if not frame["finite"].all():
+              raise RuntimeError("non-finite gain-1 holdout detected")
+          frame.to_csv("results/generated/flyvis_type_pair_l1_gain1_holdout.csv", index=False)
+
+          seed_means = frame.groupby(["seed", "horizon", "rule"], as_index=False)[
+              [
+                  "cross_entropy",
+                  "accuracy",
+                  "hard_margin",
+                  "soft_margin",
+                  "correct_probability",
+                  "wrong_tail_pressure",
+                  "ce_on_local_correct",
+                  "ce_on_local_wrong",
+                  "wrong_to_correct_fraction",
+                  "correct_to_wrong_fraction",
+              ]
+          ].mean()
+          rows = []
+          metric_signs = {
+              "cross_entropy": -1.0,
+              "accuracy": 1.0,
+              "hard_margin": 1.0,
+              "soft_margin": 1.0,
+              "correct_probability": 1.0,
+              "wrong_tail_pressure": -1.0,
+              "ce_on_local_correct": -1.0,
+              "ce_on_local_wrong": -1.0,
+          }
+          for horizon in sorted(seed_means["horizon"].unique()):
+              subset = seed_means[seed_means.horizon == horizon]
+              piv = {
+                  rule: subset[subset.rule == rule].set_index("seed").sort_index()
+                  for rule in ("local", "gain1", "standard")
+              }
+              comparisons = (("gain1_vs_local", "gain1", "local"), ("standard_vs_local", "standard", "local"), ("gain1_vs_standard", "gain1", "standard"))
+              for comparison, treatment, reference in comparisons:
+                  for metric, sign in metric_signs.items():
+                      delta = sign * (piv[treatment][metric] - piv[reference][metric]).to_numpy(float)
+                      mean = float(delta.mean())
+                      std = float(delta.std(ddof=1))
+                      ci_low, ci_high = stats.t.interval(
+                          0.95,
+                          len(delta) - 1,
+                          loc=mean,
+                          scale=std / np.sqrt(len(delta)),
+                      )
+                      rows.append(
+                          {
+                              "horizon": int(horizon),
+                              "comparison": comparison,
+                              "metric": metric,
+                              "n": len(delta),
+                              "mean_improvement": mean,
+                              "ci_low": float(ci_low),
+                              "ci_high": float(ci_high),
+                              "positive": int((delta > 0).sum()),
+                              "t_p": float(stats.ttest_1samp(delta, 0.0).pvalue),
+                              "wilcoxon_p": float(stats.wilcoxon(delta).pvalue),
+                              "cohen_dz": mean / std if std > 0 else float("nan"),
+                          }
+                      )
+          pd.DataFrame(rows).to_csv(
+              "results/generated/flyvis_type_pair_l1_gain1_holdout_summary.csv",
+              index=False,
+          )
+
+          diagnostics = frame.groupby(["seed", "horizon", "rule"], as_index=False)[
+              ["mean_weight_norm_error", "mean_bias_error"]
+          ].mean()
+          diagnostics.to_csv(
+              "results/generated/flyvis_type_pair_l1_gain1_holdout_diagnostics.csv",
+              index=False,
+          )
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-type-pair-l1-gain1-holdout-aggregate
+          path: |
+            results/generated/flyvis_type_pair_l1_gain1_holdout.csv
+            results/generated/flyvis_type_pair_l1_gain1_holdout_summary.csv
+            results/generated/flyvis_type_pair_l1_gain1_holdout_diagnostics.csv
