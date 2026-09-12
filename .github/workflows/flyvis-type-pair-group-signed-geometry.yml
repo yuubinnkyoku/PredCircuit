@@ -1,0 +1,169 @@
+name: FlyVis type-pair group signed geometry
+
+on:
+  push:
+    paths:
+      - ".github/triggers/run-type-pair-group-signed-geometry-1240-1259"
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [1240, 1241, 1242, 1243, 1244, 1245, 1246, 1247, 1248, 1249, 1250, 1251, 1252, 1253, 1254, 1255, 1256, 1257, 1258, 1259]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Run signed geometry diagnostic for seed ${{ matrix.seed }}
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run python scripts/diagnose_flyvis_type_pair_group_signed_geometry.py \
+            --seed ${{ matrix.seed }} \
+            --out results/generated/flyvis_type_pair_group_signed_geometry_seed${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: type-pair-group-signed-geometry-seed${{ matrix.seed }}
+          path: results/generated/flyvis_type_pair_group_signed_geometry_seed${{ matrix.seed }}.csv
+
+  aggregate:
+    needs: diagnose
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: type-pair-group-signed-geometry-seed*
+          path: artifacts
+          merge-multiple: true
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Aggregate signed geometry diagnostic
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run --with scipy python - <<'PY'
+          from pathlib import Path
+          import numpy as np
+          import pandas as pd
+          from scipy import stats
+
+          paths = sorted(Path("artifacts").glob("*.csv"))
+          if len(paths) != 20:
+              raise RuntimeError(f"expected 20 seed artifacts, got {len(paths)}")
+          frame = pd.concat([pd.read_csv(path) for path in paths], ignore_index=True)
+          if not frame["finite"].all():
+              raise RuntimeError("non-finite signed geometry diagnostic detected")
+          frame.to_csv(
+              "results/generated/flyvis_type_pair_group_signed_geometry.csv",
+              index=False,
+          )
+
+          rows = []
+          for init_mode in sorted(frame["init_mode"].unique()):
+              for horizon in sorted(frame["horizon"].unique()):
+                  subset = frame[
+                      (frame.init_mode == init_mode) & (frame.horizon == horizon)
+                  ]
+                  for high_rho in (False, True):
+                      part = subset[subset.high_rho == high_rho]
+                      for metric in (
+                          "ce_grad_dot_mean",
+                          "hard_margin_grad_dot_mean",
+                          "soft_margin_grad_dot_mean",
+                          "weight_mean_times_credit_mean",
+                      ):
+                          seed_values = part.groupby("seed")[metric].mean()
+                          values = seed_values.to_numpy(float)
+                          if len(values) == 0:
+                              continue
+                          mean = float(values.mean())
+                          std = float(values.std(ddof=1)) if len(values) > 1 else float("nan")
+                          if len(values) > 1:
+                              ci_low, ci_high = stats.t.interval(
+                                  0.95,
+                                  len(values) - 1,
+                                  loc=mean,
+                                  scale=std / np.sqrt(len(values)),
+                              )
+                              t_p = float(stats.ttest_1samp(values, 0.0).pvalue)
+                          else:
+                              ci_low = ci_high = mean
+                              t_p = float("nan")
+                          rows.append(
+                              {
+                                  "init_mode": init_mode,
+                                  "horizon": int(horizon),
+                                  "high_rho": bool(high_rho),
+                                  "metric": metric,
+                                  "n_seeds": len(values),
+                                  "mean": mean,
+                                  "ci_low": float(ci_low),
+                                  "ci_high": float(ci_high),
+                                  "positive": int((values > 0).sum()),
+                                  "t_p": t_p,
+                                  "cohen_dz": mean / std if std > 0 else float("nan"),
+                              }
+                          )
+          pd.DataFrame(rows).to_csv(
+              "results/generated/flyvis_type_pair_group_signed_geometry_summary.csv",
+              index=False,
+          )
+
+          corr_rows = []
+          features = (
+              "mean_to_residual_norm",
+              "mean_credit",
+              "mean_credit_abs",
+              "weight_mean",
+              "weight_std",
+              "weight_mean_times_credit_mean",
+          )
+          targets = (
+              "ce_grad_dot_mean",
+              "hard_margin_grad_dot_mean",
+              "soft_margin_grad_dot_mean",
+          )
+          for init_mode in sorted(frame["init_mode"].unique()):
+              for horizon in sorted(frame["horizon"].unique()):
+                  subset = frame[
+                      (frame.init_mode == init_mode)
+                      & (frame.horizon == horizon)
+                      & frame.high_rho
+                  ]
+                  for feature in features:
+                      for target in targets:
+                          if len(subset) < 3:
+                              continue
+                          pearson = stats.pearsonr(subset[feature], subset[target])
+                          spearman = stats.spearmanr(subset[feature], subset[target])
+                          corr_rows.append(
+                              {
+                                  "init_mode": init_mode,
+                                  "horizon": int(horizon),
+                                  "feature": feature,
+                                  "target": target,
+                                  "n_groups": len(subset),
+                                  "pearson_r": float(pearson.statistic),
+                                  "pearson_p": float(pearson.pvalue),
+                                  "spearman_r": float(spearman.statistic),
+                                  "spearman_p": float(spearman.pvalue),
+                              }
+                          )
+          pd.DataFrame(corr_rows).to_csv(
+              "results/generated/flyvis_type_pair_group_signed_geometry_correlations.csv",
+              index=False,
+          )
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-type-pair-group-signed-geometry-aggregate
+          path: |
+            results/generated/flyvis_type_pair_group_signed_geometry.csv
+            results/generated/flyvis_type_pair_group_signed_geometry_summary.csv
+            results/generated/flyvis_type_pair_group_signed_geometry_correlations.csv
