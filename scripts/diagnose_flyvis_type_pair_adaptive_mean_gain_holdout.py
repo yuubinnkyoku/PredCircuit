@@ -49,7 +49,7 @@ def _adaptive_direction(
     for _, _, indices in named_groups:
         values = raw_edge[indices]
         mean = values.mean()
-        mean_component = torch.full_like(values, mean)
+        mean_component = mean.expand_as(values)
         residual = values - mean
         mean_norm = torch.linalg.vector_norm(mean_component)
         residual_norm = torch.linalg.vector_norm(residual)
@@ -66,7 +66,9 @@ def _adaptive_direction(
         ratios.append(ratio)
 
     weight_total = max(sum(weights), 1)
-    edge_weighted_gain = sum(gain * weight for gain, weight in zip(gains, weights, strict=True)) / weight_total
+    edge_weighted_gain = sum(
+        gain * weight for gain, weight in zip(gains, weights, strict=True)
+    ) / weight_total
     return result, {
         "adaptive_mean_extra_gain": float(sum(gains) / max(len(gains), 1)),
         "adaptive_edge_weighted_extra_gain": float(edge_weighted_gain),
@@ -163,7 +165,9 @@ def run_seed(*, seed: int, learning_rate: float, max_update: float) -> pd.DataFr
             local = models[mode]["local"]
             for eval_rep in range(EVAL_REPS):
                 jitter_seed = EVAL_JITTER_BASE + eval_rep
-                local_readout, classes = _heldout_readout(local, circuit, jitter_seed=jitter_seed)
+                local_readout, classes = _heldout_readout(
+                    local, circuit, jitter_seed=jitter_seed
+                )
                 for rule in RULES:
                     model = models[mode][rule]
                     if rule == "local":
@@ -189,7 +193,10 @@ def run_seed(*, seed: int, learning_rate: float, max_update: float) -> pd.DataFr
                         and all(math.isfinite(value) for value in metrics.values())
                         and math.isfinite(mean_weight_error)
                         and math.isfinite(mean_bias_error)
-                        and all(math.isfinite(value) for value in adaptive_diagnostics.values())
+                        and all(
+                            math.isfinite(value)
+                            for value in adaptive_diagnostics.values()
+                        )
                     )
                     rows.append(
                         {
@@ -222,7 +229,11 @@ def main() -> None:
     parser.add_argument("--max-update", type=float, default=0.05)
     parser.add_argument("--out", type=Path, required=True)
     args = parser.parse_args()
-    frame = run_seed(seed=args.seed, learning_rate=args.learning_rate, max_update=args.max_update)
+    frame = run_seed(
+        seed=args.seed,
+        learning_rate=args.learning_rate,
+        max_update=args.max_update,
+    )
     args.out.parent.mkdir(parents=True, exist_ok=True)
     frame.to_csv(args.out, index=False)
     print(frame.to_string(index=False))
