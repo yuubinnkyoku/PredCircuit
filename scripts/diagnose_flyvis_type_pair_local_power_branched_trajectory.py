@@ -62,8 +62,7 @@ def _selection_geometry(
         "median_rho": float(ratio_tensor.median()),
         "rho_ge_05_fraction": float((ratio_tensor >= 0.5).float().mean()),
         "local_power_added_group_fraction": local_power_added / count,
-        "local_power_suppressed_group_fraction": (threshold_suppressed + local_power_added)
-        / count,
+        "local_power_suppressed_group_fraction": (threshold_suppressed + local_power_added) / count,
         "mean_local_power_score": float(score_tensor.mean()),
         "positive_local_power_score_fraction": float((score_tensor > 0.0).float().mean()),
     }
@@ -173,9 +172,7 @@ def run_seed(*, seed: int, learning_rate: float, max_update: float) -> pd.DataFr
             weight_distance = float(
                 torch.linalg.vector_norm(power_model.weight - threshold_model.weight)
             )
-            bias_distance = float(
-                torch.linalg.vector_norm(power_model.bias - threshold_model.bias)
-            )
+            bias_distance = float(torch.linalg.vector_norm(power_model.bias - threshold_model.bias))
 
             for eval_rep in range(EVAL_REPS):
                 jitter_seed = EVAL_JITTER_BASE + eval_rep
@@ -196,9 +193,7 @@ def run_seed(*, seed: int, learning_rate: float, max_update: float) -> pd.DataFr
                 threshold_metrics = _metrics(
                     threshold_readout, classes, local_readout=baseline_readout
                 )
-                power_metrics = _metrics(
-                    power_readout, classes, local_readout=baseline_readout
-                )
+                power_metrics = _metrics(power_readout, classes, local_readout=baseline_readout)
                 metric_names = ("cross_entropy", "accuracy", "hard_margin", "soft_margin")
                 values = {
                     **{f"threshold_{key}": threshold_metrics[key] for key in metric_names},
