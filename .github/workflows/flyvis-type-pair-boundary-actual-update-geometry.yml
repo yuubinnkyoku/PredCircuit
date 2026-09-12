@@ -1,0 +1,192 @@
+name: FlyVis boundary actual-update geometry
+
+on:
+  push:
+    paths:
+      - ".github/triggers/run-type-pair-boundary-actual-update-geometry-1420-1439"
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [1420, 1421, 1422, 1423, 1424, 1425, 1426, 1427, 1428, 1429, 1430, 1431, 1432, 1433, 1434, 1435, 1436, 1437, 1438, 1439]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Run boundary actual-update geometry for seed ${{ matrix.seed }}
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run python scripts/diagnose_flyvis_type_pair_boundary_actual_update_geometry.py \
+            --seed ${{ matrix.seed }} \
+            --out results/generated/flyvis_type_pair_boundary_actual_update_geometry_seed${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: type-pair-boundary-actual-update-geometry-seed${{ matrix.seed }}
+          path: results/generated/flyvis_type_pair_boundary_actual_update_geometry_seed${{ matrix.seed }}.csv
+
+  aggregate:
+    needs: diagnose
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: type-pair-boundary-actual-update-geometry-seed*
+          path: artifacts
+          merge-multiple: true
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Aggregate boundary actual-update geometry
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run --with scipy python - <<'PY'
+          from pathlib import Path
+          import numpy as np
+          import pandas as pd
+          from scipy import stats
+
+          paths = sorted(Path("artifacts").glob("*.csv"))
+          if len(paths) != 20:
+              raise RuntimeError(f"expected 20 seed artifacts, got {len(paths)}")
+          frame = pd.concat([pd.read_csv(path) for path in paths], ignore_index=True)
+          if not frame["finite"].all():
+              raise RuntimeError("non-finite boundary geometry detected")
+          frame.to_csv(
+              "results/generated/flyvis_type_pair_boundary_actual_update_geometry.csv",
+              index=False,
+          )
+
+          target = "hard_margin_grad_dot_suppression_delta"
+          features = (
+              "rho",
+              "mean_credit",
+              "mean_credit_abs",
+              "weight_mean",
+              "weight_std",
+              "weight_mean_times_credit_mean",
+              "mean_weight_times_credit",
+              "weight_credit_cosine",
+              "suppression_delta_norm",
+              "weight_suppression_delta_dot",
+              "weight_suppression_delta_cosine",
+              "high_clip_fraction",
+              "low_clip_fraction",
+              "clip_fraction_drop",
+          )
+
+          correlation_rows = []
+          sign_rows = []
+          for (seed, horizon), subset in frame.groupby(["seed", "horizon"]):
+              y = subset[target].to_numpy(float)
+              beneficial = y > 0.0
+              for feature in features:
+                  x = subset[feature].to_numpy(float)
+                  if np.std(x) > 0.0 and np.std(y) > 0.0:
+                      pearson = float(stats.pearsonr(x, y).statistic)
+                      spearman = float(stats.spearmanr(x, y).statistic)
+                  else:
+                      pearson = float("nan")
+                      spearman = float("nan")
+                  correlation_rows.append(
+                      {
+                          "seed": int(seed),
+                          "horizon": int(horizon),
+                          "feature": feature,
+                          "pearson": pearson,
+                          "spearman": spearman,
+                      }
+                  )
+                  predicted_positive = x > 0.0
+                  accuracy_pos = float((predicted_positive == beneficial).mean())
+                  accuracy_neg = float(((~predicted_positive) == beneficial).mean())
+                  sign_rows.append(
+                      {
+                          "seed": int(seed),
+                          "horizon": int(horizon),
+                          "feature": feature,
+                          "accuracy_if_positive": accuracy_pos,
+                          "accuracy_if_negative": accuracy_neg,
+                      }
+                  )
+
+          correlations = pd.DataFrame(correlation_rows)
+          correlations.to_csv(
+              "results/generated/flyvis_type_pair_boundary_actual_update_geometry_correlations.csv",
+              index=False,
+          )
+          signs = pd.DataFrame(sign_rows)
+          signs.to_csv(
+              "results/generated/flyvis_type_pair_boundary_actual_update_geometry_signs.csv",
+              index=False,
+          )
+
+          summary_rows = []
+          for horizon in sorted(frame["horizon"].unique()):
+              frame_h = frame[frame["horizon"] == horizon]
+              beneficial_fraction = (
+                  frame_h.groupby("seed")[target].apply(lambda x: float((x > 0.0).mean())).to_numpy()
+              )
+              summary_rows.append(
+                  {
+                      "horizon": int(horizon),
+                      "kind": "target",
+                      "feature": "beneficial_fraction",
+                      "metric": "mean",
+                      "value": float(beneficial_fraction.mean()),
+                      "t_p_vs_half": float(stats.ttest_1samp(beneficial_fraction, 0.5).pvalue),
+                  }
+              )
+              for feature in features:
+                  corr_h = correlations[
+                      (correlations["horizon"] == horizon)
+                      & (correlations["feature"] == feature)
+                  ]
+                  for metric in ("pearson", "spearman"):
+                      values = corr_h[metric].dropna().to_numpy(float)
+                      summary_rows.append(
+                          {
+                              "horizon": int(horizon),
+                              "kind": "correlation",
+                              "feature": feature,
+                              "metric": metric,
+                              "value": float(values.mean()),
+                              "t_p_vs_half": float(stats.ttest_1samp(values, 0.0).pvalue),
+                          }
+                      )
+                  sign_h = signs[
+                      (signs["horizon"] == horizon) & (signs["feature"] == feature)
+                  ]
+                  for metric in ("accuracy_if_positive", "accuracy_if_negative"):
+                      values = sign_h[metric].to_numpy(float)
+                      summary_rows.append(
+                          {
+                              "horizon": int(horizon),
+                              "kind": "sign_accuracy",
+                              "feature": feature,
+                              "metric": metric,
+                              "value": float(values.mean()),
+                              "t_p_vs_half": float(stats.ttest_1samp(values, 0.5).pvalue),
+                          }
+                      )
+
+          pd.DataFrame(summary_rows).to_csv(
+              "results/generated/flyvis_type_pair_boundary_actual_update_geometry_summary.csv",
+              index=False,
+          )
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-type-pair-boundary-actual-update-geometry-aggregate
+          path: |
+            results/generated/flyvis_type_pair_boundary_actual_update_geometry.csv
+            results/generated/flyvis_type_pair_boundary_actual_update_geometry_correlations.csv
+            results/generated/flyvis_type_pair_boundary_actual_update_geometry_signs.csv
+            results/generated/flyvis_type_pair_boundary_actual_update_geometry_summary.csv
