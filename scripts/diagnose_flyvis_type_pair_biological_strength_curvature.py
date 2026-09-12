@@ -101,7 +101,9 @@ def run_seed(
                     "total_predicted_synergy": total_synergy,
                     "group_synergy_contribution": contribution,
                     "group_projection_norm": float(torch.linalg.vector_norm(group_projection)),
-                    "group_residual_hvp_norm": float(torch.linalg.vector_norm(residual_hvp[indices])),
+                    "group_residual_hvp_norm": float(
+                        torch.linalg.vector_norm(residual_hvp[indices])
+                    ),
                 }
                 finite = (
                     bool(torch.isfinite(local.weight).all())
