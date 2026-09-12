@@ -1,0 +1,133 @@
+name: FlyVis local power norm-control trajectory
+
+on:
+  push:
+    paths:
+      - ".github/triggers/run-type-pair-local-power-norm-control-1480-1499"
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [1480, 1481, 1482, 1483, 1484, 1485, 1486, 1487, 1488, 1489, 1490, 1491, 1492, 1493, 1494, 1495, 1496, 1497, 1498, 1499]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Run local power norm-control trajectory for seed ${{ matrix.seed }}
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run python scripts/diagnose_flyvis_type_pair_local_power_norm_control_trajectory.py \
+            --seed ${{ matrix.seed }} \
+            --out results/generated/flyvis_type_pair_local_power_norm_control_trajectory_seed${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: type-pair-local-power-norm-control-trajectory-seed${{ matrix.seed }}
+          path: results/generated/flyvis_type_pair_local_power_norm_control_trajectory_seed${{ matrix.seed }}.csv
+
+  aggregate:
+    needs: diagnose
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: type-pair-local-power-norm-control-trajectory-seed*
+          path: artifacts
+          merge-multiple: true
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Aggregate local power norm-control trajectory
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run --with scipy python - <<'PY'
+          from pathlib import Path
+          import numpy as np
+          import pandas as pd
+          from scipy import stats
+
+          paths = sorted(Path("artifacts").glob("*.csv"))
+          if len(paths) != 20:
+              raise RuntimeError(f"expected 20 seed artifacts, got {len(paths)}")
+          frame = pd.concat([pd.read_csv(path) for path in paths], ignore_index=True)
+          if not frame["finite"].all():
+              raise RuntimeError("non-finite norm-control trajectory detected")
+          frame.to_csv(
+              "results/generated/flyvis_type_pair_local_power_norm_control_trajectory.csv",
+              index=False,
+          )
+
+          comparison_prefixes = (
+              "local_power_minus_threshold",
+              "delta_norm_minus_threshold",
+              "local_power_minus_delta_norm",
+          )
+          metric_names = ("cross_entropy", "accuracy", "hard_margin", "soft_margin")
+          metric_columns = [
+              f"{prefix}_{metric}"
+              for prefix in comparison_prefixes
+              for metric in metric_names
+          ]
+          metric_columns.append("local_power_delta_norm_weight_distance")
+          diag_columns = [
+              column
+              for column in frame.columns
+              if column.endswith("suppressed_group_fraction")
+              or column.endswith("added_group_fraction")
+          ]
+          metric_columns.extend(diag_columns)
+
+          per_seed = frame.groupby(
+              ["seed", "init_mode", "branch_step"], as_index=False
+          )[metric_columns].mean()
+          rows = []
+          for (mode, step), subset in per_seed.groupby(["init_mode", "branch_step"]):
+              for metric in metric_columns:
+                  values = subset[metric].to_numpy(float)
+                  mean = float(values.mean())
+                  std = float(values.std(ddof=1))
+                  if std > 0.0:
+                      ci_low, ci_high = stats.t.interval(
+                          0.95,
+                          len(values) - 1,
+                          loc=mean,
+                          scale=std / np.sqrt(len(values)),
+                      )
+                      p = float(stats.ttest_1samp(values, 0.0).pvalue)
+                      dz = mean / std
+                  else:
+                      ci_low = ci_high = mean
+                      p = 1.0 if mean == 0.0 else 0.0
+                      dz = float("nan")
+                  rows.append(
+                      {
+                          "init_mode": mode,
+                          "branch_step": int(step),
+                          "metric": metric,
+                          "n": len(values),
+                          "mean": mean,
+                          "ci_low": float(ci_low),
+                          "ci_high": float(ci_high),
+                          "positive": int((values > 0.0).sum()),
+                          "t_p": p,
+                          "cohen_dz": dz,
+                      }
+                  )
+          pd.DataFrame(rows).to_csv(
+              "results/generated/flyvis_type_pair_local_power_norm_control_trajectory_summary.csv",
+              index=False,
+          )
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-type-pair-local-power-norm-control-trajectory-aggregate
+          path: |
+            results/generated/flyvis_type_pair_local_power_norm_control_trajectory.csv
+            results/generated/flyvis_type_pair_local_power_norm_control_trajectory_summary.csv
