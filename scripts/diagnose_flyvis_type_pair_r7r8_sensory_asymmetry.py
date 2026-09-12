@@ -171,13 +171,9 @@ def run_seed(
     if pair_counts != {"R7": 1, "R8": 1}:
         raise RuntimeError(f"unexpected R7/R8->Mi9 group counts: {pair_counts}")
 
-    models = {
-        profile: {rule: copy.deepcopy(base) for rule in RULES}
-        for profile in PROFILES
-    }
+    models = {profile: {rule: copy.deepcopy(base) for rule in RULES} for profile in PROFILES}
     direction_change_sum = {
-        profile: {rule: 0.0 for rule in RULES if rule != "local"}
-        for profile in PROFILES
+        profile: {rule: 0.0 for rule in RULES if rule != "local"} for profile in PROFILES
     }
     weight_error_sum = copy.deepcopy(direction_change_sum)
     bias_error_sum = copy.deepcopy(direction_change_sum)
