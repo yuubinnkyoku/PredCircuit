@@ -1,0 +1,135 @@
+name: FlyVis type-pair late gate intervention
+
+on:
+  push:
+    paths:
+      - ".github/triggers/run-type-pair-late-gate-intervention-1600-1619"
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [1600, 1601, 1602, 1603, 1604, 1605, 1606, 1607, 1608, 1609, 1610, 1611, 1612, 1613, 1614, 1615, 1616, 1617, 1618, 1619]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Run late gate intervention for seed ${{ matrix.seed }}
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run python scripts/diagnose_flyvis_type_pair_late_gate_intervention.py \
+            --seed ${{ matrix.seed }} \
+            --out results/generated/flyvis_type_pair_late_gate_intervention_seed${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: type-pair-late-gate-intervention-seed${{ matrix.seed }}
+          path: results/generated/flyvis_type_pair_late_gate_intervention_seed${{ matrix.seed }}.csv
+
+  aggregate:
+    needs: diagnose
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: type-pair-late-gate-intervention-seed*
+          path: artifacts
+          merge-multiple: true
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Aggregate late gate intervention
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run --with scipy python - <<'PY'
+          from pathlib import Path
+
+          import numpy as np
+          import pandas as pd
+          from scipy import stats
+
+          paths = sorted(Path("artifacts").glob("*.csv"))
+          if len(paths) != 20:
+              raise RuntimeError(f"expected 20 seed artifacts, got {len(paths)}")
+          frame = pd.concat([pd.read_csv(path) for path in paths], ignore_index=True)
+          if frame["seed"].nunique() != 20:
+              raise RuntimeError(f"expected 20 unique seeds, got {frame['seed'].nunique()}")
+          if not frame["finite"].all():
+              raise RuntimeError("non-finite late-gate intervention detected")
+          expected_rows = 20 * 5 * 4
+          if len(frame) != expected_rows:
+              raise RuntimeError(f"expected {expected_rows} rows, got {len(frame)}")
+          frame.to_csv(
+              "results/generated/flyvis_type_pair_late_gate_intervention.csv",
+              index=False,
+          )
+
+          metric_suffixes = (
+              "cross_entropy",
+              "accuracy",
+              "hard_margin",
+              "soft_margin",
+              "weight_norm",
+          )
+          branches = ("rho05", "local_power", "local")
+          per_seed = frame.groupby(["seed", "branch_step"], as_index=False).mean(numeric_only=True)
+          rows = []
+          for branch_step in sorted(per_seed["branch_step"].unique()):
+              subset = per_seed[per_seed["branch_step"] == branch_step]
+              for branch in branches:
+                  for metric in metric_suffixes:
+                      column = f"{branch}_minus_standard_{metric}"
+                      values = subset[column].to_numpy(float)
+                      mean = float(values.mean())
+                      std = float(values.std(ddof=1))
+                      sem = std / np.sqrt(len(values)) if std > 0.0 else 0.0
+                      if sem > 0.0:
+                          ci_low, ci_high = stats.t.interval(
+                              0.95,
+                              len(values) - 1,
+                              loc=mean,
+                              scale=sem,
+                          )
+                          t_p = float(stats.ttest_1samp(values, 0.0).pvalue)
+                          dz = mean / std
+                      else:
+                          ci_low = ci_high = mean
+                          t_p = 1.0
+                          dz = 0.0
+                      try:
+                          wilcoxon_p = float(stats.wilcoxon(values).pvalue)
+                      except ValueError:
+                          wilcoxon_p = 1.0
+                      rows.append(
+                          {
+                              "branch_step": int(branch_step),
+                              "branch": branch,
+                              "metric": metric,
+                              "n": len(values),
+                              "mean_delta": mean,
+                              "ci_low": float(ci_low),
+                              "ci_high": float(ci_high),
+                              "cohens_dz": float(dz),
+                              "positive": int((values > 0.0).sum()),
+                              "negative": int((values < 0.0).sum()),
+                              "t_p": t_p,
+                              "wilcoxon_p": wilcoxon_p,
+                          }
+                      )
+          pd.DataFrame(rows).to_csv(
+              "results/generated/flyvis_type_pair_late_gate_intervention_summary.csv",
+              index=False,
+          )
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-type-pair-late-gate-intervention-aggregate
+          path: |
+            results/generated/flyvis_type_pair_late_gate_intervention.csv
+            results/generated/flyvis_type_pair_late_gate_intervention_summary.csv
