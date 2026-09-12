@@ -1,0 +1,179 @@
+name: FlyVis type-pair responder geometry holdout
+
+on:
+  push:
+    paths:
+      - ".github/triggers/run-type-pair-responder-geometry-700-719"
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [700, 701, 702, 703, 704, 705, 706, 707, 708, 709, 710, 711, 712, 713, 714, 715, 716, 717, 718, 719]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Diagnose responder geometry for seed ${{ matrix.seed }}
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run python scripts/diagnose_flyvis_type_pair_responder_geometry.py \
+            --seed ${{ matrix.seed }} \
+            --shuffle-seed $((980000 + ${{ matrix.seed }})) \
+            --out results/generated/flyvis_type_pair_responder_geometry_seed${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: type-pair-responder-geometry-seed${{ matrix.seed }}
+          path: results/generated/flyvis_type_pair_responder_geometry_seed${{ matrix.seed }}.csv
+
+  aggregate:
+    needs: diagnose
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: type-pair-responder-geometry-seed*
+          path: artifacts
+          merge-multiple: true
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Aggregate preregistered responder predictors
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run --with scipy python - <<'PY'
+          from pathlib import Path
+          import numpy as np
+          import pandas as pd
+          from scipy import stats
+
+          frame = pd.concat(
+              [pd.read_csv(path) for path in sorted(Path("artifacts").glob("*.csv"))],
+              ignore_index=True,
+          )
+          if len(frame) != 480:
+              raise RuntimeError(f"expected 480 rows, got {len(frame)}")
+          if not frame["finite"].all():
+              raise RuntimeError("non-finite responder-geometry run detected")
+          if frame["margin_identity_error"].max() > 1e-6:
+              raise RuntimeError("hard/soft/tail decomposition identity failed")
+          frame.to_csv(
+              "results/generated/flyvis_type_pair_responder_geometry.csv",
+              index=False,
+          )
+
+          metrics = ["hard_margin", "soft_margin", "cross_entropy", "accuracy"]
+          means = frame.groupby(["seed", "rule"], as_index=False)[metrics].mean()
+          local = means[means.rule == "local"].set_index("seed").sort_index()
+          type_ = means[means.rule == "type"].set_index("seed").loc[local.index]
+          shuffle = means[means.rule == "shuffle"].set_index("seed").loc[local.index]
+
+          seed_rows = []
+          for seed in local.index:
+              source = frame[frame.seed == seed].iloc[0]
+              seed_rows.append(
+                  {
+                      "seed": seed,
+                      "type_minus_local_hard_margin": (
+                          type_.loc[seed, "hard_margin"] - local.loc[seed, "hard_margin"]
+                      ),
+                      "type_minus_shuffle_hard_margin": (
+                          type_.loc[seed, "hard_margin"] - shuffle.loc[seed, "hard_margin"]
+                      ),
+                      "type_vs_local_ce_improvement": (
+                          local.loc[seed, "cross_entropy"] - type_.loc[seed, "cross_entropy"]
+                      ),
+                      "type_vs_shuffle_ce_improvement": (
+                          shuffle.loc[seed, "cross_entropy"] - type_.loc[seed, "cross_entropy"]
+                      ),
+                      "base_hard_margin": source["base_hard_margin"],
+                      "base_soft_margin": source["base_soft_margin"],
+                      "base_cross_entropy": source["base_cross_entropy"],
+                      "p1_shared_fraction_advantage": source[
+                          "type_minus_shuffle_coarse_norm_fraction"
+                      ],
+                      "p2_mixed_change_advantage": source[
+                          "type_minus_shuffle_mixed_relative_change"
+                      ],
+                      "p3_mixed_cosine_advantage": source[
+                          "type_minus_shuffle_mixed_cosine_to_raw"
+                      ],
+                      "secondary_clip_fraction_advantage": source[
+                          "type_minus_shuffle_matched_clip_fraction"
+                      ],
+                  }
+              )
+          seed_frame = pd.DataFrame(seed_rows)
+          seed_frame.to_csv(
+              "results/generated/flyvis_type_pair_responder_geometry_seed_summary.csv",
+              index=False,
+          )
+
+          predictors = [
+              "p1_shared_fraction_advantage",
+              "p2_mixed_change_advantage",
+              "p3_mixed_cosine_advantage",
+          ]
+          outcomes = [
+              "type_minus_local_hard_margin",
+              "type_minus_shuffle_hard_margin",
+          ]
+          rows = []
+          for predictor in predictors:
+              for outcome in outcomes:
+                  x = seed_frame[predictor].to_numpy(float)
+                  y = seed_frame[outcome].to_numpy(float)
+                  pearson = stats.pearsonr(x, y)
+                  spearman = stats.spearmanr(x, y)
+                  rows.append(
+                      {
+                          "predictor": predictor,
+                          "outcome": outcome,
+                          "n": len(x),
+                          "pearson_r": float(pearson.statistic),
+                          "pearson_p": float(pearson.pvalue),
+                          "spearman_rho": float(spearman.statistic),
+                          "spearman_p": float(spearman.pvalue),
+                      }
+                  )
+          correlations = pd.DataFrame(rows)
+          correlations.to_csv(
+              "results/generated/flyvis_type_pair_responder_geometry_preregistered.csv",
+              index=False,
+          )
+
+          for outcome in outcomes:
+              delta = seed_frame[outcome].to_numpy(float)
+              mean = float(delta.mean())
+              std = float(delta.std(ddof=1))
+              ci = stats.t.interval(
+                  0.95,
+                  len(delta) - 1,
+                  loc=mean,
+                  scale=std / np.sqrt(len(delta)),
+              )
+              print(
+                  outcome,
+                  "mean=", mean,
+                  "CI=", ci,
+                  "positive=", int((delta > 0).sum()),
+                  "p=", float(stats.ttest_1samp(delta, 0.0).pvalue),
+                  "dz=", mean / std if std > 0 else float("nan"),
+              )
+          print("\nPreregistered predictor correlations:\n")
+          print(correlations.to_string(index=False))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-type-pair-responder-geometry-aggregate
+          path: |
+            results/generated/flyvis_type_pair_responder_geometry.csv
+            results/generated/flyvis_type_pair_responder_geometry_seed_summary.csv
+            results/generated/flyvis_type_pair_responder_geometry_preregistered.csv
