@@ -54,9 +54,7 @@ def _signed_band_direction(
         signed_proxy = float(weights.mean() * mean)
         high_rho = ratio >= HIGH_RHO_THRESHOLD
         signed_band = (
-            ratio >= SIGNED_BAND_THRESHOLD
-            and ratio < HIGH_RHO_THRESHOLD
-            and signed_proxy > 0.0
+            ratio >= SIGNED_BAND_THRESHOLD and ratio < HIGH_RHO_THRESHOLD and signed_proxy > 0.0
         )
         suppress = high_rho or signed_band
         extra_gain = LOW_EXTRA_GAIN if suppress else HIGH_EXTRA_GAIN
@@ -90,12 +88,8 @@ def run_seed(*, seed: int, learning_rate: float, max_update: float) -> pd.DataFr
     }
     models = {mode: {rule: copy.deepcopy(base) for rule in RULES} for mode, base in bases.items()}
     nonlocal_rules = ("standard", "threshold", "signed_band")
-    weight_error_sum = {
-        mode: {rule: 0.0 for rule in nonlocal_rules} for mode in INIT_MODES
-    }
-    bias_error_sum = {
-        mode: {rule: 0.0 for rule in nonlocal_rules} for mode in INIT_MODES
-    }
+    weight_error_sum = {mode: {rule: 0.0 for rule in nonlocal_rules} for mode in INIT_MODES}
+    bias_error_sum = {mode: {rule: 0.0 for rule in nonlocal_rules} for mode in INIT_MODES}
     signed_diag_sum = {
         mode: {
             "signed_suppressed_group_fraction": 0.0,
