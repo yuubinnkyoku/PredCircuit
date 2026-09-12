@@ -1,0 +1,111 @@
+name: FlyVis type-pair shared-credit recovery
+
+on:
+  push:
+    paths:
+      - ".github/triggers/run-type-pair-shared-credit-recovery-1580-1589"
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [1580, 1581, 1582, 1583, 1584, 1585, 1586, 1587, 1588, 1589]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Run shared-credit recovery for seed ${{ matrix.seed }}
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run python scripts/diagnose_flyvis_type_pair_shared_credit_recovery.py \
+            --seed ${{ matrix.seed }} \
+            --out results/generated/flyvis_type_pair_shared_credit_recovery_seed${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: type-pair-shared-credit-recovery-seed${{ matrix.seed }}
+          path: results/generated/flyvis_type_pair_shared_credit_recovery_seed${{ matrix.seed }}.csv
+
+  aggregate:
+    needs: diagnose
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: type-pair-shared-credit-recovery-seed*
+          path: artifacts
+          merge-multiple: true
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Aggregate shared-credit recovery
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run --with scipy python - <<'PY'
+          from pathlib import Path
+          import numpy as np
+          import pandas as pd
+          from scipy import stats
+
+          paths = sorted(Path("artifacts").glob("*.csv"))
+          if len(paths) != 10:
+              raise RuntimeError(f"expected 10 seed artifacts, got {len(paths)}")
+          frame = pd.concat([pd.read_csv(path) for path in paths], ignore_index=True)
+          if not frame["finite"].all():
+              raise RuntimeError("non-finite shared-credit recovery detected")
+          frame.to_csv(
+              "results/generated/flyvis_type_pair_shared_credit_recovery.csv",
+              index=False,
+          )
+
+          metric_columns = [
+              column
+              for column in frame.columns
+              if column not in ("seed", "horizon", "rule", "finite")
+          ]
+          per_seed = frame.groupby(
+              ["seed", "rule", "horizon"], as_index=False
+          )[metric_columns].mean()
+          rows = []
+          for (rule, horizon), subset in per_seed.groupby(["rule", "horizon"]):
+              for metric in metric_columns:
+                  values = subset[metric].to_numpy(float)
+                  mean = float(values.mean())
+                  std = float(values.std(ddof=1))
+                  if std > 0.0:
+                      ci_low, ci_high = stats.t.interval(
+                          0.95,
+                          len(values) - 1,
+                          loc=mean,
+                          scale=std / np.sqrt(len(values)),
+                      )
+                  else:
+                      ci_low = ci_high = mean
+                  rows.append(
+                      {
+                          "rule": rule,
+                          "horizon": int(horizon),
+                          "metric": metric,
+                          "n": len(values),
+                          "mean": mean,
+                          "ci_low": float(ci_low),
+                          "ci_high": float(ci_high),
+                      }
+                  )
+          pd.DataFrame(rows).to_csv(
+              "results/generated/flyvis_type_pair_shared_credit_recovery_summary.csv",
+              index=False,
+          )
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-type-pair-shared-credit-recovery-aggregate
+          path: |
+            results/generated/flyvis_type_pair_shared_credit_recovery.csv
+            results/generated/flyvis_type_pair_shared_credit_recovery_summary.csv
