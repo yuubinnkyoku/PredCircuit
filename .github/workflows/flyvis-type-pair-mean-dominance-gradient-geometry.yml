@@ -1,0 +1,232 @@
+name: FlyVis type-pair mean-dominance gradient geometry
+
+on:
+  push:
+    paths:
+      - ".github/triggers/run-type-pair-mean-dominance-gradient-geometry-1240-1259"
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [1240, 1241, 1242, 1243, 1244, 1245, 1246, 1247, 1248, 1249, 1250, 1251, 1252, 1253, 1254, 1255, 1256, 1257, 1258, 1259]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Run mean-dominance gradient geometry for seed ${{ matrix.seed }}
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run python scripts/diagnose_flyvis_type_pair_mean_dominance_gradient_geometry.py \
+            --seed ${{ matrix.seed }} \
+            --out results/generated/flyvis_type_pair_mean_dominance_gradient_geometry_seed${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: type-pair-mean-dominance-gradient-geometry-seed${{ matrix.seed }}
+          path: results/generated/flyvis_type_pair_mean_dominance_gradient_geometry_seed${{ matrix.seed }}.csv
+
+  aggregate:
+    needs: diagnose
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: type-pair-mean-dominance-gradient-geometry-seed*
+          path: artifacts
+          merge-multiple: true
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Aggregate mean-dominance gradient geometry
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run --with scipy python - <<'PY'
+          from pathlib import Path
+          import numpy as np
+          import pandas as pd
+          from scipy import stats
+
+          paths = sorted(Path("artifacts").glob("*.csv"))
+          if len(paths) != 20:
+              raise RuntimeError(f"expected 20 seed artifacts, got {len(paths)}")
+          frame = pd.concat([pd.read_csv(path) for path in paths], ignore_index=True)
+          if not frame["finite"].all():
+              raise RuntimeError("non-finite mean-dominance gradient geometry detected")
+          frame.to_csv(
+              "results/generated/flyvis_type_pair_mean_dominance_gradient_geometry.csv",
+              index=False,
+          )
+
+          metrics = [
+              "ce_grad_dot_gain3_extra",
+              "hard_margin_grad_dot_gain3_extra",
+              "soft_margin_grad_dot_gain3_extra",
+              "gain3_minus_gain1_update_norm",
+          ]
+          collapsed = frame.groupby(
+              [
+                  "seed",
+                  "init_mode",
+                  "horizon",
+                  "group_index",
+                  "source_type",
+                  "target_type",
+                  "flagged_mean_dominant",
+              ],
+              as_index=False,
+          )[["mean_to_residual_norm", *metrics]].mean()
+
+          correlation_rows = []
+          for (seed, init_mode, horizon), subset in collapsed.groupby(
+              ["seed", "init_mode", "horizon"]
+          ):
+              q = subset["mean_to_residual_norm"].to_numpy(float)
+              for metric in metrics[:3]:
+                  values = subset[metric].to_numpy(float)
+                  pearson = stats.pearsonr(q, values)
+                  spearman = stats.spearmanr(q, values)
+                  correlation_rows.append(
+                      {
+                          "seed": seed,
+                          "init_mode": init_mode,
+                          "horizon": horizon,
+                          "metric": metric,
+                          "pearson_r": float(pearson.statistic),
+                          "spearman_r": float(spearman.statistic),
+                      }
+                  )
+          correlations = pd.DataFrame(correlation_rows)
+          correlations.to_csv(
+              "results/generated/flyvis_type_pair_mean_dominance_gradient_geometry_correlations.csv",
+              index=False,
+          )
+
+          summary_rows = []
+          for (init_mode, horizon, metric), subset in correlations.groupby(
+              ["init_mode", "horizon", "metric"]
+          ):
+              for correlation in ("pearson_r", "spearman_r"):
+                  values = subset[correlation].to_numpy(float)
+                  mean = float(values.mean())
+                  std = float(values.std(ddof=1))
+                  ci_low, ci_high = stats.t.interval(
+                      0.95,
+                      len(values) - 1,
+                      loc=mean,
+                      scale=std / np.sqrt(len(values)),
+                  )
+                  summary_rows.append(
+                      {
+                          "kind": "correlation",
+                          "init_mode": init_mode,
+                          "horizon": horizon,
+                          "metric": metric,
+                          "comparison": correlation,
+                          "mean": mean,
+                          "ci_low": float(ci_low),
+                          "ci_high": float(ci_high),
+                          "positive": int((values > 0).sum()),
+                          "t_p": float(stats.ttest_1samp(values, 0.0).pvalue),
+                          "cohen_dz": mean / std if std > 0 else float("nan"),
+                      }
+                  )
+
+          for (seed, init_mode, horizon), subset in collapsed.groupby(
+              ["seed", "init_mode", "horizon"]
+          ):
+              pass
+
+          flagged_seed_rows = []
+          for (seed, init_mode, horizon), subset in collapsed.groupby(
+              ["seed", "init_mode", "horizon"]
+          ):
+              flagged = subset[subset["flagged_mean_dominant"]]
+              unflagged = subset[~subset["flagged_mean_dominant"]]
+              for metric in metrics:
+                  flagged_seed_rows.append(
+                      {
+                          "seed": seed,
+                          "init_mode": init_mode,
+                          "horizon": horizon,
+                          "metric": metric,
+                          "flagged_mean": float(flagged[metric].mean()) if len(flagged) else float("nan"),
+                          "unflagged_mean": float(unflagged[metric].mean()) if len(unflagged) else float("nan"),
+                          "flagged_fraction": float(len(flagged) / len(subset)),
+                      }
+                  )
+          flagged_seed = pd.DataFrame(flagged_seed_rows)
+          flagged_seed.to_csv(
+              "results/generated/flyvis_type_pair_mean_dominance_gradient_geometry_flagged.csv",
+              index=False,
+          )
+          for (init_mode, horizon, metric), subset in flagged_seed.groupby(
+              ["init_mode", "horizon", "metric"]
+          ):
+              valid = subset.dropna(subset=["flagged_mean", "unflagged_mean"])
+              if not len(valid):
+                  continue
+              delta = (valid["flagged_mean"] - valid["unflagged_mean"]).to_numpy(float)
+              mean = float(delta.mean())
+              std = float(delta.std(ddof=1)) if len(delta) > 1 else float("nan")
+              if len(delta) > 1:
+                  ci_low, ci_high = stats.t.interval(
+                      0.95,
+                      len(delta) - 1,
+                      loc=mean,
+                      scale=std / np.sqrt(len(delta)),
+                  )
+                  p_value = float(stats.ttest_1samp(delta, 0.0).pvalue)
+              else:
+                  ci_low = ci_high = p_value = float("nan")
+              summary_rows.append(
+                  {
+                      "kind": "flagged_minus_unflagged",
+                      "init_mode": init_mode,
+                      "horizon": horizon,
+                      "metric": metric,
+                      "comparison": "flagged_minus_unflagged",
+                      "mean": mean,
+                      "ci_low": float(ci_low),
+                      "ci_high": float(ci_high),
+                      "positive": int((delta > 0).sum()),
+                      "t_p": p_value,
+                      "cohen_dz": mean / std if std > 0 else float("nan"),
+                  }
+              )
+
+          pd.DataFrame(summary_rows).to_csv(
+              "results/generated/flyvis_type_pair_mean_dominance_gradient_geometry_summary.csv",
+              index=False,
+          )
+
+          pair_summary = collapsed.groupby(
+              [
+                  "init_mode",
+                  "horizon",
+                  "group_index",
+                  "source_type",
+                  "target_type",
+              ],
+              as_index=False,
+          )[["mean_to_residual_norm", *metrics]].mean()
+          pair_summary.to_csv(
+              "results/generated/flyvis_type_pair_mean_dominance_gradient_geometry_pairs.csv",
+              index=False,
+          )
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-type-pair-mean-dominance-gradient-geometry-aggregate
+          path: |
+            results/generated/flyvis_type_pair_mean_dominance_gradient_geometry.csv
+            results/generated/flyvis_type_pair_mean_dominance_gradient_geometry_correlations.csv
+            results/generated/flyvis_type_pair_mean_dominance_gradient_geometry_flagged.csv
+            results/generated/flyvis_type_pair_mean_dominance_gradient_geometry_summary.csv
+            results/generated/flyvis_type_pair_mean_dominance_gradient_geometry_pairs.csv
