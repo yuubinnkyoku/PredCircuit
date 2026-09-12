@@ -1,0 +1,164 @@
+name: FlyVis type-pair local proxy mechanism
+
+on:
+  push:
+    paths:
+      - ".github/triggers/run-type-pair-local-proxy-mechanism-1540-1559"
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [1540, 1541, 1542, 1543, 1544, 1545, 1546, 1547, 1548, 1549, 1550, 1551, 1552, 1553, 1554, 1555, 1556, 1557, 1558, 1559]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Run local proxy mechanism for seed ${{ matrix.seed }}
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run python scripts/diagnose_flyvis_type_pair_local_proxy_mechanism.py \
+            --seed ${{ matrix.seed }} \
+            --out results/generated/flyvis_type_pair_local_proxy_mechanism_seed${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: type-pair-local-proxy-mechanism-seed${{ matrix.seed }}
+          path: results/generated/flyvis_type_pair_local_proxy_mechanism_seed${{ matrix.seed }}.csv
+
+  aggregate:
+    needs: diagnose
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: type-pair-local-proxy-mechanism-seed*
+          path: artifacts
+          merge-multiple: true
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Aggregate local proxy mechanism
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run --with scipy python - <<'PY'
+          from pathlib import Path
+          import numpy as np
+          import pandas as pd
+          from scipy import stats
+
+          paths = sorted(Path("artifacts").glob("*.csv"))
+          if len(paths) != 20:
+              raise RuntimeError(f"expected 20 seed artifacts, got {len(paths)}")
+          frame = pd.concat([pd.read_csv(path) for path in paths], ignore_index=True)
+          if not frame["finite"].all():
+              raise RuntimeError("non-finite local proxy mechanism detected")
+          frame.to_csv(
+              "results/generated/flyvis_type_pair_local_proxy_mechanism.csv",
+              index=False,
+          )
+
+          proxies = [
+              "rho",
+              "mean_w_c",
+              "mean_w_times_mean_c",
+              "cov_w_c",
+              "weight_credit_cosine",
+              "credit_mean_abs",
+              "credit_std",
+              "credit_norm",
+              "weight_mean",
+              "weight_std",
+              "high_clip_fraction",
+              "low_clip_fraction",
+              "clip_fraction_drop",
+              "delta_u_norm",
+              "weight_delta_dot",
+          ]
+
+          def auroc(scores, labels):
+              scores = np.asarray(scores, float)
+              labels = np.asarray(labels, bool)
+              if labels.sum() == 0 or (~labels).sum() == 0:
+                  return float("nan")
+              order = np.argsort(scores)
+              ranks = np.empty(len(scores))
+              ranks[order] = np.arange(1, len(scores) + 1)
+              n_pos = labels.sum()
+              n_neg = (~labels).sum()
+              return float((ranks[labels].sum() - n_pos * (n_pos + 1) / 2) / (n_pos * n_neg))
+
+          def auprc(scores, labels):
+              scores = np.asarray(scores, float)
+              labels = np.asarray(labels, bool)
+              if labels.sum() == 0:
+                  return float("nan")
+              order = np.argsort(-scores)
+              sorted_labels = labels[order]
+              precisions = np.cumsum(sorted_labels) / np.arange(1, len(sorted_labels) + 1)
+              return float(precisions[sorted_labels].mean())
+
+          rows = []
+          for horizon, subset in frame.groupby("horizon"):
+              y = (subset["oracle_hard_margin"] > 0).to_numpy()
+              base_rate = float(y.mean())
+              for proxy in proxies:
+                  if proxy not in subset.columns:
+                      continue
+                  scores = subset[proxy].to_numpy(float)
+                  # higher proxy -> predict harmful (same direction as local_power uses mean_w_c)
+                  auroc_val = auroc(scores, y)
+                  auprc_val = auprc(scores, y)
+                  # also try inverted direction and keep the better one for reporting
+                  auroc_inv = auroc(-scores, y)
+                  auprc_inv = auprc(-scores, y)
+                  best_dir = "as_is"
+                  if (auroc_inv or 0) > (auroc_val or 0):
+                      auroc_val, auprc_val = auroc_inv, auprc_inv
+                      best_dir = "inverted"
+                  pearson = float(np.corrcoef(scores, subset["oracle_hard_margin"])[0, 1])
+                  try:
+                      spearman = float(
+                          stats.spearmanr(scores, subset["oracle_hard_margin"]).statistic
+                      )
+                  except Exception:
+                      spearman = float("nan")
+                  # precision at same suppression rate as local_power (mean_w_c > 5e-8)
+                  power_mask = subset["mean_w_c"] > 5e-8
+                  rate = float(power_mask.mean())
+                  k = max(int(round(rate * len(scores))), 1)
+                  order = np.argsort(-scores) if best_dir == "as_is" else np.argsort(scores)
+                  top = y[order[:k]]
+                  precision_at_rate = float(top.mean()) if k > 0 else float("nan")
+                  rows.append(
+                      {
+                          "horizon": int(horizon),
+                          "proxy": proxy,
+                          "n": len(subset),
+                          "harmful_rate": base_rate,
+                          "auroc": auroc_val,
+                          "auprc": auprc_val,
+                          "best_direction": best_dir,
+                          "pearson": pearson,
+                          "spearman": spearman,
+                          "precision_at_power_rate": precision_at_rate,
+                          "power_rate": rate,
+                      }
+                  )
+          pd.DataFrame(rows).to_csv(
+              "results/generated/flyvis_type_pair_local_proxy_mechanism_summary.csv",
+              index=False,
+          )
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-type-pair-local-proxy-mechanism-aggregate
+          path: |
+            results/generated/flyvis_type_pair_local_proxy_mechanism.csv
+            results/generated/flyvis_type_pair_local_proxy_mechanism_summary.csv
