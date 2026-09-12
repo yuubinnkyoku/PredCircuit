@@ -403,11 +403,41 @@ margin gradient in the late phase. The gate that regularizes
 the valley becomes a brake on the recovery.
 ```
 
+## Late-gate causal intervention (1600-1619, parallel agent)
+
+- **Workflow run**: 34707716130 (success, 2m56s)
+- **Seeds**: 1600-1619 (20/20), finite 400/400
+- **Design:** pretrain as ungated standard 4m+r for **180 epochs**, then branch into `standard` (continue), `rho05`, `local_power`, or `local` for 0/1/5/10/20 further steps. Jitter base 10_300_000.
+- **Artifact:** `results/artifacts/late-gate-intervention-1600-1619/`
+
+### Absolute means after 180+20 epochs
+
+| branch | CE | acc | hard | soft |
+|---|---:|---:|---:|---:|
+| standard (continue) | **1.099** | **0.839** | **+0.249** | **−0.679** |
+| rho05 gate | 1.116 | 0.827 | +0.231 | −0.704 |
+| local_power gate | 1.114 | 0.831 | +0.234 | −0.702 |
+| switch to local | 1.131 | 0.791 | +0.213 | −0.730 |
+
+### Paired Δ vs continuing standard, branch_step=20
+
+| branch | CE Δ | acc Δ | hard Δ | soft Δ |
+|---|---|---|---|---|
+| rho05 | +0.0163* | −0.0120 | **−0.0177*** | −0.0244* |
+| local_power | +0.0150* | −0.0073 | **−0.0154*** | −0.0228* |
+| local | +0.0317* | −0.0471* | **−0.0365*** | −0.0506* |
+
+Effects grow monotonically with branch_step (0 → 1 → 5 → 10 → 20), a clean dose–response.
+
+### Causal statement
+
+**Applying the rho05 or local_power gate after 180 epochs of ungated 4m+r significantly reduces the hard-margin gain and worsens CE and soft margin.** Switching to plain local is even worse. Continuing ungated shared type-pair mean credit is the best late-phase action.
+
+This is the causal counterpart of the correlational gradient-alignment result: the gate removes shared-mean credit that, in the late phase, is aligned with the held-out hard-margin gradient. The gate that regularizes the mid-training valley is a brake on the late recovery.
+
 ## Next single experiment
 
-**Confirm the recovery mechanism on more seeds and with a direct intervention.** Concretely: on a fresh 20-seed block, train standard 4m+r to epoch 200, then for the last 20 epochs either (a) keep ungated, (b) apply the rho05 gate, or (c) apply the gate only to groups whose shared-mean cosine with the (diagnostic) hard-margin gradient is negative. Prediction: (b) kills the margin gain; (c) preserves it. This would turn the correlational gradient-alignment story into a causal one without using the oracle as a learning rule in the confirmation metrics themselves.
-
-Also still open: biological-strength scale perturbation; a far-jitter hold-out.
+**Biological-strength scale perturbation.** Train standard 4m+r and local to epoch 200 under `use_biological_strength` multipliers of roughly {0.5, 1.0, 1.5} (or an equivalent lighter/heavier init), and check whether the late recovery is specific to one init scale or is a generic property of shared mean credit. Also still open: a far-jitter hold-out that re-evaluates saved weights under a disjoint jitter base.
 
 ## Artifact index (local)
 
@@ -417,6 +447,7 @@ results/artifacts/full-horizon-1500-1519/
 results/artifacts/full-horizon-1520-1539/
 results/artifacts/full-horizon-200-1560-1579/     # U-turn discovery
 results/artifacts/recovery-1580-1589/             # recovery mechanism
+results/artifacts/late-gate-intervention-1600-1619/ # causal late-gate brake
 results/artifacts/boundary-geometry-1420-1439/
 results/artifacts/mechanism-1540-1559/
 results/artifacts/branched-1460-1479/
