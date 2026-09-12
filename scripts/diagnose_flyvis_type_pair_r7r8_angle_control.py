@@ -37,9 +37,9 @@ def _r7r8_direction(
 
 
 def _angle_cosine(left: torch.Tensor, right: torch.Tensor) -> float:
-    denominator = (
-        torch.linalg.vector_norm(left) * torch.linalg.vector_norm(right)
-    ).clamp_min(1e-30)
+    denominator = (torch.linalg.vector_norm(left) * torch.linalg.vector_norm(right)).clamp_min(
+        1e-30
+    )
     return float((torch.dot(left, right) / denominator).clamp(-1.0, 1.0))
 
 
@@ -118,9 +118,7 @@ def run_seed(
             selected_ids,
             target_cosine=target_cosine,
         )
-        angle_error_sum += abs(
-            _angle_cosine(control_raw, control_direction) - target_cosine
-        )
+        angle_error_sum += abs(_angle_cosine(control_raw, control_direction) - target_cosine)
 
         for rule, raw_edge, raw_bias, direction in (
             ("r7r8_mi9", r7_raw, r7_bias, r7_direction),
@@ -161,7 +159,9 @@ def run_seed(
                     mean_direction_change = direction_change_sum[rule] / step
                     mean_weight_error = weight_error_sum[rule] / step
                     mean_bias_error = bias_error_sum[rule] / step
-                    mean_angle_error = angle_error_sum / step if rule == "angle_matched_sparse" else 0.0
+                    mean_angle_error = (
+                        angle_error_sum / step if rule == "angle_matched_sparse" else 0.0
+                    )
                 finite = (
                     bool(torch.isfinite(models[rule].weight).all())
                     and bool(torch.isfinite(models[rule].bias).all())
