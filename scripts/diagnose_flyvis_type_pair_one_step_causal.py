@@ -87,9 +87,7 @@ def run_seed(
                     torch.linalg.vector_norm(direction - raw_edge) / raw_norm
                 ),
                 "cosine_to_local": _cosine(direction, raw_edge),
-                "direction_norm_ratio": float(
-                    torch.linalg.vector_norm(direction) / raw_norm
-                ),
+                "direction_norm_ratio": float(torch.linalg.vector_norm(direction) / raw_norm),
                 "clip_fraction": float(
                     (learning_rate * direction).abs().gt(max_update).float().mean()
                 ),
