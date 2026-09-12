@@ -1,0 +1,144 @@
+name: FlyVis L1-complement shared-credit interaction
+
+on:
+  push:
+    paths:
+      - ".github/triggers/run-type-pair-l1-complement-1060-1079"
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [1060, 1061, 1062, 1063, 1064, 1065, 1066, 1067, 1068, 1069, 1070, 1071, 1072, 1073, 1074, 1075, 1076, 1077, 1078, 1079]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Run L1-complement interaction for seed ${{ matrix.seed }}
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run python scripts/diagnose_flyvis_type_pair_l1_complement_interaction.py \
+            --seed ${{ matrix.seed }} \
+            --out results/generated/flyvis_type_pair_l1_complement_seed${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: type-pair-l1-complement-seed${{ matrix.seed }}
+          path: results/generated/flyvis_type_pair_l1_complement_seed${{ matrix.seed }}.csv
+
+  aggregate:
+    needs: diagnose
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: type-pair-l1-complement-seed*
+          path: artifacts
+          merge-multiple: true
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Aggregate L1-complement interaction
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run --with scipy python - <<'PY'
+          from pathlib import Path
+          import numpy as np
+          import pandas as pd
+          from scipy import stats
+
+          paths = sorted(Path("artifacts").glob("*.csv"))
+          if len(paths) != 20:
+              raise RuntimeError(f"expected 20 seed artifacts, got {len(paths)}")
+          frame = pd.concat([pd.read_csv(path) for path in paths], ignore_index=True)
+          if not frame["finite"].all():
+              raise RuntimeError("non-finite L1-complement run detected")
+          frame.to_csv(
+              "results/generated/flyvis_type_pair_l1_complement_interaction.csv",
+              index=False,
+          )
+
+          seed_means = frame.groupby(["seed", "horizon", "rule"], as_index=False)[
+              ["cross_entropy", "accuracy", "hard_margin"]
+          ].mean()
+          rows = []
+          for horizon in sorted(seed_means["horizon"].unique()):
+              subset = seed_means[seed_means.horizon == horizon]
+              pivot = {
+                  rule: subset[subset.rule == rule].set_index("seed").sort_index()
+                  for rule in ("local", "l1_only", "non_l1_only", "type")
+              }
+              for metric in ("cross_entropy", "accuracy", "hard_margin"):
+                  local = pivot["local"][metric]
+                  l1 = pivot["l1_only"][metric]
+                  non_l1 = pivot["non_l1_only"][metric]
+                  full = pivot["type"][metric]
+                  if metric == "cross_entropy":
+                      gain_l1 = local - l1
+                      gain_non_l1 = local - non_l1
+                      gain_full = local - full
+                  else:
+                      gain_l1 = l1 - local
+                      gain_non_l1 = non_l1 - local
+                      gain_full = full - local
+                  effects = {
+                      "l1_minus_local": gain_l1,
+                      "non_l1_minus_local": gain_non_l1,
+                      "type_minus_local": gain_full,
+                      "interaction_full_minus_additive": gain_full - gain_l1 - gain_non_l1,
+                  }
+                  for comparison, values in effects.items():
+                      delta = values.to_numpy(float)
+                      mean = float(delta.mean())
+                      std = float(delta.std(ddof=1))
+                      ci_low, ci_high = stats.t.interval(
+                          0.95,
+                          len(delta) - 1,
+                          loc=mean,
+                          scale=std / np.sqrt(len(delta)),
+                      )
+                      rows.append(
+                          {
+                              "horizon": int(horizon),
+                              "comparison": comparison,
+                              "metric": metric,
+                              "n": len(delta),
+                              "mean_improvement": mean,
+                              "ci_low": float(ci_low),
+                              "ci_high": float(ci_high),
+                              "positive": int((delta > 0).sum()),
+                              "t_p": float(stats.ttest_1samp(delta, 0.0).pvalue),
+                              "wilcoxon_p": float(stats.wilcoxon(delta).pvalue),
+                              "cohen_dz": mean / std if std > 0 else float("nan"),
+                          }
+                      )
+          pd.DataFrame(rows).to_csv(
+              "results/generated/flyvis_type_pair_l1_complement_interaction_summary.csv",
+              index=False,
+          )
+
+          diagnostics = frame.groupby(["seed", "horizon", "rule"], as_index=False)[
+              [
+                  "mean_relative_direction_change",
+                  "mean_weight_norm_error",
+                  "mean_bias_error",
+              ]
+          ].mean()
+          diagnostics.to_csv(
+              "results/generated/flyvis_type_pair_l1_complement_interaction_diagnostics.csv",
+              index=False,
+          )
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-type-pair-l1-complement-interaction-aggregate
+          path: |
+            results/generated/flyvis_type_pair_l1_complement_interaction.csv
+            results/generated/flyvis_type_pair_l1_complement_interaction_summary.csv
+            results/generated/flyvis_type_pair_l1_complement_interaction_diagnostics.csv
