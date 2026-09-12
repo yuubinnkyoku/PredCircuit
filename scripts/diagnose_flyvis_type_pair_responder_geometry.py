@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pandas as pd
 import torch
+from diagnose_flyvis_type_pair_multi_eval_holdout import heldout_metrics
 from run_flyvis_temporal_coherence_gate import apply_local_credit
 from run_flyvis_type_pair_axis_identity_control import credit
 from run_flyvis_type_pair_consensus import type_pair_indices
@@ -14,7 +15,6 @@ from run_flyvis_type_pair_linear_mix import linear_mix_direction
 from run_flyvis_type_pair_norm_matched_control import match_norm
 from run_flyvis_type_pair_shuffle_control import shuffled_groups_like
 
-from diagnose_flyvis_type_pair_multi_eval_holdout import heldout_metrics
 from predcircuit.flyvis import load_flyvis_spec
 from predcircuit.flyvis_retinotopy import graph_from_flyvis_retinotopy
 from predcircuit.model import PredictiveCodingGraph
