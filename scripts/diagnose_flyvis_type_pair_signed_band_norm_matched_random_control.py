@@ -32,7 +32,9 @@ RANDOM_CANDIDATES = 256
 RHO04_THRESHOLD = 0.4
 
 
-def _clipped_update(direction: torch.Tensor, learning_rate: float, max_update: float) -> torch.Tensor:
+def _clipped_update(
+    direction: torch.Tensor, learning_rate: float, max_update: float
+) -> torch.Tensor:
     update = learning_rate * direction
     return update.clamp(-max_update, max_update) if max_update > 0.0 else update
 
@@ -222,8 +224,14 @@ def run_seed(*, seed: int, learning_rate: float, max_update: float) -> pd.DataFr
                         outputs["signed"][metric] - outputs["rho04"][metric]
                     )
                 finite = (
-                    all(torch.isfinite(model.weight).all() for model in (rho_model, signed_model, matched_model))
-                    and all(torch.isfinite(model.bias).all() for model in (rho_model, signed_model, matched_model))
+                    all(
+                        torch.isfinite(model.weight).all()
+                        for model in (rho_model, signed_model, matched_model)
+                    )
+                    and all(
+                        torch.isfinite(model.bias).all()
+                        for model in (rho_model, signed_model, matched_model)
+                    )
                     and all(math.isfinite(float(value)) for value in values.values())
                     and all(math.isfinite(float(value)) for value in diagnostics.values())
                 )
