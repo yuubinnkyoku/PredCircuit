@@ -40,7 +40,6 @@ def _apply_rule_step(
     raw_edge, raw_bias = credit(model, circuit, seed=seed, epoch=epoch)
     if rule == "threshold":
         direction, diag = _threshold_direction(raw_edge, named_groups)
-        diag = {"threshold_suppressed_group_fraction": diag["suppressed_group_fraction"]}
     else:
         direction, diag = _candidate_direction(
             raw_edge,
@@ -75,7 +74,7 @@ def _current_diag(
     raw_edge, _ = credit(model, circuit, seed=seed, epoch=epoch)
     if rule == "threshold":
         _, diag = _threshold_direction(raw_edge, named_groups)
-        return {"threshold_suppressed_group_fraction": diag["suppressed_group_fraction"]}
+        return diag
     _, diag = _candidate_direction(
         raw_edge,
         model.weight.detach(),
