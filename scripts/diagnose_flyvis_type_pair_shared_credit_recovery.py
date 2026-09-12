@@ -94,7 +94,7 @@ def run_seed(*, seed: int, learning_rate: float, max_update: float) -> pd.DataFr
         for rule in RULES:
             model = models[rule]
             raw_edge, raw_bias = credit(model, circuit, seed=seed, epoch=epoch)
-            direction, diagnostics, shared = _rule_direction(
+            direction, diagnostics, _shared = _rule_direction(
                 rule,
                 raw_edge,
                 model.weight.detach(),
