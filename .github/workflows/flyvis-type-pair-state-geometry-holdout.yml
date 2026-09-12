@@ -1,0 +1,172 @@
+name: FlyVis type-pair state geometry holdout
+
+on:
+  push:
+    paths:
+      - ".github/triggers/run-type-pair-state-geometry-780-799"
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [780, 781, 782, 783, 784, 785, 786, 787, 788, 789, 790, 791, 792, 793, 794, 795, 796, 797, 798, 799]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Diagnose state geometry for seed ${{ matrix.seed }}
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run python scripts/diagnose_flyvis_type_pair_state_geometry.py \
+            --seed ${{ matrix.seed }} \
+            --shuffle-seed $((997000 + ${{ matrix.seed }})) \
+            --out results/generated/flyvis_type_pair_state_geometry_seed${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: type-pair-state-geometry-seed${{ matrix.seed }}
+          path: results/generated/flyvis_type_pair_state_geometry_seed${{ matrix.seed }}.csv
+
+  aggregate:
+    needs: diagnose
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: type-pair-state-geometry-seed*
+          path: artifacts
+          merge-multiple: true
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Aggregate state geometry
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run --with scipy python - <<'PY'
+          from pathlib import Path
+          import numpy as np
+          import pandas as pd
+          from scipy import stats
+
+          paths = sorted(Path("artifacts").glob("*.csv"))
+          frame = pd.concat([pd.read_csv(path) for path in paths], ignore_index=True)
+          if len(paths) != 20:
+              raise RuntimeError(f"expected 20 seed artifacts, got {len(paths)}")
+          if len(frame) != 1680:
+              raise RuntimeError(f"expected 1680 rows, got {len(frame)}")
+          if not frame["finite"].all():
+              raise RuntimeError("non-finite state geometry run detected")
+          frame.to_csv("results/generated/flyvis_type_pair_state_geometry.csv", index=False)
+
+          metric_cols = ["cross_entropy", "accuracy", "hard_margin"]
+          geometry_cols = [
+              "weight_biological_projection_fraction",
+              "weight_shuffle_projection_fraction",
+              "weight_cosine_to_local",
+              "displacement_norm",
+              "displacement_biological_projection_fraction",
+              "displacement_shuffle_projection_fraction",
+          ]
+          seed_means = frame.groupby(["seed", "horizon", "rule"], as_index=False)[
+              metric_cols + geometry_cols
+          ].mean()
+
+          rows = []
+          corr_rows = []
+          for horizon in sorted(seed_means["horizon"].unique()):
+              subset = seed_means[seed_means.horizon == horizon]
+              local = subset[subset.rule == "local"].set_index("seed").sort_index()
+              type_ = subset[subset.rule == "type"].set_index("seed").loc[local.index]
+              shuffle = subset[subset.rule == "shuffle"].set_index("seed").loc[local.index]
+
+              ce_advantage = shuffle["cross_entropy"] - type_["cross_entropy"]
+              margin_advantage = type_["hard_margin"] - shuffle["hard_margin"]
+              type_state_preference = (
+                  type_["weight_biological_projection_fraction"]
+                  - type_["weight_shuffle_projection_fraction"]
+              )
+              type_displacement_preference = (
+                  type_["displacement_biological_projection_fraction"]
+                  - type_["displacement_shuffle_projection_fraction"]
+              )
+
+              for name, values in (
+                  ("type_state_bio_minus_shuffle_projection", type_state_preference),
+                  (
+                      "type_displacement_bio_minus_shuffle_projection",
+                      type_displacement_preference,
+                  ),
+                  (
+                      "type_minus_shuffle_biological_weight_projection",
+                      type_["weight_biological_projection_fraction"]
+                      - shuffle["weight_biological_projection_fraction"],
+                  ),
+              ):
+                  delta = values.to_numpy(float)
+                  mean = float(delta.mean())
+                  std = float(delta.std(ddof=1))
+                  ci_low, ci_high = stats.t.interval(
+                      0.95,
+                      len(delta) - 1,
+                      loc=mean,
+                      scale=std / np.sqrt(len(delta)),
+                  )
+                  rows.append(
+                      {
+                          "horizon": int(horizon),
+                          "metric": name,
+                          "n": len(delta),
+                          "mean": mean,
+                          "ci_low": float(ci_low),
+                          "ci_high": float(ci_high),
+                          "positive": int((delta > 0).sum()),
+                          "t_p": float(stats.ttest_1samp(delta, 0.0).pvalue),
+                          "wilcoxon_p": float(stats.wilcoxon(delta).pvalue),
+                          "cohen_dz": mean / std if std > 0 else float("nan"),
+                      }
+                  )
+
+              for geometry_name, geometry_values in (
+                  ("type_state_preference", type_state_preference),
+                  ("type_displacement_preference", type_displacement_preference),
+              ):
+                  for outcome_name, outcome_values in (
+                      ("ce_advantage", ce_advantage),
+                      ("margin_advantage", margin_advantage),
+                  ):
+                      pearson = stats.pearsonr(geometry_values, outcome_values)
+                      spearman = stats.spearmanr(geometry_values, outcome_values)
+                      corr_rows.append(
+                          {
+                              "horizon": int(horizon),
+                              "geometry": geometry_name,
+                              "outcome": outcome_name,
+                              "pearson_r": float(pearson.statistic),
+                              "pearson_p": float(pearson.pvalue),
+                              "spearman_r": float(spearman.statistic),
+                              "spearman_p": float(spearman.pvalue),
+                          }
+                      )
+
+          pd.DataFrame(rows).to_csv(
+              "results/generated/flyvis_type_pair_state_geometry_summary.csv",
+              index=False,
+          )
+          pd.DataFrame(corr_rows).to_csv(
+              "results/generated/flyvis_type_pair_state_geometry_correlations.csv",
+              index=False,
+          )
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-type-pair-state-geometry-aggregate
+          path: |
+            results/generated/flyvis_type_pair_state_geometry.csv
+            results/generated/flyvis_type_pair_state_geometry_summary.csv
+            results/generated/flyvis_type_pair_state_geometry_correlations.csv
