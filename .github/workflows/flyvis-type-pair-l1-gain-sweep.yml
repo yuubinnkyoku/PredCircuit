@@ -1,0 +1,133 @@
+name: FlyVis L1 shared-credit gain sweep
+
+on:
+  push:
+    paths:
+      - ".github/triggers/run-type-pair-l1-gain-sweep-1100-1119"
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [1100, 1101, 1102, 1103, 1104, 1105, 1106, 1107, 1108, 1109, 1110, 1111, 1112, 1113, 1114, 1115, 1116, 1117, 1118, 1119]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Run L1 gain sweep for seed ${{ matrix.seed }}
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run python scripts/diagnose_flyvis_type_pair_l1_gain_sweep.py \
+            --seed ${{ matrix.seed }} \
+            --out results/generated/flyvis_type_pair_l1_gain_sweep_seed${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: type-pair-l1-gain-sweep-seed${{ matrix.seed }}
+          path: results/generated/flyvis_type_pair_l1_gain_sweep_seed${{ matrix.seed }}.csv
+
+  aggregate:
+    needs: diagnose
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: type-pair-l1-gain-sweep-seed*
+          path: artifacts
+          merge-multiple: true
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Aggregate L1 gain sweep
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run --with scipy python - <<'PY'
+          from pathlib import Path
+          import numpy as np
+          import pandas as pd
+          from scipy import stats
+
+          paths = sorted(Path("artifacts").glob("*.csv"))
+          if len(paths) != 20:
+              raise RuntimeError(f"expected 20 seed artifacts, got {len(paths)}")
+          frame = pd.concat([pd.read_csv(path) for path in paths], ignore_index=True)
+          if not frame["finite"].all():
+              raise RuntimeError("non-finite L1 gain-sweep run detected")
+          frame.to_csv("results/generated/flyvis_type_pair_l1_gain_sweep.csv", index=False)
+
+          metrics = {
+              "cross_entropy": -1.0,
+              "accuracy": 1.0,
+              "hard_margin": 1.0,
+              "soft_margin": 1.0,
+              "correct_probability": 1.0,
+              "wrong_tail_pressure": -1.0,
+              "ce_on_local_correct": -1.0,
+              "ce_on_local_wrong": -1.0,
+          }
+          seed_means = frame.groupby(["seed", "horizon", "rule", "l1_gain"], as_index=False)[
+              list(metrics) + ["wrong_to_correct_fraction", "correct_to_wrong_fraction"]
+          ].mean()
+          rows = []
+          for horizon in sorted(seed_means["horizon"].unique()):
+              subset = seed_means[seed_means.horizon == horizon]
+              local = subset[subset.rule == "local"].set_index("seed").sort_index()
+              for gain in (0.0, 1.0, 2.0, 3.0):
+                  rule = f"l1_gain_{gain:g}"
+                  treatment = subset[subset.rule == rule].set_index("seed").sort_index()
+                  for metric, sign in metrics.items():
+                      delta = sign * (treatment[metric] - local[metric]).to_numpy(float)
+                      mean = float(delta.mean())
+                      std = float(delta.std(ddof=1))
+                      ci_low, ci_high = stats.t.interval(
+                          0.95,
+                          len(delta) - 1,
+                          loc=mean,
+                          scale=std / np.sqrt(len(delta)),
+                      )
+                      rows.append(
+                          {
+                              "horizon": int(horizon),
+                              "l1_gain": gain,
+                              "metric": metric,
+                              "n": len(delta),
+                              "mean_improvement": mean,
+                              "ci_low": float(ci_low),
+                              "ci_high": float(ci_high),
+                              "positive": int((delta > 0).sum()),
+                              "t_p": float(stats.ttest_1samp(delta, 0.0).pvalue),
+                              "cohen_dz": mean / std if std > 0 else float("nan"),
+                          }
+                      )
+          pd.DataFrame(rows).to_csv(
+              "results/generated/flyvis_type_pair_l1_gain_sweep_summary.csv",
+              index=False,
+          )
+
+          transitions = seed_means[
+              [
+                  "seed",
+                  "horizon",
+                  "l1_gain",
+                  "wrong_to_correct_fraction",
+                  "correct_to_wrong_fraction",
+              ]
+          ]
+          transitions.to_csv(
+              "results/generated/flyvis_type_pair_l1_gain_sweep_transitions.csv",
+              index=False,
+          )
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-type-pair-l1-gain-sweep-aggregate
+          path: |
+            results/generated/flyvis_type_pair_l1_gain_sweep.csv
+            results/generated/flyvis_type_pair_l1_gain_sweep_summary.csv
+            results/generated/flyvis_type_pair_l1_gain_sweep_transitions.csv
