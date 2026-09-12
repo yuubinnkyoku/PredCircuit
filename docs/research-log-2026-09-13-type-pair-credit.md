@@ -461,9 +461,45 @@ ungated 4m+r  →  weight-norm growth  →  late hard-margin explosion
   gate removes this                      gate is a brake
 ```
 
+## Biological-strength scale perturbation (1620-1629)
+
+- **Workflow run**: 34709187136 (success, 4m34s)
+- **Seeds**: 1620-1629 (10/10), finite 720/720
+- **Design:** `use_biological_strength=True` with `init_scale` ∈ {0.04, 0.08, 0.16} (half / default / double). Rules: local vs standard 4m+r. Horizons 100/160/200. Jitter base 10_700_000.
+- **Artifact:** `results/artifacts/bio-scale-1620-1629/`
+
+### standard − local at h=200 (paired, n=10)
+
+| init_scale | Δ hard | Δ acc | Δ CE | verdict |
+|---:|---|---|---|---|
+| 0.04 | +0.0069 (10/10) | +0.138 (9/10) | −0.0055 (10/10) | standard wins, small |
+| **0.08** | **+0.232 (10/10)** | **+0.408 (10/10)** | **−0.251 (10/10)** | **standard wins, large** |
+| 0.16 | **−2.136 (1/10)** | −0.197 (1/10) | +1.939 (1/10) | **standard diverges** |
+
+### Absolute h=200 means
+
+| scale | rule | CE | acc | hard | weight_norm |
+|---:|---|---:|---:|---:|---:|
+| 0.04 | local | 1.376 | 0.476 | −0.003 | 22.4 |
+| 0.04 | standard | 1.371 | 0.614 | +0.004 | 27.5 |
+| 0.08 | local | 1.371 | 0.432 | −0.016 | 40.0 |
+| 0.08 | standard | **1.120** | **0.840** | **+0.216** | 66.0 |
+| 0.16 | local | 1.554 | 0.448 | −0.486 | 86.2 |
+| 0.16 | standard | 3.493 | 0.252 | **−2.622** | 130.1 |
+
+### Interpretation
+
+The late 4m+r recovery is **not scale-free**. It is large and clean at the default init scale 0.08, real but an order of magnitude smaller at 0.04, and **reverses into divergence** at 0.16. Shared mean credit amplifies whatever dynamical regime the init scale sets: too little → weak effect; too much → instability (standard reaches weight_norm 130 and CE 3.49).
+
+Local credit degrades at 0.16 as well (hard −0.49) but far less than standard. The recovery therefore sits in a **Goldilocks band** of init magnitude. Any claim that "shared type-pair mean credit is good" must be qualified by this dynamical constraint.
+
 ## Next single experiment
 
-**Biological-strength scale perturbation.** Train standard 4m+r and local to epoch 200 under lighter/heavier biological-strength init, and check whether the late recovery is specific to one init scale.
+The session has mapped the main structure. Highest-value remaining items, in order:
+
+1. **Far-jitter hold-out** that re-evaluates saved 200-epoch weights under a completely disjoint jitter base (confirm the U-turn is not jitter-specific).
+2. **Finer init-scale sweep** around 0.08 (e.g. 0.06 / 0.08 / 0.10 / 0.12) to locate the divergence boundary.
+3. **FPGA-oriented packing** of the ungated 4m+r rule only after (1) and (2) — not before.
 
 ## Artifact index (local)
 
@@ -475,6 +511,7 @@ results/artifacts/full-horizon-200-1560-1579/     # U-turn discovery
 results/artifacts/recovery-1580-1589/             # recovery mechanism
 results/artifacts/late-gate-intervention-1600-1619/ # causal late-gate brake
 results/artifacts/late-gate-switch-1590-1599/      # switch dose-response
+results/artifacts/bio-scale-1620-1629/             # init-scale Goldilocks band
 results/artifacts/boundary-geometry-1420-1439/
 results/artifacts/mechanism-1540-1559/
 results/artifacts/branched-1460-1479/
