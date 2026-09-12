@@ -1,0 +1,117 @@
+name: FlyVis full-horizon type-pair rule holdout
+
+on:
+  push:
+    paths:
+      - ".github/triggers/run-type-pair-full-horizon-1500-1519"
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [1500, 1501, 1502, 1503, 1504, 1505, 1506, 1507, 1508, 1509, 1510, 1511, 1512, 1513, 1514, 1515, 1516, 1517, 1518, 1519]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Run full-horizon type-pair rule holdout for seed ${{ matrix.seed }}
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run python scripts/diagnose_flyvis_type_pair_full_horizon_rule_holdout.py \
+            --seed ${{ matrix.seed }} \
+            --out results/generated/flyvis_type_pair_full_horizon_rule_holdout_seed${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: type-pair-full-horizon-rule-holdout-seed${{ matrix.seed }}
+          path: results/generated/flyvis_type_pair_full_horizon_rule_holdout_seed${{ matrix.seed }}.csv
+
+  aggregate:
+    needs: diagnose
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: type-pair-full-horizon-rule-holdout-seed*
+          path: artifacts
+          merge-multiple: true
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Aggregate full-horizon type-pair rule holdout
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run --with scipy python - <<'PY'
+          from pathlib import Path
+          import numpy as np
+          import pandas as pd
+          from scipy import stats
+
+          paths = sorted(Path("artifacts").glob("*.csv"))
+          if len(paths) != 20:
+              raise RuntimeError(f"expected 20 seed artifacts, got {len(paths)}")
+          frame = pd.concat([pd.read_csv(path) for path in paths], ignore_index=True)
+          if frame["seed"].nunique() != 20:
+              raise RuntimeError(f"expected 20 unique seeds, got {frame['seed'].nunique()}")
+          if not frame["finite"].all():
+              raise RuntimeError("non-finite full-horizon result detected")
+          frame.to_csv(
+              "results/generated/flyvis_type_pair_full_horizon_rule_holdout.csv",
+              index=False,
+          )
+
+          metric_columns = [column for column in frame.columns if "_minus_" in column]
+          diag_columns = [column for column in frame.columns if "_mean_" in column]
+          per_seed = frame.groupby(["seed", "init_mode", "horizon"], as_index=False)[
+              metric_columns + diag_columns
+          ].mean()
+          rows = []
+          for (mode, horizon), subset in per_seed.groupby(["init_mode", "horizon"]):
+              for metric in metric_columns + diag_columns:
+                  values = subset[metric].to_numpy(float)
+                  mean = float(values.mean())
+                  std = float(values.std(ddof=1))
+                  if std > 0.0:
+                      ci_low, ci_high = stats.t.interval(
+                          0.95,
+                          len(values) - 1,
+                          loc=mean,
+                          scale=std / np.sqrt(len(values)),
+                      )
+                      p = float(stats.ttest_1samp(values, 0.0).pvalue)
+                      dz = mean / std
+                  else:
+                      ci_low = ci_high = mean
+                      p = 1.0 if mean == 0.0 else 0.0
+                      dz = float("nan")
+                  rows.append(
+                      {
+                          "init_mode": mode,
+                          "horizon": int(horizon),
+                          "metric": metric,
+                          "n": len(values),
+                          "mean": mean,
+                          "ci_low": float(ci_low),
+                          "ci_high": float(ci_high),
+                          "positive": int((values > 0.0).sum()),
+                          "t_p": p,
+                          "cohen_dz": dz,
+                      }
+                  )
+          pd.DataFrame(rows).to_csv(
+              "results/generated/flyvis_type_pair_full_horizon_rule_holdout_summary.csv",
+              index=False,
+          )
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-type-pair-full-horizon-rule-holdout-aggregate
+          path: |
+            results/generated/flyvis_type_pair_full_horizon_rule_holdout.csv
+            results/generated/flyvis_type_pair_full_horizon_rule_holdout_summary.csv
