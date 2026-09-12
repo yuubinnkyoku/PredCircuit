@@ -1,0 +1,164 @@
+from __future__ import annotations
+
+import argparse
+import copy
+import math
+from pathlib import Path
+
+import pandas as pd
+import torch
+from diagnose_flyvis_type_pair_horizon_causal import _match_local_state, _mixed_direction
+from diagnose_flyvis_type_pair_mi9_causal import _named_groups
+from diagnose_flyvis_type_pair_multi_eval_holdout import heldout_metrics
+from run_flyvis_temporal_coherence_gate import apply_local_credit
+from run_flyvis_type_pair_axis_identity_control import credit
+from run_flyvis_type_pair_norm_matched_control import match_norm
+
+from predcircuit.flyvis import load_flyvis_spec
+from predcircuit.flyvis_retinotopy import graph_from_flyvis_retinotopy
+from predcircuit.model import PredictiveCodingGraph
+
+HORIZONS = (60, 80, 100)
+EVAL_REPS = 4
+EVAL_JITTER_BASE = 3_600_000
+RULES = ("local", "l1_only", "non_l1_only", "type")
+
+
+def _subset_direction(
+    raw_edge: torch.Tensor,
+    named_groups: list[tuple[str, str, torch.Tensor]],
+    *,
+    select_l1: bool,
+) -> torch.Tensor:
+    result = raw_edge.clone()
+    for _, target_type, indices in named_groups:
+        selected = (target_type == "L1") == select_l1
+        if selected:
+            result[indices] = raw_edge[indices] + 3.0 * raw_edge[indices].mean()
+    return match_norm(result, raw_edge)
+
+
+def run_seed(
+    *,
+    seed: int,
+    learning_rate: float,
+    max_update: float,
+) -> pd.DataFrame:
+    circuit = graph_from_flyvis_retinotopy(load_flyvis_spec(), extent=2)
+    named_groups = _named_groups(circuit)
+    groups = [indices for _, _, indices in named_groups]
+    base = PredictiveCodingGraph(
+        circuit.graph,
+        seed=seed,
+        init_scale=0.08,
+        use_biological_strength=True,
+    )
+    models = {rule: copy.deepcopy(base) for rule in RULES}
+    direction_change_sum = {rule: 0.0 for rule in RULES if rule != "local"}
+    weight_error_sum = copy.deepcopy(direction_change_sum)
+    bias_error_sum = copy.deepcopy(direction_change_sum)
+    rows: list[dict[str, float | int | bool | str]] = []
+
+    for step in range(1, max(HORIZONS) + 1):
+        epoch = step - 1
+        local_edge, local_bias = credit(models["local"], circuit, seed=seed, epoch=epoch)
+        apply_local_credit(
+            models["local"],
+            local_edge,
+            local_bias,
+            learning_rate=learning_rate,
+            weight_decay=0.0,
+            max_update=max_update,
+        )
+
+        for rule in RULES[1:]:
+            model = models[rule]
+            raw_edge, raw_bias = credit(model, circuit, seed=seed, epoch=epoch)
+            if rule == "type":
+                direction = _mixed_direction(raw_edge, groups)
+            elif rule == "l1_only":
+                direction = _subset_direction(raw_edge, named_groups, select_l1=True)
+            else:
+                direction = _subset_direction(raw_edge, named_groups, select_l1=False)
+            direction_change_sum[rule] += float(
+                torch.linalg.vector_norm(direction - raw_edge)
+                / torch.linalg.vector_norm(raw_edge).clamp_min(1e-30)
+            )
+            apply_local_credit(
+                model,
+                direction,
+                raw_bias,
+                learning_rate=learning_rate,
+                weight_decay=0.0,
+                max_update=max_update,
+            )
+            weight_error, bias_error = _match_local_state(model, models["local"])
+            weight_error_sum[rule] += weight_error
+            bias_error_sum[rule] += bias_error
+
+        if step not in HORIZONS:
+            continue
+
+        for eval_rep in range(EVAL_REPS):
+            jitter_seed = EVAL_JITTER_BASE + eval_rep
+            for rule in RULES:
+                model = models[rule]
+                metrics = heldout_metrics(model, circuit, jitter_seed=jitter_seed)
+                if rule == "local":
+                    mean_direction_change = 0.0
+                    mean_weight_error = 0.0
+                    mean_bias_error = 0.0
+                else:
+                    mean_direction_change = direction_change_sum[rule] / step
+                    mean_weight_error = weight_error_sum[rule] / step
+                    mean_bias_error = bias_error_sum[rule] / step
+                finite = (
+                    bool(torch.isfinite(model.weight).all())
+                    and bool(torch.isfinite(model.bias).all())
+                    and all(math.isfinite(value) for value in metrics.values())
+                    and math.isfinite(mean_direction_change)
+                    and math.isfinite(mean_weight_error)
+                    and math.isfinite(mean_bias_error)
+                )
+                rows.append(
+                    {
+                        "seed": seed,
+                        "horizon": step,
+                        "eval_rep": eval_rep,
+                        "rule": rule,
+                        "mean_relative_direction_change": mean_direction_change,
+                        "mean_weight_norm_error": mean_weight_error,
+                        "mean_bias_error": mean_bias_error,
+                        **metrics,
+                        "finite": finite,
+                    }
+                )
+
+    return pd.DataFrame(rows)
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description=(
+            "Measure causal interaction between L1-targeted and complementary type-pair "
+            "shared credit under biological-strength initialization"
+        )
+    )
+    parser.add_argument("--seed", type=int, required=True)
+    parser.add_argument("--learning-rate", type=float, default=160.0)
+    parser.add_argument("--max-update", type=float, default=0.05)
+    parser.add_argument("--out", type=Path, required=True)
+    args = parser.parse_args()
+    frame = run_seed(
+        seed=args.seed,
+        learning_rate=args.learning_rate,
+        max_update=args.max_update,
+    )
+    args.out.parent.mkdir(parents=True, exist_ok=True)
+    frame.to_csv(args.out, index=False)
+    print(frame.to_string(index=False))
+    print(f"\nSaved: {args.out}")
+
+
+if __name__ == "__main__":
+    main()
