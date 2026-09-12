@@ -1,0 +1,135 @@
+name: FlyVis L1 shared-credit gain geometry
+
+on:
+  push:
+    paths:
+      - ".github/triggers/run-type-pair-l1-gain-geometry-1160-1179"
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [1160, 1161, 1162, 1163, 1164, 1165, 1166, 1167, 1168, 1169, 1170, 1171, 1172, 1173, 1174, 1175, 1176, 1177, 1178, 1179]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Diagnose L1 gain geometry for seed ${{ matrix.seed }}
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run python scripts/diagnose_flyvis_type_pair_l1_gain_geometry.py \
+            --seed ${{ matrix.seed }} \
+            --out results/generated/flyvis_type_pair_l1_gain_geometry_seed${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: type-pair-l1-gain-geometry-seed${{ matrix.seed }}
+          path: results/generated/flyvis_type_pair_l1_gain_geometry_seed${{ matrix.seed }}.csv
+
+  aggregate:
+    needs: diagnose
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: type-pair-l1-gain-geometry-seed*
+          path: artifacts
+          merge-multiple: true
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Aggregate L1 gain geometry
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run --with scipy python - <<'PY'
+          from pathlib import Path
+          import numpy as np
+          import pandas as pd
+          from scipy import stats
+
+          paths = sorted(Path("artifacts").glob("*.csv"))
+          if len(paths) != 20:
+              raise RuntimeError(f"expected 20 seed artifacts, got {len(paths)}")
+          frame = pd.concat([pd.read_csv(path) for path in paths], ignore_index=True)
+          if not frame["finite"].all():
+              raise RuntimeError("non-finite L1 gain geometry detected")
+          frame.to_csv("results/generated/flyvis_type_pair_l1_gain_geometry.csv", index=False)
+
+          metrics = [
+              "l1_raw_norm",
+              "l1_mean_norm",
+              "l1_residual_norm",
+              "l1_mean_energy_fraction",
+              "l1_mean_to_residual_norm",
+              "gain1_gain3_direction_cosine",
+              "gain3_extra_update_norm",
+              "gain3_extra_update_relative_norm",
+              "gain1_l1_clip_fraction",
+              "gain3_l1_clip_fraction",
+              "heldout_ce",
+              "heldout_hard_margin",
+              "heldout_soft_margin",
+              "ce_grad_dot_gain3_extra_update",
+              "hard_margin_grad_dot_gain3_extra_update",
+              "soft_margin_grad_dot_gain3_extra_update",
+              "ce_grad_cos_l1_mean",
+              "hard_margin_grad_cos_l1_mean",
+              "soft_margin_grad_cos_l1_mean",
+          ]
+          means = frame.groupby(["init_mode", "horizon"], as_index=False)[metrics].mean()
+          means.to_csv("results/generated/flyvis_type_pair_l1_gain_geometry_means.csv", index=False)
+
+          rows = []
+          for horizon in sorted(frame["horizon"].unique()):
+              subset = frame[frame.horizon == horizon]
+              bio = subset[subset.init_mode == "biological_strength"].set_index("seed").sort_index()
+              random = subset[subset.init_mode == "random"].set_index("seed").sort_index()
+              if not bio.index.equals(random.index):
+                  raise RuntimeError("seed mismatch between initialization modes")
+              for metric in metrics:
+                  delta = (bio[metric] - random[metric]).to_numpy(float)
+                  mean = float(delta.mean())
+                  std = float(delta.std(ddof=1))
+                  lo, hi = stats.t.interval(
+                      0.95,
+                      len(delta) - 1,
+                      loc=mean,
+                      scale=std / np.sqrt(len(delta)),
+                  )
+                  t_p = float(stats.ttest_1samp(delta, 0.0).pvalue)
+                  try:
+                      wilcoxon_p = float(stats.wilcoxon(delta).pvalue)
+                  except ValueError:
+                      wilcoxon_p = float("nan")
+                  rows.append(
+                      {
+                          "horizon": int(horizon),
+                          "metric": metric,
+                          "n": len(delta),
+                          "bio_minus_random": mean,
+                          "ci_low": float(lo),
+                          "ci_high": float(hi),
+                          "positive": int((delta > 0).sum()),
+                          "t_p": t_p,
+                          "wilcoxon_p": wilcoxon_p,
+                          "cohen_dz": mean / std if std > 0 else float("nan"),
+                      }
+                  )
+          pd.DataFrame(rows).to_csv(
+              "results/generated/flyvis_type_pair_l1_gain_geometry_paired.csv",
+              index=False,
+          )
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-type-pair-l1-gain-geometry-aggregate
+          path: |
+            results/generated/flyvis_type_pair_l1_gain_geometry.csv
+            results/generated/flyvis_type_pair_l1_gain_geometry_means.csv
+            results/generated/flyvis_type_pair_l1_gain_geometry_paired.csv
