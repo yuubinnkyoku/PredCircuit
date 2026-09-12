@@ -1,0 +1,230 @@
+name: FlyVis type-pair coefficient dynamics holdout
+
+on:
+  push:
+    paths:
+      - ".github/triggers/run-type-pair-coefficient-dynamics-1710-1729"
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        seed:
+          - 1710
+          - 1711
+          - 1712
+          - 1713
+          - 1714
+          - 1715
+          - 1716
+          - 1717
+          - 1718
+          - 1719
+          - 1720
+          - 1721
+          - 1722
+          - 1723
+          - 1724
+          - 1725
+          - 1726
+          - 1727
+          - 1728
+          - 1729
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Run coefficient dynamics for seed ${{ matrix.seed }}
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run python scripts/diagnose_flyvis_type_pair_coefficient_dynamics.py \
+            --seed ${{ matrix.seed }} \
+            --init-scales 0.12,0.14,0.16 \
+            --coefficients 1.0,1.5,2.0,2.5 \
+            --horizons 40,80,120,160,180,200 \
+            --eval-jitter-base 10940000 \
+            --out results/generated/flyvis_type_pair_coefficient_dynamics_seed${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: type-pair-coefficient-dynamics-seed${{ matrix.seed }}
+          path: results/generated/flyvis_type_pair_coefficient_dynamics_seed${{ matrix.seed }}.csv
+
+  aggregate:
+    needs: diagnose
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: type-pair-coefficient-dynamics-seed*
+          path: artifacts
+          merge-multiple: true
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Aggregate coefficient dynamics
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run --with scipy python - <<'PY'
+          from pathlib import Path
+
+          import numpy as np
+          import pandas as pd
+          from scipy import stats
+
+          paths = sorted(Path("artifacts").glob("*.csv"))
+          if len(paths) != 20:
+              raise RuntimeError(f"expected 20 seed artifacts, got {len(paths)}")
+          frame = pd.concat([pd.read_csv(path) for path in paths], ignore_index=True)
+          if len(frame) != 5760:
+              raise RuntimeError(f"expected 5760 rows, got {len(frame)}")
+          if not frame["finite"].all():
+              raise RuntimeError("non-finite coefficient-dynamics result detected")
+          if frame["seed"].nunique() != 20:
+              raise RuntimeError("expected 20 unique seeds")
+          frame.to_csv(
+              "results/generated/flyvis_type_pair_coefficient_dynamics.csv",
+              index=False,
+          )
+
+          metrics = (
+              "cross_entropy",
+              "accuracy",
+              "hard_margin",
+              "soft_margin",
+              "weight_norm",
+          )
+          geometry = (
+              "raw_credit_norm",
+              "shared_credit_norm",
+              "residual_credit_norm",
+              "direction_norm",
+              "preclip_update_norm",
+              "clipped_update_norm",
+              "clip_fraction",
+              "radial_update_cosine",
+              "radial_update_projection",
+              "mean_abs_update",
+              "max_abs_update",
+          )
+          columns = list(metrics + geometry)
+          per_seed = frame.groupby(
+              ["seed", "init_scale", "shared_coefficient", "horizon"],
+              as_index=False,
+          )[columns].mean()
+          per_seed.to_csv(
+              "results/generated/flyvis_type_pair_coefficient_dynamics_per_seed.csv",
+              index=False,
+          )
+
+          paired_rows = []
+          for scale in sorted(per_seed["init_scale"].unique()):
+              for horizon in sorted(per_seed["horizon"].unique()):
+                  subset = per_seed[
+                      (per_seed["init_scale"] == scale)
+                      & (per_seed["horizon"] == horizon)
+                  ]
+                  local = subset[subset["shared_coefficient"] == 1.0].set_index("seed").sort_index()
+                  if len(local) != 20:
+                      raise RuntimeError("missing local baseline")
+                  for coefficient in sorted(subset["shared_coefficient"].unique()):
+                      lhs = subset[subset["shared_coefficient"] == coefficient].set_index("seed").sort_index()
+                      if not lhs.index.equals(local.index) or len(lhs) != 20:
+                          raise RuntimeError("paired seed mismatch")
+                      for metric in metrics:
+                          diff = lhs[metric].to_numpy(float) - local[metric].to_numpy(float)
+                          mean = float(diff.mean())
+                          std = float(diff.std(ddof=1))
+                          if std > 0.0:
+                              ci_low, ci_high = stats.t.interval(
+                                  0.95,
+                                  len(diff) - 1,
+                                  loc=mean,
+                                  scale=std / np.sqrt(len(diff)),
+                              )
+                              p_value = float(
+                                  stats.ttest_rel(
+                                      lhs[metric].to_numpy(float),
+                                      local[metric].to_numpy(float),
+                                  ).pvalue
+                              )
+                              dz = mean / std
+                          else:
+                              ci_low = ci_high = mean
+                              p_value = 1.0
+                              dz = 0.0
+                          paired_rows.append(
+                              {
+                                  "init_scale": float(scale),
+                                  "horizon": int(horizon),
+                                  "shared_coefficient": float(coefficient),
+                                  "metric": metric,
+                                  "n": len(diff),
+                                  "mean_difference_vs_local": mean,
+                                  "ci_low": float(ci_low),
+                                  "ci_high": float(ci_high),
+                                  "p_value": p_value,
+                                  "cohen_dz": float(dz),
+                                  "positive_seeds": int((diff > 0).sum()),
+                                  "negative_seeds": int((diff < 0).sum()),
+                              }
+                          )
+          pd.DataFrame(paired_rows).to_csv(
+              "results/generated/flyvis_type_pair_coefficient_dynamics_paired.csv",
+              index=False,
+          )
+
+          final = per_seed[per_seed["horizon"] == 200].copy()
+          local_final = final[final["shared_coefficient"] == 1.0][
+              ["seed", "init_scale", "hard_margin"]
+          ].rename(columns={"hard_margin": "local_hard_margin_200"})
+          final = final.merge(local_final, on=["seed", "init_scale"], validate="many_to_one")
+          final["hard_gain_200"] = final["hard_margin"] - final["local_hard_margin_200"]
+
+          predictor_rows = []
+          for horizon in (40, 80, 120, 160, 180):
+              predictors = per_seed[
+                  (per_seed["horizon"] == horizon)
+                  & (per_seed["shared_coefficient"] > 1.0)
+              ].merge(
+                  final[
+                      ["seed", "init_scale", "shared_coefficient", "hard_gain_200"]
+                  ],
+                  on=["seed", "init_scale", "shared_coefficient"],
+                  validate="one_to_one",
+              )
+              for feature in ("weight_norm",) + geometry:
+                  x = predictors[feature].to_numpy(float)
+                  y = predictors["hard_gain_200"].to_numpy(float)
+                  pearson_r, pearson_p = stats.pearsonr(x, y)
+                  spearman_r, spearman_p = stats.spearmanr(x, y)
+                  predictor_rows.append(
+                      {
+                          "horizon": horizon,
+                          "feature": feature,
+                          "n": len(predictors),
+                          "pearson_r": float(pearson_r),
+                          "pearson_p": float(pearson_p),
+                          "spearman_r": float(spearman_r),
+                          "spearman_p": float(spearman_p),
+                      }
+                  )
+          pd.DataFrame(predictor_rows).to_csv(
+              "results/generated/flyvis_type_pair_coefficient_dynamics_predictors.csv",
+              index=False,
+          )
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-type-pair-coefficient-dynamics-aggregate
+          path: |
+            results/generated/flyvis_type_pair_coefficient_dynamics.csv
+            results/generated/flyvis_type_pair_coefficient_dynamics_per_seed.csv
+            results/generated/flyvis_type_pair_coefficient_dynamics_paired.csv
+            results/generated/flyvis_type_pair_coefficient_dynamics_predictors.csv
