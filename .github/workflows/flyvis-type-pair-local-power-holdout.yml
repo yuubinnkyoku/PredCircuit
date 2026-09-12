@@ -1,0 +1,124 @@
+name: FlyVis local power boundary-gate holdout
+
+on:
+  push:
+    paths:
+      - ".github/triggers/run-type-pair-local-power-holdout-1440-1459"
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [1440, 1441, 1442, 1443, 1444, 1445, 1446, 1447, 1448, 1449, 1450, 1451, 1452, 1453, 1454, 1455, 1456, 1457, 1458, 1459]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Run local power holdout for seed ${{ matrix.seed }}
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run python scripts/diagnose_flyvis_type_pair_local_power_holdout.py \
+            --seed ${{ matrix.seed }} \
+            --out results/generated/flyvis_type_pair_local_power_holdout_seed${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: type-pair-local-power-holdout-seed${{ matrix.seed }}
+          path: results/generated/flyvis_type_pair_local_power_holdout_seed${{ matrix.seed }}.csv
+
+  aggregate:
+    needs: diagnose
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: type-pair-local-power-holdout-seed*
+          path: artifacts
+          merge-multiple: true
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Aggregate local power holdout
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run --with scipy python - <<'PY'
+          from pathlib import Path
+          import numpy as np
+          import pandas as pd
+          from scipy import stats
+
+          paths = sorted(Path("artifacts").glob("*.csv"))
+          if len(paths) != 20:
+              raise RuntimeError(f"expected 20 seed artifacts, got {len(paths)}")
+          frame = pd.concat([pd.read_csv(path) for path in paths], ignore_index=True)
+          if not frame["finite"].all():
+              raise RuntimeError("non-finite local power holdout detected")
+          frame.to_csv(
+              "results/generated/flyvis_type_pair_local_power_holdout.csv",
+              index=False,
+          )
+
+          diff_metrics = [
+              column
+              for column in frame.columns
+              if "_minus_threshold_" in column
+          ]
+          diagnostics = [
+              "local_power_suppressed_group_fraction",
+              "local_power_added_group_fraction",
+              "delta_norm_suppressed_group_fraction",
+              "delta_norm_added_group_fraction",
+          ]
+          per_seed = frame.groupby(["seed", "horizon"], as_index=False)[
+              diff_metrics + diagnostics
+          ].mean()
+          rows = []
+          for horizon, subset in per_seed.groupby("horizon"):
+              for metric in diff_metrics + diagnostics:
+                  values = subset[metric].to_numpy(float)
+                  null = 0.0
+                  mean = float(values.mean())
+                  std = float(values.std(ddof=1))
+                  if std > 0.0:
+                      ci_low, ci_high = stats.t.interval(
+                          0.95,
+                          len(values) - 1,
+                          loc=mean,
+                          scale=std / np.sqrt(len(values)),
+                      )
+                      p = float(stats.ttest_1samp(values, null).pvalue)
+                      dz = mean / std
+                  else:
+                      ci_low = ci_high = mean
+                      p = 1.0 if mean == null else 0.0
+                      dz = float("nan")
+                  rows.append(
+                      {
+                          "horizon": int(horizon),
+                          "metric": metric,
+                          "n": len(values),
+                          "mean": mean,
+                          "ci_low": float(ci_low),
+                          "ci_high": float(ci_high),
+                          "positive": int((values > 0.0).sum()),
+                          "t_p": p,
+                          "cohen_dz": dz,
+                      }
+                  )
+          pd.DataFrame(rows).to_csv(
+              "results/generated/flyvis_type_pair_local_power_holdout_summary.csv",
+              index=False,
+          )
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-type-pair-local-power-holdout-aggregate
+          path: |
+            results/generated/flyvis_type_pair_local_power_holdout.csv
+            results/generated/flyvis_type_pair_local_power_holdout_summary.csv
