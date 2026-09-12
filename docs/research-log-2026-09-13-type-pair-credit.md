@@ -341,11 +341,73 @@ Consecutive-run lengths of power-band membership: n=570 runs, **mean 1.15**, med
 
 **Mechanistic implication:** local_power does **not** lock onto a small set of persistently harmful type-pair groups. Each evaluation horizon suppresses a largely different ~5–8 groups. The hard-margin gain is therefore better described as a **bursty, rotating stochastic suppressor** (dropout-like on the mean-credit channel) than as targeted identification of a stable harmful set. The 80.8% oracle-precision figure is a same-time-point statement and does not imply temporal consistency.
 
+## Shared-credit recovery mechanism (1580-1589)
+
+- **Workflow run**: 34706943323 (success, 4m3s)
+- **Seeds**: 1580-1589 (10/10), finite 400/400
+- **Design**: train local / standard / threshold / local_power from epoch 0 to 200; at each horizon log weight-norm, ρ distribution, shared-mean fraction, and cosine of the shared-mean component with the held-out hard-margin gradient. Gradient is diagnostic only.
+- **Artifact**: `results/artifacts/recovery-1580-1589/`
+
+### Weight-norm growth (the primary driver)
+
+| h | local | standard | threshold | std/lcl | thr/lcl |
+|---:|---:|---:|---:|---:|---:|
+| 20 | 33.6 | 33.7 | 33.7 | 1.005 | 1.004 |
+| 80 | 35.6 | 37.1 | 36.3 | 1.041 | 1.018 |
+| 120 | 37.0 | 40.9 | 38.3 | 1.107 | 1.037 |
+| 160 | 38.3 | 50.5 | 41.3 | 1.319 | 1.079 |
+| 180 | 39.0 | 59.7 | 44.2 | 1.530 | 1.133 |
+| 200 | 40.0 | **71.1** | 49.2 | **1.778** | 1.229 |
+
+Standard 4m+r nearly doubles its weight norm relative to local by epoch 200. The gated rules grow far less. The late margin explosion is a **weight-norm phenomenon** enabled by ungated shared mean credit.
+
+### ρ≥0.5 group fraction declines with training
+
+| h | ρ≥0.5 | ρ≥0.35 |
+|---:|---:|---:|
+| 20 | 0.350 | 0.472 |
+| 80 | 0.314 | 0.465 |
+| 140 | 0.250 | 0.392 |
+| 180 | 0.166 | 0.307 |
+| 200 | **0.133** | 0.268 |
+
+As training proceeds the credit geometry becomes less mean-dominated. The rho05 gate therefore fires less often late — but the groups it still suppresses are increasingly the ones whose shared mean is aligned with the margin gradient, so the gate removes helpful credit exactly when it would matter.
+
+### Shared-mean ↔ hard-margin gradient cosine
+
+| h | standard | threshold | local_power |
+|---:|---:|---:|---:|
+| 20 | −0.002 | −0.004 | −0.004 |
+| 80 | +0.009 | +0.010 | +0.003 |
+| 140 | +0.038 | −0.056 | −0.062 |
+| 180 | +0.056 | +0.025 | +0.042 |
+| 200 | **+0.060** | +0.015 | +0.030 |
+
+Standard's shared-mean component becomes positively aligned with the hard-margin gradient in the late phase. Threshold and local_power show weaker or negative alignment in the valley (h=120–160) because they have been suppressing the high-ρ groups that carry this alignment.
+
+### Mechanism summary
+
+```
+Ungated 4m+r late recovery
+  = (1) continued weight-norm growth (1.78× local at h=200)
+  + (2) shared-mean component rotating into alignment
+        with the held-out hard-margin gradient (cos +0.06)
+  + (3) the ρ≥0.5 population shrinking (0.35 → 0.13),
+        so the credit geometry itself becomes more residual-like
+        and the extra mean gain acts on a different structure
+        than it did in the valley.
+
+The rho05 / local_power gates block (1) and (2) by suppressing
+exactly the groups whose shared mean is most aligned with the
+margin gradient in the late phase. The gate that regularizes
+the valley becomes a brake on the recovery.
+```
+
 ## Next single experiment
 
-**Explain the late recovery of ungated 4m+r.** Concretely: on the 1560-1579 (or a fresh) 200-epoch block, log at each horizon (a) the fraction of type-pair groups with ρ ≥ 0.5, (b) the mean/extra-gain actually applied, (c) weight-norm growth per rule, and (d) the hard-margin gradient alignment of the shared-mean component. The working hypothesis is that the ρ≥0.5 gate *removes* the very groups whose shared mean credit drives the late-phase margin explosion, so the gate that helps in the valley becomes a brake in the recovery.
+**Confirm the recovery mechanism on more seeds and with a direct intervention.** Concretely: on a fresh 20-seed block, train standard 4m+r to epoch 200, then for the last 20 epochs either (a) keep ungated, (b) apply the rho05 gate, or (c) apply the gate only to groups whose shared-mean cosine with the (diagnostic) hard-margin gradient is negative. Prediction: (b) kills the margin gain; (c) preserves it. This would turn the correlational gradient-alignment story into a causal one without using the oracle as a learning rule in the confirmation metrics themselves.
 
-Also still open: a true far-jitter hold-out that re-evaluates saved weights under a disjoint jitter base; biological-strength scale perturbation.
+Also still open: biological-strength scale perturbation; a far-jitter hold-out.
 
 ## Artifact index (local)
 
@@ -354,6 +416,7 @@ results/artifacts/norm-control-1480-1499/
 results/artifacts/full-horizon-1500-1519/
 results/artifacts/full-horizon-1520-1539/
 results/artifacts/full-horizon-200-1560-1579/     # U-turn discovery
+results/artifacts/recovery-1580-1589/             # recovery mechanism
 results/artifacts/boundary-geometry-1420-1439/
 results/artifacts/mechanism-1540-1559/
 results/artifacts/branched-1460-1479/
