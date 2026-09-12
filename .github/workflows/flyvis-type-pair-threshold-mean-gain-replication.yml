@@ -1,0 +1,161 @@
+name: FlyVis threshold type-pair mean-gain replication
+
+on:
+  push:
+    paths:
+      - ".github/triggers/run-type-pair-threshold-mean-gain-replication-1220-1239"
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [1220, 1221, 1222, 1223, 1224, 1225, 1226, 1227, 1228, 1229, 1230, 1231, 1232, 1233, 1234, 1235, 1236, 1237, 1238, 1239]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Run threshold mean-gain replication for seed ${{ matrix.seed }}
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run python scripts/diagnose_flyvis_type_pair_threshold_mean_gain_holdout.py \
+            --seed ${{ matrix.seed }} \
+            --out results/generated/flyvis_type_pair_threshold_mean_gain_replication_seed${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: type-pair-threshold-mean-gain-replication-seed${{ matrix.seed }}
+          path: results/generated/flyvis_type_pair_threshold_mean_gain_replication_seed${{ matrix.seed }}.csv
+
+  aggregate:
+    needs: diagnose
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: type-pair-threshold-mean-gain-replication-seed*
+          path: artifacts
+          merge-multiple: true
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Aggregate threshold mean-gain replication
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run --with scipy python - <<'PY'
+          from pathlib import Path
+          import numpy as np
+          import pandas as pd
+          from scipy import stats
+
+          paths = sorted(Path("artifacts").glob("*.csv"))
+          if len(paths) != 20:
+              raise RuntimeError(f"expected 20 seed artifacts, got {len(paths)}")
+          frame = pd.concat([pd.read_csv(path) for path in paths], ignore_index=True)
+          if not frame["finite"].all():
+              raise RuntimeError("non-finite threshold mean-gain replication detected")
+          frame.to_csv(
+              "results/generated/flyvis_type_pair_threshold_mean_gain_replication.csv",
+              index=False,
+          )
+
+          metric_columns = [
+              "cross_entropy",
+              "accuracy",
+              "hard_margin",
+              "soft_margin",
+              "correct_probability",
+              "wrong_tail_pressure",
+              "ce_on_local_correct",
+              "ce_on_local_wrong",
+          ]
+          seed_means = frame.groupby(
+              ["seed", "init_mode", "horizon", "rule"], as_index=False
+          )[metric_columns].mean()
+          metric_signs = {
+              "cross_entropy": -1.0,
+              "accuracy": 1.0,
+              "hard_margin": 1.0,
+              "soft_margin": 1.0,
+              "correct_probability": 1.0,
+              "wrong_tail_pressure": -1.0,
+              "ce_on_local_correct": -1.0,
+              "ce_on_local_wrong": -1.0,
+          }
+          comparisons = (
+              ("threshold_vs_local", "threshold", "local"),
+              ("standard_vs_local", "standard", "local"),
+              ("threshold_vs_standard", "threshold", "standard"),
+          )
+          rows = []
+          for init_mode in sorted(seed_means["init_mode"].unique()):
+              for horizon in sorted(seed_means["horizon"].unique()):
+                  subset = seed_means[
+                      (seed_means.init_mode == init_mode) & (seed_means.horizon == horizon)
+                  ]
+                  piv = {
+                      rule: subset[subset.rule == rule].set_index("seed").sort_index()
+                      for rule in ("local", "standard", "threshold")
+                  }
+                  for comparison, treatment, reference in comparisons:
+                      for metric, sign in metric_signs.items():
+                          delta = sign * (
+                              piv[treatment][metric] - piv[reference][metric]
+                          ).to_numpy(float)
+                          mean = float(delta.mean())
+                          std = float(delta.std(ddof=1))
+                          ci_low, ci_high = stats.t.interval(
+                              0.95,
+                              len(delta) - 1,
+                              loc=mean,
+                              scale=std / np.sqrt(len(delta)),
+                          )
+                          rows.append(
+                              {
+                                  "init_mode": init_mode,
+                                  "horizon": int(horizon),
+                                  "comparison": comparison,
+                                  "metric": metric,
+                                  "n": len(delta),
+                                  "mean_improvement": mean,
+                                  "ci_low": float(ci_low),
+                                  "ci_high": float(ci_high),
+                                  "positive": int((delta > 0).sum()),
+                                  "t_p": float(stats.ttest_1samp(delta, 0.0).pvalue),
+                                  "wilcoxon_p": float(stats.wilcoxon(delta).pvalue),
+                                  "cohen_dz": mean / std if std > 0 else float("nan"),
+                              }
+                          )
+          pd.DataFrame(rows).to_csv(
+              "results/generated/flyvis_type_pair_threshold_mean_gain_replication_summary.csv",
+              index=False,
+          )
+
+          diagnostics = frame.groupby(
+              ["seed", "init_mode", "horizon", "rule"], as_index=False
+          )[
+              [
+                  "threshold_suppressed_group_fraction",
+                  "threshold_suppressed_edge_fraction",
+                  "threshold_mean_mean_to_residual_norm",
+                  "mean_weight_norm_error",
+                  "mean_bias_error",
+              ]
+          ].mean()
+          diagnostics.to_csv(
+              "results/generated/flyvis_type_pair_threshold_mean_gain_replication_diagnostics.csv",
+              index=False,
+          )
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-type-pair-threshold-mean-gain-replication-aggregate
+          path: |
+            results/generated/flyvis_type_pair_threshold_mean_gain_replication.csv
+            results/generated/flyvis_type_pair_threshold_mean_gain_replication_summary.csv
+            results/generated/flyvis_type_pair_threshold_mean_gain_replication_diagnostics.csv
