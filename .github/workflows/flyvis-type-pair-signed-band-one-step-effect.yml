@@ -1,0 +1,122 @@
+name: FlyVis signed-band one-step effect
+
+on:
+  push:
+    paths:
+      - ".github/triggers/run-type-pair-signed-band-one-step-effect-1320-1339"
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [1320, 1321, 1322, 1323, 1324, 1325, 1326, 1327, 1328, 1329, 1330, 1331, 1332, 1333, 1334, 1335, 1336, 1337, 1338, 1339]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Run one-step held-out effect for seed ${{ matrix.seed }}
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run python scripts/diagnose_flyvis_type_pair_signed_band_one_step_effect.py \
+            --seed ${{ matrix.seed }} \
+            --out results/generated/flyvis_type_pair_signed_band_one_step_effect_seed${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: type-pair-signed-band-one-step-effect-seed${{ matrix.seed }}
+          path: results/generated/flyvis_type_pair_signed_band_one_step_effect_seed${{ matrix.seed }}.csv
+
+  aggregate:
+    needs: diagnose
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: type-pair-signed-band-one-step-effect-seed*
+          path: artifacts
+          merge-multiple: true
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Aggregate one-step held-out effect
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run --with scipy python - <<'PY'
+          from pathlib import Path
+          import numpy as np
+          import pandas as pd
+          from scipy import stats
+
+          paths = sorted(Path("artifacts").glob("*.csv"))
+          if len(paths) != 20:
+              raise RuntimeError(f"expected 20 seed artifacts, got {len(paths)}")
+          frame = pd.concat([pd.read_csv(path) for path in paths], ignore_index=True)
+          if not frame["finite"].all():
+              raise RuntimeError("non-finite one-step held-out effect detected")
+          frame.to_csv(
+              "results/generated/flyvis_type_pair_signed_band_one_step_effect.csv",
+              index=False,
+          )
+
+          metrics = (
+              "signed_minus_rho04_one_step_ce",
+              "signed_minus_rho04_one_step_hard_margin",
+              "signed_minus_rho04_one_step_soft_margin",
+              "rho04_one_step_ce_change",
+              "rho04_one_step_hard_margin_change",
+              "rho04_one_step_soft_margin_change",
+              "signed_one_step_ce_change",
+              "signed_one_step_hard_margin_change",
+              "signed_one_step_soft_margin_change",
+              "signed_minus_rho04_update_norm",
+          )
+          rows = []
+          for init_mode in sorted(frame["init_mode"].unique()):
+              for horizon in sorted(frame["horizon"].unique()):
+                  subset = frame[
+                      (frame.init_mode == init_mode) & (frame.horizon == horizon)
+                  ]
+                  for metric in metrics:
+                      values = subset[metric].to_numpy(float)
+                      mean = float(values.mean())
+                      std = float(values.std(ddof=1))
+                      ci_low, ci_high = stats.t.interval(
+                          0.95,
+                          len(values) - 1,
+                          loc=mean,
+                          scale=std / np.sqrt(len(values)),
+                      )
+                      rows.append(
+                          {
+                              "init_mode": init_mode,
+                              "horizon": int(horizon),
+                              "metric": metric,
+                              "n": len(values),
+                              "mean": mean,
+                              "ci_low": float(ci_low),
+                              "ci_high": float(ci_high),
+                              "positive": int((values > 0).sum()),
+                              "t_p": float(stats.ttest_1samp(values, 0.0).pvalue),
+                              "wilcoxon_p": float(stats.wilcoxon(values).pvalue)
+                              if np.any(values != 0.0)
+                              else 1.0,
+                              "cohen_dz": mean / std if std > 0 else float("nan"),
+                          }
+                      )
+          pd.DataFrame(rows).to_csv(
+              "results/generated/flyvis_type_pair_signed_band_one_step_effect_summary.csv",
+              index=False,
+          )
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-type-pair-signed-band-one-step-effect-aggregate
+          path: |
+            results/generated/flyvis_type_pair_signed_band_one_step_effect.csv
+            results/generated/flyvis_type_pair_signed_band_one_step_effect_summary.csv
