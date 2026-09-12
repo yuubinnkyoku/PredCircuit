@@ -242,19 +242,40 @@ No simpler or stronger local proxy than `mean(w·c)` was confirmed.
 - A duplicate 40-seed full-horizon workflow (`flyvis-type-pair-full-horizon-rules`, seeds 1500-1539) was started this session and then **cancelled** after discovering a parallel agent's 20-seed holdout on the same seeds. No science lost; the 20-seed holdout + 20-seed replication covers the 40-seed requirement.
 - Mechanism discovery uses held-out hard-margin gradient strictly as a diagnostic oracle. It is never written back into any training direction.
 
+## Temporal Jaccard of selected type-pair groups (from mechanism 1540-1559)
+
+Computed offline from the mechanism-discovery artifact (all type-pair groups, horizons 0/20/40/60/80/100).
+
+**local_power band (0.35 ≤ ρ < 0.5 and mean(w·c) > 5e-8):**
+
+| transition | Jaccard | persist | appear | disappear | mean n_prev | mean n_curr |
+|---|---:|---:|---:|---:|---:|---:|
+| 0→20 | 0.000 | 0.000 | 6.30 | 2.35 | 2.35 | 6.30 |
+| 20→40 | 0.097 | 0.165 | 4.90 | 5.20 | 6.30 | 6.00 |
+| 40→60 | 0.095 | 0.166 | 3.95 | 4.90 | 6.00 | 5.05 |
+| 60→80 | 0.107 | 0.176 | 3.85 | 4.20 | 5.05 | 4.70 |
+| 80→100 | 0.117 | 0.285 | 7.15 | 3.50 | 4.70 | 8.35 |
+
+Consecutive-run lengths of power-band membership: n=570 runs, **mean 1.15**, median 1, max 5. 508/570 runs last exactly one horizon.
+
+**rho05 band (ρ ≥ 0.5) for comparison:** Jaccard 0.57–0.66 across the same transitions — much more stable.
+
+**Mechanistic implication:** local_power does **not** lock onto a small set of persistently harmful type-pair groups. Each evaluation horizon suppresses a largely different ~5–8 groups. The hard-margin gain is therefore better described as a **bursty, rotating stochastic suppressor** (dropout-like on the mean-credit channel) than as targeted identification of a stable harmful set. The 80.8% oracle-precision figure is a same-time-point statement and does not imply temporal consistency.
+
 ## Next single experiment
 
-**Extend full-horizon training to epoch 200** on the existing 1500-1519 checkpoint protocol (or a fresh 20-seed block), measuring whether the h=40 accuracy peak of shared-credit rules can be recovered, whether hard margins go positive again, and whether the CE/soft cost of local_power saturates or grows. This is the highest-value remaining question because the current results say the entire shared-credit family is a **transient** effect under epoch-0 training.
+**200-epoch extension** (in flight at close: run 34705564171, seeds 1560-1579, jitter base 9_100_000 — also serves as a mild jitter hold-out vs the 6_900_000 base of the 100-epoch block). Question: does the h=40 accuracy peak of shared-credit rules recover, reverse, or keep decaying through 200; does hard margin stay positive; does the CE/soft cost of local_power saturate?
 
-Secondary (only after 200-epoch data): evaluation-jitter hold-out with a completely different jitter base; biological-strength scale perturbation; temporal Jaccard of selected type-pair groups.
+Secondary after that: biological-strength scale perturbation; a true far-jitter hold-out that re-evaluates the same weights under a disjoint jitter base.
 
 ## Artifact index (local)
 
 ```
 results/artifacts/norm-control-1480-1499/
 results/artifacts/full-horizon-1500-1519/
+results/artifacts/full-horizon-1520-1539/
 results/artifacts/boundary-geometry-1420-1439/
 results/artifacts/mechanism-1540-1559/
-results/artifacts/branched-1460-1479/          # downloaded, not re-analyzed this session
-results/artifacts/local-power-holdout-1440-1459/ # downloaded, not re-analyzed this session
+results/artifacts/branched-1460-1479/           # hard-margin growth vs threshold consistent
+results/artifacts/local-power-holdout-1440-1459/ # one-step holdout consistent
 ```
