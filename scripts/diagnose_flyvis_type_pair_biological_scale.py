@@ -24,7 +24,15 @@ EVAL_JITTER_BASE = 10_700_000
 METRICS = ("cross_entropy", "accuracy", "hard_margin", "soft_margin")
 
 
-def run_seed(*, seed: int, learning_rate: float, max_update: float) -> pd.DataFrame:
+def run_seed(
+    *,
+    seed: int,
+    learning_rate: float,
+    max_update: float,
+    init_scales: tuple[float, ...] = INIT_SCALES,
+    horizons: tuple[int, ...] = HORIZONS,
+    eval_jitter_base: int = EVAL_JITTER_BASE,
+) -> pd.DataFrame:
     circuit = graph_from_flyvis_retinotopy(load_flyvis_spec(), extent=2)
     named_groups = _named_groups(circuit)
     models = {
@@ -34,14 +42,14 @@ def run_seed(*, seed: int, learning_rate: float, max_update: float) -> pd.DataFr
             init_scale=scale,
             use_biological_strength=True,
         )
-        for scale in INIT_SCALES
+        for scale in init_scales
         for rule in RULES
     }
     rows: list[dict[str, float | int | bool | str]] = []
 
-    for step in range(1, max(HORIZONS) + 1):
+    for step in range(1, max(horizons) + 1):
         epoch = step - 1
-        for scale in INIT_SCALES:
+        for scale in init_scales:
             for rule in RULES:
                 model = models[(scale, rule)]
                 raw_edge, raw_bias = credit(model, circuit, seed=seed, epoch=epoch)
@@ -57,15 +65,15 @@ def run_seed(*, seed: int, learning_rate: float, max_update: float) -> pd.DataFr
                     max_update=max_update,
                 )
 
-        if step not in HORIZONS:
+        if step not in horizons:
             continue
 
-        for scale in INIT_SCALES:
+        for scale in init_scales:
             for rule in RULES:
                 model = models[(scale, rule)]
                 weight_norm = float(torch.linalg.vector_norm(model.weight))
                 for eval_rep in range(EVAL_REPS):
-                    jitter_seed = EVAL_JITTER_BASE + eval_rep
+                    jitter_seed = eval_jitter_base + eval_rep
                     readout, classes = _heldout_readout(model, circuit, jitter_seed=jitter_seed)
                     batch = torch.arange(len(classes))
                     correct = readout[batch, classes]
@@ -104,6 +112,20 @@ def run_seed(*, seed: int, learning_rate: float, max_update: float) -> pd.DataFr
     return pd.DataFrame(rows)
 
 
+def _parse_float_tuple(value: str) -> tuple[float, ...]:
+    parsed = tuple(float(item.strip()) for item in value.split(",") if item.strip())
+    if not parsed:
+        raise argparse.ArgumentTypeError("expected at least one comma-separated float")
+    return parsed
+
+
+def _parse_int_tuple(value: str) -> tuple[int, ...]:
+    parsed = tuple(int(item.strip()) for item in value.split(",") if item.strip())
+    if not parsed:
+        raise argparse.ArgumentTypeError("expected at least one comma-separated integer")
+    return parsed
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description=(
@@ -114,9 +136,19 @@ def main() -> None:
     parser.add_argument("--seed", type=int, required=True)
     parser.add_argument("--learning-rate", type=float, default=160.0)
     parser.add_argument("--max-update", type=float, default=0.05)
+    parser.add_argument("--init-scales", type=_parse_float_tuple, default=INIT_SCALES)
+    parser.add_argument("--horizons", type=_parse_int_tuple, default=HORIZONS)
+    parser.add_argument("--eval-jitter-base", type=int, default=EVAL_JITTER_BASE)
     parser.add_argument("--out", type=Path, required=True)
     args = parser.parse_args()
-    frame = run_seed(seed=args.seed, learning_rate=args.learning_rate, max_update=args.max_update)
+    frame = run_seed(
+        seed=args.seed,
+        learning_rate=args.learning_rate,
+        max_update=args.max_update,
+        init_scales=args.init_scales,
+        horizons=args.horizons,
+        eval_jitter_base=args.eval_jitter_base,
+    )
     args.out.parent.mkdir(parents=True, exist_ok=True)
     frame.to_csv(args.out, index=False)
     print(frame.to_string(index=False))
