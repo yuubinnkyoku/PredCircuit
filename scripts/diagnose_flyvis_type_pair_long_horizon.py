@@ -58,8 +58,7 @@ def run_seed(
 ) -> pd.DataFrame:
     circuit = graph_from_flyvis_retinotopy(load_flyvis_spec(), extent=2)
     models = {
-        rule: PredictiveCodingGraph(circuit.graph, seed=seed, init_scale=0.08)
-        for rule in RULES
+        rule: PredictiveCodingGraph(circuit.graph, seed=seed, init_scale=0.08) for rule in RULES
     }
     biological_groups = type_pair_indices(circuit)
     shuffled_groups = shuffled_groups_like(
@@ -76,9 +75,7 @@ def run_seed(
 
     for epoch in range(max(HORIZONS)):
         local_edge, local_bias = credit(models["local"], circuit, seed=seed, epoch=epoch)
-        clip_sum["local"] += float(
-            (learning_rate * local_edge).abs().gt(max_update).float().mean()
-        )
+        clip_sum["local"] += float((learning_rate * local_edge).abs().gt(max_update).float().mean())
         apply_local_credit(
             models["local"],
             local_edge,
@@ -98,9 +95,7 @@ def run_seed(
             direction_change_sum[rule] += float(
                 torch.linalg.vector_norm(direction - raw_edge) / raw_norm
             )
-            clip_sum[rule] += float(
-                (learning_rate * direction).abs().gt(max_update).float().mean()
-            )
+            clip_sum[rule] += float((learning_rate * direction).abs().gt(max_update).float().mean())
             apply_local_credit(
                 models[rule],
                 direction,
