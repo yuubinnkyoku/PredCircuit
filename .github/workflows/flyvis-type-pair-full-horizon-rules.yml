@@ -1,0 +1,187 @@
+name: FlyVis type-pair full-horizon rules
+
+on:
+  push:
+    paths:
+      - ".github/triggers/run-type-pair-full-horizon-rules-1500-1539"
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        seed:
+          [
+            1500,
+            1501,
+            1502,
+            1503,
+            1504,
+            1505,
+            1506,
+            1507,
+            1508,
+            1509,
+            1510,
+            1511,
+            1512,
+            1513,
+            1514,
+            1515,
+            1516,
+            1517,
+            1518,
+            1519,
+            1520,
+            1521,
+            1522,
+            1523,
+            1524,
+            1525,
+            1526,
+            1527,
+            1528,
+            1529,
+            1530,
+            1531,
+            1532,
+            1533,
+            1534,
+            1535,
+            1536,
+            1537,
+            1538,
+            1539,
+          ]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Run full-horizon rules for seed ${{ matrix.seed }}
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run python scripts/diagnose_flyvis_type_pair_full_horizon_rules.py \
+            --seed ${{ matrix.seed }} \
+            --out results/generated/flyvis_type_pair_full_horizon_rules_seed${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: type-pair-full-horizon-rules-seed${{ matrix.seed }}
+          path: results/generated/flyvis_type_pair_full_horizon_rules_seed${{ matrix.seed }}.csv
+
+  aggregate:
+    needs: diagnose
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: type-pair-full-horizon-rules-seed*
+          path: artifacts
+          merge-multiple: true
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Aggregate full-horizon rules
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run --with scipy python - <<'PY'
+          from pathlib import Path
+          import numpy as np
+          import pandas as pd
+          from scipy import stats
+
+          paths = sorted(Path("artifacts").glob("*.csv"))
+          if len(paths) != 40:
+              raise RuntimeError(f"expected 40 seed artifacts, got {len(paths)}")
+          frame = pd.concat([pd.read_csv(path) for path in paths], ignore_index=True)
+          if not frame["finite"].all():
+              raise RuntimeError("non-finite full-horizon rules detected")
+          frame.to_csv(
+              "results/generated/flyvis_type_pair_full_horizon_rules.csv",
+              index=False,
+          )
+
+          comparison_prefixes = (
+              "standard_minus_local",
+              "rho05_minus_local",
+              "local_power_minus_local",
+              "delta_norm_minus_local",
+              "local_power_minus_rho05",
+              "local_power_minus_delta_norm",
+              "rho05_minus_standard",
+          )
+          metric_names = ("cross_entropy", "accuracy", "hard_margin", "soft_margin")
+          metric_columns = [
+              f"{prefix}_{metric}"
+              for prefix in comparison_prefixes
+              for metric in metric_names
+          ]
+          for rule in ("local", "standard", "rho05", "local_power", "delta_norm"):
+              for metric in metric_names:
+                  metric_columns.append(f"{rule}_{metric}")
+          diag_columns = [
+              column
+              for column in frame.columns
+              if column.startswith("cum_")
+          ]
+          metric_columns.extend(diag_columns)
+
+          per_seed = frame.groupby(
+              ["seed", "init_mode", "horizon"], as_index=False
+          )[metric_columns].mean()
+          rows = []
+          for (mode, horizon), subset in per_seed.groupby(["init_mode", "horizon"]):
+              for metric in metric_columns:
+                  values = subset[metric].to_numpy(float)
+                  mean = float(values.mean())
+                  std = float(values.std(ddof=1))
+                  if std > 0.0:
+                      ci_low, ci_high = stats.t.interval(
+                          0.95,
+                          len(values) - 1,
+                          loc=mean,
+                          scale=std / np.sqrt(len(values)),
+                      )
+                      p = float(stats.ttest_1samp(values, 0.0).pvalue)
+                      try:
+                          w_p = float(stats.wilcoxon(values).pvalue)
+                      except ValueError:
+                          w_p = float("nan")
+                      dz = mean / std
+                  else:
+                      ci_low = ci_high = mean
+                      p = 1.0 if mean == 0.0 else 0.0
+                      w_p = p
+                      dz = float("nan")
+                  rows.append(
+                      {
+                          "init_mode": mode,
+                          "horizon": int(horizon),
+                          "metric": metric,
+                          "n": len(values),
+                          "mean": mean,
+                          "ci_low": float(ci_low),
+                          "ci_high": float(ci_high),
+                          "positive": int((values > 0.0).sum()),
+                          "negative": int((values < 0.0).sum()),
+                          "t_p": p,
+                          "wilcoxon_p": w_p,
+                          "cohen_dz": dz,
+                      }
+                  )
+          pd.DataFrame(rows).to_csv(
+              "results/generated/flyvis_type_pair_full_horizon_rules_summary.csv",
+              index=False,
+          )
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-type-pair-full-horizon-rules-aggregate
+          path: |
+            results/generated/flyvis_type_pair_full_horizon_rules.csv
+            results/generated/flyvis_type_pair_full_horizon_rules_summary.csv
