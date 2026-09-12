@@ -1,0 +1,128 @@
+name: FlyVis type-pair state clamp holdout
+
+on:
+  push:
+    paths:
+      - ".github/triggers/run-type-pair-state-clamp-800-819"
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [800, 801, 802, 803, 804, 805, 806, 807, 808, 809, 810, 811, 812, 813, 814, 815, 816, 817, 818, 819]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Diagnose state clamp for seed ${{ matrix.seed }}
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run python scripts/diagnose_flyvis_type_pair_state_clamp.py \
+            --seed ${{ matrix.seed }} \
+            --shuffle-seed $((998000 + ${{ matrix.seed }})) \
+            --out results/generated/flyvis_type_pair_state_clamp_seed${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: type-pair-state-clamp-seed${{ matrix.seed }}
+          path: results/generated/flyvis_type_pair_state_clamp_seed${{ matrix.seed }}.csv
+
+  aggregate:
+    needs: diagnose
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: type-pair-state-clamp-seed*
+          path: artifacts
+          merge-multiple: true
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Aggregate state clamp
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run --with scipy python - <<'PY'
+          from pathlib import Path
+          import numpy as np
+          import pandas as pd
+          from scipy import stats
+
+          paths = sorted(Path("artifacts").glob("*.csv"))
+          frame = pd.concat([pd.read_csv(path) for path in paths], ignore_index=True)
+          if len(paths) != 20:
+              raise RuntimeError(f"expected 20 seed artifacts, got {len(paths)}")
+          if len(frame) != 2240:
+              raise RuntimeError(f"expected 2240 rows, got {len(frame)}")
+          if not frame["finite"].all():
+              raise RuntimeError("non-finite state clamp run detected")
+          if frame["mean_projection_clamp_error"].max() > 1e-5:
+              raise RuntimeError("state projection clamp failed")
+          if frame["mean_weight_norm_error"].max() > 1e-5:
+              raise RuntimeError("weight norm matching failed")
+          frame.to_csv("results/generated/flyvis_type_pair_state_clamp.csv", index=False)
+
+          metrics = ["cross_entropy", "accuracy", "hard_margin"]
+          seed_means = frame.groupby(["seed", "horizon", "rule"], as_index=False)[metrics].mean()
+          rows = []
+          for horizon in sorted(seed_means["horizon"].unique()):
+              subset = seed_means[seed_means.horizon == horizon]
+              by_rule = {
+                  rule: subset[subset.rule == rule].set_index("seed").sort_index()
+                  for rule in ("local", "type", "bio_clamp", "shuffle_clamp")
+              }
+              comparisons = (
+                  ("type_minus_local", "type", "local"),
+                  ("type_minus_bio_clamp", "type", "bio_clamp"),
+                  ("type_minus_shuffle_clamp", "type", "shuffle_clamp"),
+                  ("bio_clamp_minus_local", "bio_clamp", "local"),
+                  ("shuffle_clamp_minus_local", "shuffle_clamp", "local"),
+              )
+              for comparison, left_name, right_name in comparisons:
+                  left = by_rule[left_name]
+                  right = by_rule[right_name].loc[left.index]
+                  for metric in metrics:
+                      if metric == "cross_entropy":
+                          delta = (right[metric] - left[metric]).to_numpy(float)
+                      else:
+                          delta = (left[metric] - right[metric]).to_numpy(float)
+                      mean = float(delta.mean())
+                      std = float(delta.std(ddof=1))
+                      ci_low, ci_high = stats.t.interval(
+                          0.95,
+                          len(delta) - 1,
+                          loc=mean,
+                          scale=std / np.sqrt(len(delta)),
+                      )
+                      rows.append(
+                          {
+                              "horizon": int(horizon),
+                              "comparison": comparison,
+                              "metric": metric,
+                              "n": len(delta),
+                              "mean_improvement": mean,
+                              "ci_low": float(ci_low),
+                              "ci_high": float(ci_high),
+                              "positive": int((delta > 0).sum()),
+                              "t_p": float(stats.ttest_1samp(delta, 0.0).pvalue),
+                              "wilcoxon_p": float(stats.wilcoxon(delta).pvalue),
+                              "cohen_dz": mean / std if std > 0 else float("nan"),
+                          }
+                      )
+          pd.DataFrame(rows).to_csv(
+              "results/generated/flyvis_type_pair_state_clamp_summary.csv",
+              index=False,
+          )
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-type-pair-state-clamp-aggregate
+          path: |
+            results/generated/flyvis_type_pair_state_clamp.csv
+            results/generated/flyvis_type_pair_state_clamp_summary.csv
