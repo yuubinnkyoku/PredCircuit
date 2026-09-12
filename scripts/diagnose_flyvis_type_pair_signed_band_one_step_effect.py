@@ -103,12 +103,8 @@ def run_seed(*, seed: int, learning_rate: float, max_update: float) -> pd.DataFr
                 "signed_one_step_hard_margin_change": float(hard_signed - hard0),
                 "signed_one_step_soft_margin_change": float(soft_signed - soft0),
                 "signed_minus_rho04_one_step_ce": float(ce_signed - ce_rho04),
-                "signed_minus_rho04_one_step_hard_margin": float(
-                    hard_signed - hard_rho04
-                ),
-                "signed_minus_rho04_one_step_soft_margin": float(
-                    soft_signed - soft_rho04
-                ),
+                "signed_minus_rho04_one_step_hard_margin": float(hard_signed - hard_rho04),
+                "signed_minus_rho04_one_step_soft_margin": float(soft_signed - soft_rho04),
                 "signed_minus_rho04_update_norm": float(
                     torch.linalg.vector_norm(signed_update - rho04_update)
                 ),
