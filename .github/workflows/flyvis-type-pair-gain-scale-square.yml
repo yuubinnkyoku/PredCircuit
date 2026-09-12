@@ -1,0 +1,183 @@
+name: FlyVis type-pair gain-scale square holdout
+
+on:
+  push:
+    paths:
+      - ".github/triggers/run-type-pair-gain-scale-square-1670-1689"
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        seed:
+          - 1670
+          - 1671
+          - 1672
+          - 1673
+          - 1674
+          - 1675
+          - 1676
+          - 1677
+          - 1678
+          - 1679
+          - 1680
+          - 1681
+          - 1682
+          - 1683
+          - 1684
+          - 1685
+          - 1686
+          - 1687
+          - 1688
+          - 1689
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Run gain-scale square holdout for seed ${{ matrix.seed }}
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run python scripts/diagnose_flyvis_type_pair_gain_scale_square.py \
+            --seed ${{ matrix.seed }} \
+            --init-scales 0.10,0.12,0.14,0.16 \
+            --horizons 160,200 \
+            --eval-jitter-base 10910000 \
+            --out results/generated/flyvis_type_pair_gain_scale_square_seed${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: type-pair-gain-scale-square-seed${{ matrix.seed }}
+          path: results/generated/flyvis_type_pair_gain_scale_square_seed${{ matrix.seed }}.csv
+
+  aggregate:
+    needs: diagnose
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: type-pair-gain-scale-square-seed*
+          path: artifacts
+          merge-multiple: true
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Aggregate gain-scale square holdout
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run --with scipy python - <<'PY'
+          from pathlib import Path
+          import numpy as np
+          import pandas as pd
+          from scipy import stats
+
+          paths = sorted(Path("artifacts").glob("*.csv"))
+          if len(paths) != 20:
+              raise RuntimeError(f"expected 20 seed artifacts, got {len(paths)}")
+          frame = pd.concat([pd.read_csv(path) for path in paths], ignore_index=True)
+          if len(frame) != 2560:
+              raise RuntimeError(f"expected 2560 rows, got {len(frame)}")
+          if not frame["finite"].all():
+              raise RuntimeError("non-finite gain-scale square result detected")
+          if frame["seed"].nunique() != 20:
+              raise RuntimeError("expected 20 unique seeds")
+
+          # At scale 0.10, sq40 is mathematically identical to standard (coefficient 4).
+          parity = frame[frame["init_scale"] == 0.10].pivot_table(
+              index=["seed", "horizon", "eval_rep"],
+              columns="rule",
+              values=["cross_entropy", "accuracy", "hard_margin", "soft_margin", "weight_norm"],
+          )
+          for metric in ("cross_entropy", "accuracy", "hard_margin", "soft_margin", "weight_norm"):
+              error = np.max(np.abs(parity[(metric, "standard")] - parity[(metric, "sq40")]))
+              if error > 1e-10:
+                  raise RuntimeError(f"standard/sq40 parity failure at scale 0.10 for {metric}: {error}")
+
+          frame.to_csv(
+              "results/generated/flyvis_type_pair_gain_scale_square.csv",
+              index=False,
+          )
+
+          metrics = (
+              "cross_entropy",
+              "accuracy",
+              "hard_margin",
+              "soft_margin",
+              "weight_norm",
+          )
+          per_seed = frame.groupby(
+              ["seed", "init_scale", "rule", "horizon"], as_index=False
+          )[list(metrics)].mean()
+          rows = []
+          comparisons = (
+              ("standard", "local"),
+              ("sq32", "local"),
+              ("sq40", "local"),
+              ("sq32", "standard"),
+              ("sq40", "standard"),
+              ("sq40", "sq32"),
+          )
+          for scale in sorted(per_seed["init_scale"].unique()):
+              for horizon in sorted(per_seed["horizon"].unique()):
+                  subset = per_seed[
+                      (per_seed["init_scale"] == scale)
+                      & (per_seed["horizon"] == horizon)
+                  ]
+                  for lhs_rule, rhs_rule in comparisons:
+                      lhs = subset[subset["rule"] == lhs_rule].set_index("seed").sort_index()
+                      rhs = subset[subset["rule"] == rhs_rule].set_index("seed").sort_index()
+                      if not lhs.index.equals(rhs.index) or len(lhs) != 20:
+                          raise RuntimeError("paired seed mismatch")
+                      for metric in metrics:
+                          diff = lhs[metric].to_numpy(float) - rhs[metric].to_numpy(float)
+                          mean = float(diff.mean())
+                          std = float(diff.std(ddof=1))
+                          se = std / np.sqrt(len(diff))
+                          if std > 0.0:
+                              ci_low, ci_high = stats.t.interval(
+                                  0.95, len(diff) - 1, loc=mean, scale=se
+                              )
+                              p_value = float(
+                                  stats.ttest_rel(
+                                      lhs[metric].to_numpy(float),
+                                      rhs[metric].to_numpy(float),
+                                  ).pvalue
+                              )
+                              dz = mean / std
+                          else:
+                              ci_low = ci_high = mean
+                              p_value = 1.0
+                              dz = 0.0
+                          rows.append(
+                              {
+                                  "init_scale": float(scale),
+                                  "horizon": int(horizon),
+                                  "lhs_rule": lhs_rule,
+                                  "rhs_rule": rhs_rule,
+                                  "metric": metric,
+                                  "n": len(diff),
+                                  "mean_difference": mean,
+                                  "ci_low": float(ci_low),
+                                  "ci_high": float(ci_high),
+                                  "p_value": p_value,
+                                  "cohen_dz": float(dz),
+                                  "positive_seeds": int((diff > 0).sum()),
+                                  "negative_seeds": int((diff < 0).sum()),
+                              }
+                          )
+          pd.DataFrame(rows).to_csv(
+              "results/generated/flyvis_type_pair_gain_scale_square_paired.csv",
+              index=False,
+          )
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-type-pair-gain-scale-square-aggregate
+          path: |
+            results/generated/flyvis_type_pair_gain_scale_square.csv
+            results/generated/flyvis_type_pair_gain_scale_square_paired.csv
