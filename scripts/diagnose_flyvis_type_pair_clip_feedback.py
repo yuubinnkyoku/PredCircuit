@@ -90,9 +90,7 @@ def run_seed(
     }
     coefficient_sum = {(scale, rule): 0.0 for scale in init_scales for rule in RULES}
     gated_steps = {(scale, rule): 0 for scale in init_scales for rule in RULES}
-    last_prospective_clip = {
-        (scale, rule): 0.0 for scale in init_scales for rule in RULES
-    }
+    last_prospective_clip = {(scale, rule): 0.0 for scale in init_scales for rule in RULES}
     last_actual_clip = {(scale, rule): 0.0 for scale in init_scales for rule in RULES}
     last_coefficient = {(scale, rule): 1.0 for scale in init_scales for rule in RULES}
     rows: list[dict[str, float | int | bool | str]] = []
@@ -123,9 +121,7 @@ def run_seed(
                 )
                 preclip_update = learning_rate * direction
                 if max_update > 0.0:
-                    actual_clip = float(
-                        (preclip_update.abs() >= max_update).float().mean()
-                    )
+                    actual_clip = float((preclip_update.abs() >= max_update).float().mean())
                 else:
                     actual_clip = 0.0
                 apply_local_credit(
