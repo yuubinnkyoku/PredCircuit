@@ -1,0 +1,120 @@
+name: FlyVis signed-band swap update geometry
+
+on:
+  push:
+    paths:
+      - ".github/triggers/run-type-pair-signed-band-swap-update-geometry-1300-1319"
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [1300, 1301, 1302, 1303, 1304, 1305, 1306, 1307, 1308, 1309, 1310, 1311, 1312, 1313, 1314, 1315, 1316, 1317, 1318, 1319]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Run swap update geometry for seed ${{ matrix.seed }}
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run python scripts/diagnose_flyvis_type_pair_signed_band_swap_update_geometry.py \
+            --seed ${{ matrix.seed }} \
+            --out results/generated/flyvis_type_pair_signed_band_swap_update_geometry_seed${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: type-pair-signed-band-swap-update-geometry-seed${{ matrix.seed }}
+          path: results/generated/flyvis_type_pair_signed_band_swap_update_geometry_seed${{ matrix.seed }}.csv
+
+  aggregate:
+    needs: diagnose
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: type-pair-signed-band-swap-update-geometry-seed*
+          path: artifacts
+          merge-multiple: true
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Aggregate swap update geometry
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run --with scipy python - <<'PY'
+          from pathlib import Path
+          import numpy as np
+          import pandas as pd
+          from scipy import stats
+
+          paths = sorted(Path("artifacts").glob("*.csv"))
+          if len(paths) != 20:
+              raise RuntimeError(f"expected 20 seed artifacts, got {len(paths)}")
+          frame = pd.concat([pd.read_csv(path) for path in paths], ignore_index=True)
+          if not frame["finite"].all():
+              raise RuntimeError("non-finite swap update geometry detected")
+          frame.to_csv(
+              "results/generated/flyvis_type_pair_signed_band_swap_update_geometry.csv",
+              index=False,
+          )
+
+          metrics = (
+              "ce_grad_dot_signed_minus_rho04_update",
+              "hard_margin_grad_dot_signed_minus_rho04_update",
+              "soft_margin_grad_dot_signed_minus_rho04_update",
+              "signed_minus_rho04_update_norm",
+              "signed_only_group_count",
+              "rho04_only_group_count",
+              "signed_suppressed_group_fraction",
+              "rho04_suppressed_group_fraction",
+          )
+          rows = []
+          for init_mode in sorted(frame["init_mode"].unique()):
+              for horizon in sorted(frame["horizon"].unique()):
+                  subset = frame[
+                      (frame.init_mode == init_mode) & (frame.horizon == horizon)
+                  ]
+                  for metric in metrics:
+                      values = subset[metric].to_numpy(float)
+                      mean = float(values.mean())
+                      std = float(values.std(ddof=1))
+                      ci_low, ci_high = stats.t.interval(
+                          0.95,
+                          len(values) - 1,
+                          loc=mean,
+                          scale=std / np.sqrt(len(values)),
+                      )
+                      rows.append(
+                          {
+                              "init_mode": init_mode,
+                              "horizon": int(horizon),
+                              "metric": metric,
+                              "n": len(values),
+                              "mean": mean,
+                              "ci_low": float(ci_low),
+                              "ci_high": float(ci_high),
+                              "positive": int((values > 0).sum()),
+                              "t_p": float(stats.ttest_1samp(values, 0.0).pvalue),
+                              "wilcoxon_p": float(stats.wilcoxon(values).pvalue)
+                              if np.any(values != 0.0)
+                              else 1.0,
+                              "cohen_dz": mean / std if std > 0 else float("nan"),
+                          }
+                      )
+          pd.DataFrame(rows).to_csv(
+              "results/generated/flyvis_type_pair_signed_band_swap_update_geometry_summary.csv",
+              index=False,
+          )
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-type-pair-signed-band-swap-update-geometry-aggregate
+          path: |
+            results/generated/flyvis_type_pair_signed_band_swap_update_geometry.csv
+            results/generated/flyvis_type_pair_signed_band_swap_update_geometry_summary.csv
