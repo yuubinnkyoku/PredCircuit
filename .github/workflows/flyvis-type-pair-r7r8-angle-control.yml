@@ -1,0 +1,137 @@
+name: FlyVis R7/R8 angle-matched sparse control
+
+on:
+  push:
+    paths:
+      - ".github/triggers/run-type-pair-r7r8-angle-control-1000-1019"
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [1000, 1001, 1002, 1003, 1004, 1005, 1006, 1007, 1008, 1009, 1010, 1011, 1012, 1013, 1014, 1015, 1016, 1017, 1018, 1019]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Run angle-matched sparse control for seed ${{ matrix.seed }}
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run python scripts/diagnose_flyvis_type_pair_r7r8_angle_control.py \
+            --seed ${{ matrix.seed }} \
+            --control-seed $((3200000 + ${{ matrix.seed }})) \
+            --out results/generated/flyvis_type_pair_r7r8_angle_control_seed${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: type-pair-r7r8-angle-control-seed${{ matrix.seed }}
+          path: results/generated/flyvis_type_pair_r7r8_angle_control_seed${{ matrix.seed }}.csv
+
+  aggregate:
+    needs: diagnose
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: type-pair-r7r8-angle-control-seed*
+          path: artifacts
+          merge-multiple: true
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Aggregate angle-matched sparse control
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run --with scipy python - <<'PY'
+          from pathlib import Path
+          import numpy as np
+          import pandas as pd
+          from scipy import stats
+
+          paths = sorted(Path("artifacts").glob("*.csv"))
+          if len(paths) != 20:
+              raise RuntimeError(f"expected 20 seed artifacts, got {len(paths)}")
+          frame = pd.concat([pd.read_csv(path) for path in paths], ignore_index=True)
+          if len(frame) != 720:
+              raise RuntimeError(f"expected 720 rows, got {len(frame)}")
+          if not frame["finite"].all():
+              raise RuntimeError("non-finite angle-control run detected")
+          frame.to_csv("results/generated/flyvis_type_pair_r7r8_angle_control.csv", index=False)
+
+          seed_means = frame.groupby(["seed", "horizon", "rule"], as_index=False)[
+              ["cross_entropy", "accuracy", "hard_margin"]
+          ].mean()
+          comparisons = (
+              ("r7r8_minus_local", "r7r8_mi9", "local"),
+              ("angle_control_minus_local", "angle_matched_sparse", "local"),
+              ("r7r8_minus_angle_control", "r7r8_mi9", "angle_matched_sparse"),
+          )
+          rows = []
+          for horizon in sorted(seed_means["horizon"].unique()):
+              subset = seed_means[seed_means.horizon == horizon]
+              indexed = {
+                  rule: subset[subset.rule == rule].set_index("seed").sort_index()
+                  for rule in seed_means["rule"].unique()
+              }
+              for comparison, treatment_name, baseline_name in comparisons:
+                  treatment = indexed[treatment_name]
+                  baseline = indexed[baseline_name].loc[treatment.index]
+                  for metric in ("cross_entropy", "accuracy", "hard_margin"):
+                      if metric == "cross_entropy":
+                          delta = (baseline[metric] - treatment[metric]).to_numpy(float)
+                      else:
+                          delta = (treatment[metric] - baseline[metric]).to_numpy(float)
+                      mean = float(delta.mean())
+                      std = float(delta.std(ddof=1))
+                      ci_low, ci_high = stats.t.interval(
+                          0.95,
+                          len(delta) - 1,
+                          loc=mean,
+                          scale=std / np.sqrt(len(delta)),
+                      )
+                      rows.append(
+                          {
+                              "horizon": int(horizon),
+                              "comparison": comparison,
+                              "metric": metric,
+                              "n": len(delta),
+                              "mean_improvement": mean,
+                              "ci_low": float(ci_low),
+                              "ci_high": float(ci_high),
+                              "positive": int((delta > 0).sum()),
+                              "t_p": float(stats.ttest_1samp(delta, 0.0).pvalue),
+                              "wilcoxon_p": float(stats.wilcoxon(delta).pvalue),
+                              "cohen_dz": mean / std if std > 0 else float("nan"),
+                          }
+                      )
+          pd.DataFrame(rows).to_csv(
+              "results/generated/flyvis_type_pair_r7r8_angle_control_summary.csv",
+              index=False,
+          )
+
+          diagnostics = frame.groupby(["seed", "horizon", "rule"], as_index=False)[
+              [
+                  "mean_relative_direction_change",
+                  "mean_angle_cosine_error",
+                  "mean_weight_norm_error",
+                  "mean_bias_error",
+              ]
+          ].mean()
+          diagnostics.to_csv(
+              "results/generated/flyvis_type_pair_r7r8_angle_control_diagnostics.csv",
+              index=False,
+          )
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-type-pair-r7r8-angle-control-aggregate
+          path: |
+            results/generated/flyvis_type_pair_r7r8_angle_control.csv
+            results/generated/flyvis_type_pair_r7r8_angle_control_summary.csv
+            results/generated/flyvis_type_pair_r7r8_angle_control_diagnostics.csv
