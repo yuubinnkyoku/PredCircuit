@@ -62,8 +62,7 @@ def run_seed(
         for init_mode, base in bases.items()
     }
     direction_change_sum = {
-        init_mode: {rule: 0.0 for rule in RULES if rule != "local"}
-        for init_mode in INIT_MODES
+        init_mode: {rule: 0.0 for rule in RULES if rule != "local"} for init_mode in INIT_MODES
     }
     weight_error_sum = copy.deepcopy(direction_change_sum)
     bias_error_sum = copy.deepcopy(direction_change_sum)
