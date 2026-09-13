@@ -91,8 +91,7 @@ def _update_geometry(
     ).clamp_min(1e-30)
     cosine = float(torch.dot(raw_update, applied) / denominator)
     norm_ratio = float(
-        torch.linalg.vector_norm(applied)
-        / torch.linalg.vector_norm(raw_update).clamp_min(1e-30)
+        torch.linalg.vector_norm(applied) / torch.linalg.vector_norm(raw_update).clamp_min(1e-30)
     )
     return cosine, norm_ratio
 
