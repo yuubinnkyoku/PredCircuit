@@ -30,10 +30,7 @@ RANDOM_PROBABILITY = {"random020": 0.20, "random035": 0.35}
 
 def _deterministic_unit(seed: int, epoch: int, group_index: int) -> float:
     value = (
-        seed * 1_000_003
-        + epoch * 91_769
-        + group_index * 6_113
-        + seed * epoch * 37
+        seed * 1_000_003 + epoch * 91_769 + group_index * 6_113 + seed * epoch * 37
     ) % 1_000_000
     return value / 1_000_000.0
 
@@ -222,11 +219,7 @@ def run_seed(*, seed: int, learning_rate: float = 160.0, max_update: float = 0.0
                         "weight_norm": float(torch.linalg.vector_norm(model.weight.detach())),
                     }
                     diagnostics = {
-                        key: (
-                            diag_sums[rule][key] / step
-                            if rule in diag_sums
-                            else math.nan
-                        )
+                        key: (diag_sums[rule][key] / step if rule in diag_sums else math.nan)
                         for key in (
                             "mean_multiplier",
                             "edge_weighted_multiplier",
