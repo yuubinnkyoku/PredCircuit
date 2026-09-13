@@ -44,9 +44,13 @@ def _apply_direction_preserving(
                 edge_update.mul_(max_update / peak)
         elif mode == "group":
             for _, _, indices in groups:
-                peak = edge_update[indices].abs().max()
+                group_update = edge_update[indices]
+                peak = group_update.abs().max()
                 if float(peak) > max_update:
-                    edge_update[indices].mul_(max_update / peak)
+                    # LongTensor advanced indexing returns a copy, so mutating
+                    # edge_update[indices] in-place does not update edge_update.
+                    # Assign the scaled values back explicitly.
+                    edge_update[indices] = group_update * (max_update / peak)
         else:
             raise ValueError(f"unknown rescale mode: {mode}")
         bias_update.clamp_(-max_update, max_update)
@@ -74,9 +78,10 @@ def _update_geometry(
     elif mode == "group":
         applied = raw_update.clone()
         for _, _, indices in groups:
-            peak = applied[indices].abs().max()
+            group_update = applied[indices]
+            peak = group_update.abs().max()
             if float(peak) > max_update:
-                applied[indices].mul_(max_update / peak)
+                applied[indices] = group_update * (max_update / peak)
     else:
         raise ValueError(mode)
 
