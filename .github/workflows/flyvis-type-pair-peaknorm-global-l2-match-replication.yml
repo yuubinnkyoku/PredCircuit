@@ -1,0 +1,172 @@
+name: FlyVis type-pair peak-norm global L2-match replication
+
+on:
+  push:
+    paths:
+      - ".github/triggers/run-type-pair-peaknorm-global-l2-match-replication-2130-2169"
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [2130, 2131, 2132, 2133, 2134, 2135, 2136, 2137, 2138, 2139, 2140, 2141, 2142, 2143, 2144, 2145, 2146, 2147, 2148, 2149, 2150, 2151, 2152, 2153, 2154, 2155, 2156, 2157, 2158, 2159, 2160, 2161, 2162, 2163, 2164, 2165, 2166, 2167, 2168, 2169]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Run focused global L2-match replication for seed ${{ matrix.seed }}
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run python scripts/diagnose_flyvis_type_pair_peaknorm_global_l2_match_replication.py \
+            --seed ${{ matrix.seed }} \
+            --out results/generated/flyvis_type_pair_peaknorm_global_l2_match_replication_seed${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: type-pair-peaknorm-global-l2-match-replication-seed${{ matrix.seed }}
+          path: results/generated/flyvis_type_pair_peaknorm_global_l2_match_replication_seed${{ matrix.seed }}.csv
+
+  aggregate:
+    needs: diagnose
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: type-pair-peaknorm-global-l2-match-replication-seed*
+          path: artifacts
+          merge-multiple: true
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Aggregate focused global L2-match replication
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run --with scipy python - <<'PY'
+          from pathlib import Path
+          import numpy as np
+          import pandas as pd
+          from scipy import stats
+
+          paths = sorted(Path("artifacts").glob("*.csv"))
+          if len(paths) != 40:
+              raise RuntimeError(f"expected 40 seed artifacts, got {len(paths)}")
+          frame = pd.concat([pd.read_csv(path) for path in paths], ignore_index=True)
+          if len(frame) != 1280:
+              raise RuntimeError(f"expected 1280 rows, got {len(frame)}")
+          if frame["seed"].nunique() != 40:
+              raise RuntimeError("expected 40 unique seeds")
+          if not frame["finite"].all():
+              raise RuntimeError("non-finite focused global L2-match result detected")
+          frame.to_csv(
+              "results/generated/flyvis_type_pair_peaknorm_global_l2_match_replication.csv",
+              index=False,
+          )
+
+          metrics = (
+              "cross_entropy",
+              "accuracy",
+              "hard_margin",
+              "soft_margin",
+              "weight_norm",
+          )
+          per_seed = frame.groupby(
+              ["seed", "init_scale", "horizon", "rule"], as_index=False
+          )[list(metrics)].mean()
+          pivot = per_seed.pivot(
+              index=["seed", "init_scale", "horizon"],
+              columns="rule",
+              values=list(metrics),
+          )
+          pivot.columns = [f"{metric}_{rule}" for metric, rule in pivot.columns]
+          pivot = pivot.reset_index()
+          contrasts = [
+              ("soft035_minus_global035", "soft035", "global035"),
+              ("soft035_minus_standard", "soft035", "standard"),
+              ("global035_minus_standard", "global035", "standard"),
+              ("soft035_minus_local", "soft035", "local"),
+              ("standard_minus_local", "standard", "local"),
+          ]
+
+          rows = []
+          for (scale, horizon), subset in pivot.groupby(["init_scale", "horizon"]):
+              for name, left, right in contrasts:
+                  for metric in metrics:
+                      values = (
+                          subset[f"{metric}_{left}"] - subset[f"{metric}_{right}"]
+                      ).to_numpy(float)
+                      mean = float(values.mean())
+                      std = float(values.std(ddof=1))
+                      if std > 0.0:
+                          ci_low, ci_high = stats.t.interval(
+                              0.95,
+                              len(values) - 1,
+                              loc=mean,
+                              scale=std / np.sqrt(len(values)),
+                          )
+                          p = float(stats.ttest_1samp(values, 0.0).pvalue)
+                          try:
+                              w_p = float(stats.wilcoxon(values).pvalue)
+                          except ValueError:
+                              w_p = float("nan")
+                          dz = mean / std
+                      else:
+                          ci_low = ci_high = mean
+                          p = 1.0 if mean == 0.0 else 0.0
+                          w_p = p
+                          dz = float("nan")
+                      rows.append(
+                          {
+                              "init_scale": float(scale),
+                              "horizon": int(horizon),
+                              "contrast": name,
+                              "metric": metric,
+                              "n": len(values),
+                              "mean": mean,
+                              "ci_low": float(ci_low),
+                              "ci_high": float(ci_high),
+                              "positive": int((values > 0.0).sum()),
+                              "negative": int((values < 0.0).sum()),
+                              "t_p": p,
+                              "wilcoxon_p": w_p,
+                              "cohen_dz": dz,
+                          }
+                      )
+          pd.DataFrame(rows).to_csv(
+              "results/generated/flyvis_type_pair_peaknorm_global_l2_match_replication_summary.csv",
+              index=False,
+          )
+
+          diag_columns = [
+              "mean_multiplier",
+              "edge_weighted_multiplier",
+              "candidate_group_fraction",
+              "active_group_fraction",
+              "attenuation_mass_fraction",
+              "update_l2_ratio",
+              "matched_l2_relative_error",
+          ]
+          diagnostics = frame[frame["rule"].isin(["soft035", "global035"])].groupby(
+              ["seed", "init_scale", "horizon", "rule"], as_index=False
+          )[diag_columns].mean()
+          if diagnostics.loc[
+              diagnostics["rule"] == "global035", "matched_l2_relative_error"
+          ].max() > 1e-5:
+              raise RuntimeError("global L2 match relative error exceeded 1e-5")
+          diagnostics.to_csv(
+              "results/generated/flyvis_type_pair_peaknorm_global_l2_match_replication_diagnostics.csv",
+              index=False,
+          )
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-type-pair-peaknorm-global-l2-match-replication-aggregate
+          path: |
+            results/generated/flyvis_type_pair_peaknorm_global_l2_match_replication.csv
+            results/generated/flyvis_type_pair_peaknorm_global_l2_match_replication_summary.csv
+            results/generated/flyvis_type_pair_peaknorm_global_l2_match_replication_diagnostics.csv
