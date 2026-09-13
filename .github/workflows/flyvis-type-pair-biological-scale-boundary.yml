@@ -1,0 +1,207 @@
+name: FlyVis type-pair biological scale boundary
+
+on:
+  push:
+    paths:
+      - ".github/workflows/flyvis-type-pair-biological-scale-boundary.yml"
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [1870, 1871, 1872, 1873, 1874, 1875, 1876, 1877, 1878, 1879, 1880, 1881, 1882, 1883, 1884, 1885, 1886, 1887, 1888, 1889]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Run biological-scale boundary localization for seed ${{ matrix.seed }}
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run python scripts/diagnose_flyvis_type_pair_biological_scale.py \
+            --seed ${{ matrix.seed }} \
+            --init-scales 0.100,0.105,0.110,0.115,0.120 \
+            --horizons 160,180,200 \
+            --eval-jitter-base 82000000 \
+            --out results/generated/flyvis_type_pair_biological_scale_boundary_seed${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: type-pair-biological-scale-boundary-seed${{ matrix.seed }}
+          path: results/generated/flyvis_type_pair_biological_scale_boundary_seed${{ matrix.seed }}.csv
+
+  aggregate:
+    needs: diagnose
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: type-pair-biological-scale-boundary-seed*
+          path: artifacts
+          merge-multiple: true
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Aggregate biological-scale boundary localization
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run --with scipy python - <<'PY'
+          from pathlib import Path
+          import numpy as np
+          import pandas as pd
+          from scipy import stats
+
+          paths = sorted(Path("artifacts").glob("*.csv"))
+          if len(paths) != 20:
+              raise RuntimeError(f"expected 20 seed artifacts, got {len(paths)}")
+          frame = pd.concat([pd.read_csv(path) for path in paths], ignore_index=True)
+          if len(frame) != 2400:
+              raise RuntimeError(f"expected 2400 rows, got {len(frame)}")
+          if not frame["finite"].all():
+              raise RuntimeError("non-finite biological-scale boundary result detected")
+          if frame["seed"].nunique() != 20:
+              raise RuntimeError("expected 20 unique seeds")
+          frame.to_csv(
+              "results/generated/flyvis_type_pair_biological_scale_boundary.csv",
+              index=False,
+          )
+
+          metrics = (
+              "cross_entropy",
+              "accuracy",
+              "hard_margin",
+              "soft_margin",
+              "weight_norm",
+          )
+          per_seed = frame.groupby(
+              ["seed", "init_scale", "rule", "horizon"], as_index=False
+          )[list(metrics)].mean()
+          rows = []
+          hard_rows = []
+          for scale in sorted(per_seed["init_scale"].unique()):
+              for horizon in sorted(per_seed["horizon"].unique()):
+                  local = (
+                      per_seed[
+                          (per_seed["init_scale"] == scale)
+                          & (per_seed["horizon"] == horizon)
+                          & (per_seed["rule"] == "local")
+                      ]
+                      .set_index("seed")
+                      .sort_index()
+                  )
+                  standard = (
+                      per_seed[
+                          (per_seed["init_scale"] == scale)
+                          & (per_seed["horizon"] == horizon)
+                          & (per_seed["rule"] == "standard")
+                      ]
+                      .set_index("seed")
+                      .sort_index()
+                  )
+                  if not local.index.equals(standard.index) or len(local) != 20:
+                      raise RuntimeError("paired seed mismatch")
+                  for metric in metrics:
+                      diff = standard[metric].to_numpy(float) - local[metric].to_numpy(float)
+                      mean = float(diff.mean())
+                      std = float(diff.std(ddof=1))
+                      if std > 0.0:
+                          ci_low, ci_high = stats.t.interval(
+                              0.95,
+                              len(diff) - 1,
+                              loc=mean,
+                              scale=std / np.sqrt(len(diff)),
+                          )
+                          p_value = float(stats.ttest_1samp(diff, 0.0).pvalue)
+                          try:
+                              wilcoxon_p = float(stats.wilcoxon(diff).pvalue)
+                          except ValueError:
+                              wilcoxon_p = float("nan")
+                          dz = mean / std
+                      else:
+                          ci_low = ci_high = mean
+                          p_value = 1.0 if mean == 0.0 else 0.0
+                          wilcoxon_p = p_value
+                          dz = float("nan")
+                      rows.append(
+                          {
+                              "init_scale": float(scale),
+                              "horizon": int(horizon),
+                              "metric": metric,
+                              "n": len(diff),
+                              "standard_minus_local_mean": mean,
+                              "ci_low": float(ci_low),
+                              "ci_high": float(ci_high),
+                              "t_p": p_value,
+                              "wilcoxon_p": wilcoxon_p,
+                              "cohen_dz": float(dz),
+                              "positive_seeds": int((diff > 0.0).sum()),
+                              "negative_seeds": int((diff < 0.0).sum()),
+                          }
+                      )
+                      if metric == "hard_margin":
+                          for seed, value in zip(local.index.to_numpy(), diff, strict=True):
+                              hard_rows.append(
+                                  {
+                                      "seed": int(seed),
+                                      "init_scale": float(scale),
+                                      "horizon": int(horizon),
+                                      "hard_margin_gain": float(value),
+                                  }
+                              )
+
+          summary = pd.DataFrame(rows)
+          summary.to_csv(
+              "results/generated/flyvis_type_pair_biological_scale_boundary_summary.csv",
+              index=False,
+          )
+
+          hard = pd.DataFrame(hard_rows)
+          transition_rows = []
+          for horizon, subset in hard.groupby("horizon"):
+              pivot = subset.pivot(index="seed", columns="init_scale", values="hard_margin_gain")
+              scales = np.array(sorted(pivot.columns), dtype=float)
+              slopes = []
+              crossing = []
+              for _, values in pivot.iterrows():
+                  y = values.loc[scales].to_numpy(float)
+                  slopes.append(float(np.polyfit(scales, y, 1)[0]))
+                  cross = float("nan")
+                  for left, right, y_left, y_right in zip(
+                      scales[:-1], scales[1:], y[:-1], y[1:], strict=True
+                  ):
+                      if y_left == 0.0:
+                          cross = float(left)
+                          break
+                      if y_left * y_right < 0.0:
+                          cross = float(left - y_left * (right - left) / (y_right - y_left))
+                          break
+                  crossing.append(cross)
+              finite_crossing = np.array([x for x in crossing if np.isfinite(x)], dtype=float)
+              transition_rows.append(
+                  {
+                      "horizon": int(horizon),
+                      "mean_linear_slope_hard_per_scale": float(np.mean(slopes)),
+                      "negative_slope_seeds": int((np.array(slopes) < 0.0).sum()),
+                      "crossing_seeds": int(len(finite_crossing)),
+                      "median_first_zero_crossing": (
+                          float(np.median(finite_crossing)) if len(finite_crossing) else float("nan")
+                      ),
+                  }
+              )
+          pd.DataFrame(transition_rows).to_csv(
+              "results/generated/flyvis_type_pair_biological_scale_boundary_transition.csv",
+              index=False,
+          )
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-type-pair-biological-scale-boundary-aggregate
+          path: |
+            results/generated/flyvis_type_pair_biological_scale_boundary.csv
+            results/generated/flyvis_type_pair_biological_scale_boundary_summary.csv
+            results/generated/flyvis_type_pair_biological_scale_boundary_transition.csv
