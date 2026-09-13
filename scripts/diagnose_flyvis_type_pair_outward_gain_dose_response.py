@@ -159,9 +159,7 @@ def run_seed(*, seed: int, learning_rate: float, max_update: float) -> pd.DataFr
     named_groups = _named_groups(circuit)
     rows: list[dict[str, float | int | bool | str]] = []
 
-    gain_by_branch = {
-        f"out{round(gain * 100):03d}": gain for gain in OUTWARD_GAINS
-    }
+    gain_by_branch = {f"out{round(gain * 100):03d}": gain for gain in OUTWARD_GAINS}
 
     for init_scale in INIT_SCALES:
         base = PredictiveCodingGraph(
