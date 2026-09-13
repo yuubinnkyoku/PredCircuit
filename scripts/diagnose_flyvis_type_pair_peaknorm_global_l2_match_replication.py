@@ -110,9 +110,7 @@ def run_seed(*, seed: int, learning_rate: float = 160.0, max_update: float = 0.0
             jitter_seed = EVAL_JITTER_BASE + eval_rep
             _, classes = _heldout_readout(models["local"], circuit, jitter_seed=jitter_seed)
             for rule, model in models.items():
-                readout, paired_classes = _heldout_readout(
-                    model, circuit, jitter_seed=jitter_seed
-                )
+                readout, paired_classes = _heldout_readout(model, circuit, jitter_seed=jitter_seed)
                 if not torch.equal(classes, paired_classes):
                     raise RuntimeError("held-out class mismatch")
                 weight = model.weight.detach().clone().requires_grad_(True)
