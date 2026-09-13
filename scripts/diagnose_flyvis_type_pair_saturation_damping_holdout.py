@@ -60,13 +60,13 @@ def _saturation_damped_update(
         weights.append(len(indices))
 
     total_weight = max(sum(weights), 1)
-    edge_weighted_multiplier = sum(
-        multiplier * weight
-        for multiplier, weight in zip(multipliers, weights, strict=True)
-    ) / total_weight
-    edge_weighted_ratio = sum(
-        ratio * weight for ratio, weight in zip(ratios, weights, strict=True)
-    ) / total_weight
+    edge_weighted_multiplier = (
+        sum(multiplier * weight for multiplier, weight in zip(multipliers, weights, strict=True))
+        / total_weight
+    )
+    edge_weighted_ratio = (
+        sum(ratio * weight for ratio, weight in zip(ratios, weights, strict=True)) / total_weight
+    )
     return applied, {
         "sat_mean_multiplier": float(sum(multipliers) / max(len(multipliers), 1)),
         "sat_edge_weighted_multiplier": float(edge_weighted_multiplier),
