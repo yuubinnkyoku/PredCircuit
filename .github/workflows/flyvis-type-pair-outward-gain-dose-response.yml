@@ -1,0 +1,210 @@
+name: FlyVis type-pair outward gain dose response
+
+on:
+  push:
+    paths:
+      - ".github/triggers/run-type-pair-outward-gain-dose-response-1810-1829"
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [1810, 1811, 1812, 1813, 1814, 1815, 1816, 1817, 1818, 1819, 1820, 1821, 1822, 1823, 1824, 1825, 1826, 1827, 1828, 1829]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Run outward gain dose response for seed ${{ matrix.seed }}
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run python scripts/diagnose_flyvis_type_pair_outward_gain_dose_response.py \
+            --seed ${{ matrix.seed }} \
+            --out results/generated/flyvis_type_pair_outward_gain_seed${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: type-pair-outward-gain-seed${{ matrix.seed }}
+          path: results/generated/flyvis_type_pair_outward_gain_seed${{ matrix.seed }}.csv
+
+  aggregate:
+    needs: diagnose
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: type-pair-outward-gain-seed*
+          path: artifacts
+          merge-multiple: true
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Aggregate outward gain dose response
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run --with scipy python - <<'PY'
+          from pathlib import Path
+
+          import numpy as np
+          import pandas as pd
+          from scipy import stats
+
+          paths = sorted(Path("artifacts").glob("*.csv"))
+          if len(paths) != 20:
+              raise RuntimeError(f"expected 20 seed artifacts, got {len(paths)}")
+          frame = pd.concat([pd.read_csv(path) for path in paths], ignore_index=True)
+          if frame["seed"].nunique() != 20:
+              raise RuntimeError(f"expected 20 unique seeds, got {frame['seed'].nunique()}")
+          if not frame["finite"].all():
+              raise RuntimeError("non-finite outward gain dose response detected")
+          expected_rows = 20 * 3 * 5 * 4
+          if len(frame) != expected_rows:
+              raise RuntimeError(f"expected {expected_rows} rows, got {len(frame)}")
+          frame.to_csv(
+              "results/generated/flyvis_type_pair_outward_gain_dose_response.csv",
+              index=False,
+          )
+
+          metrics = (
+              "cross_entropy",
+              "accuracy",
+              "hard_margin",
+              "soft_margin",
+              "weight_norm",
+          )
+          gains = (0.0, 0.25, 0.5, 0.75, 1.0, 1.25)
+          branches = tuple(f"out{int(round(gain * 100)):03d}" for gain in gains)
+          all_branches = branches + ("local",)
+          per_seed = frame.groupby(
+              ["seed", "init_scale", "branch_step"], as_index=False
+          ).mean(numeric_only=True)
+
+          rows = []
+          for init_scale in sorted(per_seed["init_scale"].unique()):
+              for branch_step in sorted(per_seed["branch_step"].unique()):
+                  subset = per_seed[
+                      (per_seed["init_scale"] == init_scale)
+                      & (per_seed["branch_step"] == branch_step)
+                  ]
+                  for baseline in ("out000", "out100", "local"):
+                      for branch in all_branches:
+                          if branch == baseline:
+                              continue
+                          for metric in metrics:
+                              values = (
+                                  subset[f"{branch}_{metric}"]
+                                  - subset[f"{baseline}_{metric}"]
+                              ).to_numpy(float)
+                              mean = float(values.mean())
+                              std = float(values.std(ddof=1))
+                              sem = std / np.sqrt(len(values)) if std > 0.0 else 0.0
+                              if sem > 0.0:
+                                  ci_low, ci_high = stats.t.interval(
+                                      0.95,
+                                      len(values) - 1,
+                                      loc=mean,
+                                      scale=sem,
+                                  )
+                                  t_p = float(stats.ttest_1samp(values, 0.0).pvalue)
+                                  dz = mean / std
+                              else:
+                                  ci_low = ci_high = mean
+                                  t_p = 1.0
+                                  dz = 0.0
+                              try:
+                                  wilcoxon_p = float(stats.wilcoxon(values).pvalue)
+                              except ValueError:
+                                  wilcoxon_p = 1.0
+                              rows.append(
+                                  {
+                                      "init_scale": float(init_scale),
+                                      "branch_step": int(branch_step),
+                                      "branch": branch,
+                                      "baseline": baseline,
+                                      "metric": metric,
+                                      "n": len(values),
+                                      "mean_delta": mean,
+                                      "ci_low": float(ci_low),
+                                      "ci_high": float(ci_high),
+                                      "cohens_dz": float(dz),
+                                      "positive": int((values > 0.0).sum()),
+                                      "negative": int((values < 0.0).sum()),
+                                      "t_p": t_p,
+                                      "wilcoxon_p": wilcoxon_p,
+                                  }
+                              )
+          pd.DataFrame(rows).to_csv(
+              "results/generated/flyvis_type_pair_outward_gain_dose_response_summary.csv",
+              index=False,
+          )
+
+          trend_rows = []
+          x = np.asarray(gains, dtype=float)
+          for init_scale in sorted(per_seed["init_scale"].unique()):
+              for branch_step in sorted(per_seed["branch_step"].unique()):
+                  subset = per_seed[
+                      (per_seed["init_scale"] == init_scale)
+                      & (per_seed["branch_step"] == branch_step)
+                  ]
+                  for metric in metrics:
+                      slopes = []
+                      spearmans = []
+                      for _, row in subset.iterrows():
+                          y = np.asarray([row[f"{branch}_{metric}"] for branch in branches])
+                          slopes.append(float(np.polyfit(x, y, 1)[0]))
+                          spearmans.append(float(stats.spearmanr(x, y).statistic))
+                      slopes = np.asarray(slopes)
+                      spearmans = np.asarray(spearmans)
+                      for statistic_name, values in (
+                          ("linear_slope", slopes),
+                          ("spearman_rho", spearmans),
+                      ):
+                          mean = float(values.mean())
+                          std = float(values.std(ddof=1))
+                          sem = std / np.sqrt(len(values)) if std > 0.0 else 0.0
+                          if sem > 0.0:
+                              ci_low, ci_high = stats.t.interval(
+                                  0.95,
+                                  len(values) - 1,
+                                  loc=mean,
+                                  scale=sem,
+                              )
+                              t_p = float(stats.ttest_1samp(values, 0.0).pvalue)
+                              dz = mean / std
+                          else:
+                              ci_low = ci_high = mean
+                              t_p = 1.0
+                              dz = 0.0
+                          trend_rows.append(
+                              {
+                                  "init_scale": float(init_scale),
+                                  "branch_step": int(branch_step),
+                                  "metric": metric,
+                                  "statistic": statistic_name,
+                                  "n": len(values),
+                                  "mean": mean,
+                                  "ci_low": float(ci_low),
+                                  "ci_high": float(ci_high),
+                                  "cohens_dz": float(dz),
+                                  "positive": int((values > 0.0).sum()),
+                                  "negative": int((values < 0.0).sum()),
+                                  "t_p": t_p,
+                              }
+                          )
+          pd.DataFrame(trend_rows).to_csv(
+              "results/generated/flyvis_type_pair_outward_gain_dose_response_trends.csv",
+              index=False,
+          )
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-type-pair-outward-gain-dose-response-aggregate
+          path: |
+            results/generated/flyvis_type_pair_outward_gain_dose_response.csv
+            results/generated/flyvis_type_pair_outward_gain_dose_response_summary.csv
+            results/generated/flyvis_type_pair_outward_gain_dose_response_trends.csv
