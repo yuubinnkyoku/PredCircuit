@@ -1,0 +1,189 @@
+name: FlyVis type-pair scale transition geometry
+
+on:
+  push:
+    paths:
+      - ".github/workflows/flyvis-type-pair-scale-transition-geometry.yml"
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [1890, 1891, 1892, 1893, 1894, 1895, 1896, 1897, 1898, 1899, 1900, 1901, 1902, 1903, 1904, 1905, 1906, 1907, 1908, 1909]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Run critical-scale transition geometry for seed ${{ matrix.seed }}
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run python scripts/diagnose_flyvis_type_pair_scale_transition_geometry.py \
+            --seed ${{ matrix.seed }} \
+            --out results/generated/flyvis_type_pair_scale_transition_geometry_seed${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: type-pair-scale-transition-geometry-seed${{ matrix.seed }}
+          path: results/generated/flyvis_type_pair_scale_transition_geometry_seed${{ matrix.seed }}.csv
+
+  aggregate:
+    needs: diagnose
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: type-pair-scale-transition-geometry-seed*
+          path: artifacts
+          merge-multiple: true
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Aggregate critical-scale transition geometry
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run --with scipy python - <<'PY'
+          from pathlib import Path
+          import numpy as np
+          import pandas as pd
+          from scipy import stats
+
+          paths = sorted(Path("artifacts").glob("*.csv"))
+          if len(paths) != 20:
+              raise RuntimeError(f"expected 20 seed artifacts, got {len(paths)}")
+          frame = pd.concat([pd.read_csv(path) for path in paths], ignore_index=True)
+          if len(frame) != 640:
+              raise RuntimeError(f"expected 640 rows, got {len(frame)}")
+          if frame["seed"].nunique() != 20:
+              raise RuntimeError("expected 20 unique seeds")
+          if not frame["finite"].all():
+              raise RuntimeError("non-finite transition-geometry result detected")
+          frame.to_csv(
+              "results/generated/flyvis_type_pair_scale_transition_geometry.csv",
+              index=False,
+          )
+
+          metrics = [
+              column
+              for column in frame.columns
+              if column
+              not in {"seed", "init_scale", "horizon", "rule", "finite"}
+          ]
+          summary_rows = []
+          for (scale, horizon, rule), subset in frame.groupby(
+              ["init_scale", "horizon", "rule"]
+          ):
+              for metric in metrics:
+                  values = subset[metric].to_numpy(float)
+                  mean = float(values.mean())
+                  std = float(values.std(ddof=1))
+                  if std > 0.0:
+                      ci_low, ci_high = stats.t.interval(
+                          0.95,
+                          len(values) - 1,
+                          loc=mean,
+                          scale=std / np.sqrt(len(values)),
+                      )
+                  else:
+                      ci_low = ci_high = mean
+                  summary_rows.append(
+                      {
+                          "init_scale": float(scale),
+                          "horizon": int(horizon),
+                          "rule": rule,
+                          "metric": metric,
+                          "n": len(values),
+                          "mean": mean,
+                          "ci_low": float(ci_low),
+                          "ci_high": float(ci_high),
+                      }
+                  )
+          pd.DataFrame(summary_rows).to_csv(
+              "results/generated/flyvis_type_pair_scale_transition_geometry_summary.csv",
+              index=False,
+          )
+
+          paired = frame.pivot(
+              index=["seed", "init_scale", "horizon"],
+              columns="rule",
+              values=["cross_entropy", "hard_margin", "soft_margin"],
+          )
+          paired.columns = [f"{metric}_{rule}" for metric, rule in paired.columns]
+          paired = paired.reset_index()
+          for metric in ("cross_entropy", "hard_margin", "soft_margin"):
+              paired[f"{metric}_gain"] = (
+                  paired[f"{metric}_standard"] - paired[f"{metric}_local"]
+              )
+          paired.to_csv(
+              "results/generated/flyvis_type_pair_scale_transition_geometry_paired.csv",
+              index=False,
+          )
+
+          final_gain = (
+              paired[paired["horizon"] == 200][["seed", "init_scale", "hard_margin_gain"]]
+              .rename(columns={"hard_margin_gain": "final_hard_gain"})
+          )
+          predictor_metrics = (
+              "weight_norm",
+              "raw_credit_norm",
+              "shared_mean_norm",
+              "shared_mean_frac",
+              "raw_hard_cosine",
+              "shared_hard_cosine",
+              "standard_hard_cosine",
+              "shared_weight_cosine",
+              "shared_weight_dot",
+              "clipped_update_hard_cosine",
+              "clipped_update_weight_cosine",
+              "clip_fraction",
+              "rho_ge_05_group_fraction",
+              "rho_ge_10_group_fraction",
+              "outward_shared_group_fraction",
+          )
+          predictor_rows = []
+          standard = frame[frame["rule"] == "standard"]
+          for source_horizon in (160, 180, 190):
+              source = standard[standard["horizon"] == source_horizon]
+              merged = source.merge(final_gain, on=["seed", "init_scale"], validate="one_to_one")
+              for metric in predictor_metrics:
+                  for scale_label, subset in [("pooled", merged), *[
+                      (f"{scale:.3f}", merged[merged["init_scale"] == scale])
+                      for scale in sorted(merged["init_scale"].unique())
+                  ]]:
+                      x = subset[metric].to_numpy(float)
+                      y = subset["final_hard_gain"].to_numpy(float)
+                      if len(x) < 3 or np.std(x) == 0.0 or np.std(y) == 0.0:
+                          pearson_r = pearson_p = spearman_r = spearman_p = float("nan")
+                      else:
+                          pearson_r, pearson_p = stats.pearsonr(x, y)
+                          spearman_r, spearman_p = stats.spearmanr(x, y)
+                      predictor_rows.append(
+                          {
+                              "source_horizon": source_horizon,
+                              "scale": scale_label,
+                              "metric": metric,
+                              "n": len(x),
+                              "pearson_r": float(pearson_r),
+                              "pearson_p": float(pearson_p),
+                              "spearman_r": float(spearman_r),
+                              "spearman_p": float(spearman_p),
+                          }
+                      )
+          pd.DataFrame(predictor_rows).to_csv(
+              "results/generated/flyvis_type_pair_scale_transition_geometry_predictors.csv",
+              index=False,
+          )
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-type-pair-scale-transition-geometry-aggregate
+          path: |
+            results/generated/flyvis_type_pair_scale_transition_geometry.csv
+            results/generated/flyvis_type_pair_scale_transition_geometry_summary.csv
+            results/generated/flyvis_type_pair_scale_transition_geometry_paired.csv
+            results/generated/flyvis_type_pair_scale_transition_geometry_predictors.csv
