@@ -1,0 +1,171 @@
+name: FlyVis type-pair long-persistence peak-norm holdout
+
+on:
+  push:
+    paths:
+      - ".github/triggers/run-type-pair-peaknorm-long-persistence-2050-2069"
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [2050, 2051, 2052, 2053, 2054, 2055, 2056, 2057, 2058, 2059, 2060, 2061, 2062, 2063, 2064, 2065, 2066, 2067, 2068, 2069]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Run long-persistence peak-norm holdout for seed ${{ matrix.seed }}
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run python scripts/diagnose_flyvis_type_pair_peaknorm_long_persistence_holdout.py \
+            --seed ${{ matrix.seed }} \
+            --out results/generated/flyvis_type_pair_peaknorm_long_persistence_seed${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: type-pair-peaknorm-long-persistence-seed${{ matrix.seed }}
+          path: results/generated/flyvis_type_pair_peaknorm_long_persistence_seed${{ matrix.seed }}.csv
+
+  aggregate:
+    needs: diagnose
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: type-pair-peaknorm-long-persistence-seed*
+          path: artifacts
+          merge-multiple: true
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Aggregate long-persistence peak-norm holdout
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run --with scipy python - <<'PY'
+          from pathlib import Path
+          import numpy as np
+          import pandas as pd
+          from scipy import stats
+
+          paths = sorted(Path("artifacts").glob("*.csv"))
+          if len(paths) != 20:
+              raise RuntimeError(f"expected 20 seed artifacts, got {len(paths)}")
+          frame = pd.concat([pd.read_csv(path) for path in paths], ignore_index=True)
+          if len(frame) != 4800:
+              raise RuntimeError(f"expected 4800 rows, got {len(frame)}")
+          if frame["seed"].nunique() != 20:
+              raise RuntimeError("expected 20 unique seeds")
+          if not frame["finite"].all():
+              raise RuntimeError("non-finite long-persistence peak-norm result detected")
+          frame.to_csv(
+              "results/generated/flyvis_type_pair_peaknorm_long_persistence.csv",
+              index=False,
+          )
+
+          metrics = (
+              "cross_entropy",
+              "accuracy",
+              "hard_margin",
+              "soft_margin",
+              "weight_norm",
+          )
+          per_seed = frame.groupby(
+              ["seed", "init_scale", "horizon", "rule"], as_index=False
+          )[list(metrics)].mean()
+          pivot = per_seed.pivot(
+              index=["seed", "init_scale", "horizon"],
+              columns="rule",
+              values=list(metrics),
+          )
+          pivot.columns = [f"{metric}_{rule}" for metric, rule in pivot.columns]
+          pivot = pivot.reset_index()
+          contrasts = []
+          for rule in ("peak025x3", "peak025x5", "peak025x7"):
+              contrasts.append((f"{rule}_minus_standard", rule, "standard"))
+              contrasts.append((f"{rule}_minus_local", rule, "local"))
+          contrasts.extend(
+              [
+                  ("peak025x5_minus_peak025x3", "peak025x5", "peak025x3"),
+                  ("peak025x7_minus_peak025x3", "peak025x7", "peak025x3"),
+                  ("peak025x7_minus_peak025x5", "peak025x7", "peak025x5"),
+                  ("standard_minus_local", "standard", "local"),
+              ]
+          )
+
+          rows = []
+          for (scale, horizon), subset in pivot.groupby(["init_scale", "horizon"]):
+              for name, left, right in contrasts:
+                  for metric in metrics:
+                      values = (
+                          subset[f"{metric}_{left}"] - subset[f"{metric}_{right}"]
+                      ).to_numpy(float)
+                      mean = float(values.mean())
+                      std = float(values.std(ddof=1))
+                      if std > 0.0:
+                          ci_low, ci_high = stats.t.interval(
+                              0.95,
+                              len(values) - 1,
+                              loc=mean,
+                              scale=std / np.sqrt(len(values)),
+                          )
+                          p = float(stats.ttest_1samp(values, 0.0).pvalue)
+                          try:
+                              w_p = float(stats.wilcoxon(values).pvalue)
+                          except ValueError:
+                              w_p = float("nan")
+                          dz = mean / std
+                      else:
+                          ci_low = ci_high = mean
+                          p = 1.0 if mean == 0.0 else 0.0
+                          w_p = p
+                          dz = float("nan")
+                      rows.append(
+                          {
+                              "init_scale": float(scale),
+                              "horizon": int(horizon),
+                              "contrast": name,
+                              "metric": metric,
+                              "n": len(values),
+                              "mean": mean,
+                              "ci_low": float(ci_low),
+                              "ci_high": float(ci_high),
+                              "positive": int((values > 0.0).sum()),
+                              "negative": int((values < 0.0).sum()),
+                              "t_p": p,
+                              "wilcoxon_p": w_p,
+                              "cohen_dz": dz,
+                          }
+                      )
+          pd.DataFrame(rows).to_csv(
+              "results/generated/flyvis_type_pair_peaknorm_long_persistence_summary.csv",
+              index=False,
+          )
+
+          diag_columns = [
+              "mean_multiplier",
+              "edge_weighted_multiplier",
+              "candidate_group_fraction",
+              "active_group_fraction",
+              "mean_streak",
+              "max_streak",
+          ]
+          frame[frame["rule"].str.startswith("peak")].groupby(
+              ["seed", "init_scale", "horizon", "rule"], as_index=False
+          )[diag_columns].mean().to_csv(
+              "results/generated/flyvis_type_pair_peaknorm_long_persistence_diagnostics.csv",
+              index=False,
+          )
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-type-pair-peaknorm-long-persistence-aggregate
+          path: |
+            results/generated/flyvis_type_pair_peaknorm_long_persistence.csv
+            results/generated/flyvis_type_pair_peaknorm_long_persistence_summary.csv
+            results/generated/flyvis_type_pair_peaknorm_long_persistence_diagnostics.csv
