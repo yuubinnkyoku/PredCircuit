@@ -3,7 +3,7 @@ name: FlyVis type-pair outward gain dose response
 on:
   push:
     paths:
-      - ".github/triggers/run-type-pair-outward-gain-dose-response-1810-1829"
+      - ".github/triggers/run-type-pair-outward-gain-dose-response-1830-1849"
   workflow_dispatch:
 
 jobs:
@@ -12,7 +12,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        seed: [1810, 1811, 1812, 1813, 1814, 1815, 1816, 1817, 1818, 1819, 1820, 1821, 1822, 1823, 1824, 1825, 1826, 1827, 1828, 1829]
+        seed: [1830, 1831, 1832, 1833, 1834, 1835, 1836, 1837, 1838, 1839, 1840, 1841, 1842, 1843, 1844, 1845, 1846, 1847, 1848, 1849]
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v10.0.1
