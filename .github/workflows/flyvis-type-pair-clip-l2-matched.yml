@@ -1,0 +1,152 @@
+name: FlyVis type-pair clip L2 matched
+
+on:
+  push:
+    paths:
+      - ".github/triggers/run-type-pair-clip-l2-matched-1930-1949"
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [1930, 1931, 1932, 1933, 1934, 1935, 1936, 1937, 1938, 1939, 1940, 1941, 1942, 1943, 1944, 1945, 1946, 1947, 1948, 1949]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Run L2-matched clip geometry for seed ${{ matrix.seed }}
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run python scripts/diagnose_flyvis_type_pair_clip_l2_matched.py \
+            --seed ${{ matrix.seed }} \
+            --out results/generated/flyvis_type_pair_clip_l2_matched_seed${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: type-pair-clip-l2-matched-seed${{ matrix.seed }}
+          path: results/generated/flyvis_type_pair_clip_l2_matched_seed${{ matrix.seed }}.csv
+
+  aggregate:
+    needs: diagnose
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: type-pair-clip-l2-matched-seed*
+          path: artifacts
+          merge-multiple: true
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Aggregate L2-matched clip geometry
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run --with scipy python - <<'PY'
+          from pathlib import Path
+          import numpy as np
+          import pandas as pd
+          from scipy import stats
+
+          paths = sorted(Path("artifacts").glob("*.csv"))
+          if len(paths) != 20:
+              raise RuntimeError(f"expected 20 seed artifacts, got {len(paths)}")
+          frame = pd.concat([pd.read_csv(path) for path in paths], ignore_index=True)
+          if len(frame) != 240:
+              raise RuntimeError(f"expected 240 rows, got {len(frame)}")
+          if frame["seed"].nunique() != 20:
+              raise RuntimeError("expected 20 unique seeds")
+          if not frame["finite"].all():
+              raise RuntimeError("non-finite L2-matched result detected")
+          frame.to_csv(
+              "results/generated/flyvis_type_pair_clip_l2_matched.csv",
+              index=False,
+          )
+
+          metrics = (
+              "cross_entropy",
+              "accuracy",
+              "hard_margin",
+              "soft_margin",
+              "weight_norm",
+          )
+          pivot = frame.pivot(
+              index=["seed", "init_scale"], columns="rule", values=list(metrics)
+          )
+          pivot.columns = [f"{metric}_{rule}" for metric, rule in pivot.columns]
+          pivot = pivot.reset_index()
+          contrasts = (
+              ("group_l2_minus_clip", "standard_group_l2", "standard_clip"),
+              ("global_l2_minus_clip", "standard_global_l2", "standard_clip"),
+              ("group_l2_minus_local", "standard_group_l2", "local"),
+              ("global_l2_minus_local", "standard_global_l2", "local"),
+              ("clip_minus_local", "standard_clip", "local"),
+          )
+          rows = []
+          for scale, subset in pivot.groupby("init_scale"):
+              for name, left, right in contrasts:
+                  for metric in metrics:
+                      values = (
+                          subset[f"{metric}_{left}"] - subset[f"{metric}_{right}"]
+                      ).to_numpy(float)
+                      mean = float(values.mean())
+                      std = float(values.std(ddof=1))
+                      if std > 0.0:
+                          ci_low, ci_high = stats.t.interval(
+                              0.95,
+                              len(values) - 1,
+                              loc=mean,
+                              scale=std / np.sqrt(len(values)),
+                          )
+                          p = float(stats.ttest_1samp(values, 0.0).pvalue)
+                          try:
+                              w_p = float(stats.wilcoxon(values).pvalue)
+                          except ValueError:
+                              w_p = float("nan")
+                          dz = mean / std
+                      else:
+                          ci_low = ci_high = mean
+                          p = 1.0 if mean == 0.0 else 0.0
+                          w_p = p
+                          dz = float("nan")
+                      rows.append(
+                          {
+                              "init_scale": float(scale),
+                              "contrast": name,
+                              "metric": metric,
+                              "n": len(values),
+                              "mean": mean,
+                              "ci_low": float(ci_low),
+                              "ci_high": float(ci_high),
+                              "positive": int((values > 0.0).sum()),
+                              "negative": int((values < 0.0).sum()),
+                              "t_p": p,
+                              "wilcoxon_p": w_p,
+                              "cohen_dz": dz,
+                          }
+                      )
+          pd.DataFrame(rows).to_csv(
+              "results/generated/flyvis_type_pair_clip_l2_matched_summary.csv",
+              index=False,
+          )
+
+          geometry_columns = [
+              column for column in frame.columns if column.startswith("branch_")
+          ]
+          frame[["seed", "init_scale", *geometry_columns]].drop_duplicates().to_csv(
+              "results/generated/flyvis_type_pair_clip_l2_matched_geometry.csv",
+              index=False,
+          )
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-type-pair-clip-l2-matched-aggregate
+          path: |
+            results/generated/flyvis_type_pair_clip_l2_matched.csv
+            results/generated/flyvis_type_pair_clip_l2_matched_summary.csv
+            results/generated/flyvis_type_pair_clip_l2_matched_geometry.csv
