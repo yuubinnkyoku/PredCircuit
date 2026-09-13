@@ -8,7 +8,8 @@ from pathlib import Path
 import pandas as pd
 import torch
 from diagnose_flyvis_type_pair_adaptive_mean_gain_holdout import _standard_direction
-from diagnose_flyvis_type_pair_l1_gain_geometry import _heldout_objectives
+from diagnose_flyvis_type_pair_biological_logit_balance import _heldout_readout
+from diagnose_flyvis_type_pair_l1_gain_geometry import EVAL_JITTER, _heldout_objectives
 from diagnose_flyvis_type_pair_mi9_causal import _named_groups
 from run_flyvis_temporal_coherence_gate import apply_local_credit
 from run_flyvis_type_pair_axis_identity_control import credit
@@ -189,8 +190,11 @@ def run_seed(
             weight = model.weight.detach().clone().requires_grad_(True)
             bias = model.bias.detach().clone()
             ce, hard_margin, soft_margin = _heldout_objectives(circuit, weight, bias)
+            readout, classes = _heldout_readout(model, circuit, jitter_seed=EVAL_JITTER)
+            accuracy = float((readout.argmax(dim=1) == classes).float().mean())
             values = {
                 "cross_entropy": float(ce.detach()),
+                "accuracy": accuracy,
                 "hard_margin": float(hard_margin.detach()),
                 "soft_margin": float(soft_margin.detach()),
                 "weight_norm": float(torch.linalg.vector_norm(model.weight.detach())),
