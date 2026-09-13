@@ -4,6 +4,7 @@ on:
   push:
     paths:
       - ".github/workflows/flyvis-type-pair-clip-geometry-intervention.yml"
+      - "scripts/diagnose_flyvis_type_pair_clip_geometry_intervention.py"
   workflow_dispatch:
 
 jobs:
