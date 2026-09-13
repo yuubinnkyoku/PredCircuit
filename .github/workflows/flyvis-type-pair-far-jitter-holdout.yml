@@ -1,0 +1,212 @@
+name: FlyVis type-pair far-jitter holdout
+
+on:
+  push:
+    paths:
+      - ".github/triggers/run-type-pair-far-jitter-1850-1869"
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [1850, 1851, 1852, 1853, 1854, 1855, 1856, 1857, 1858, 1859, 1860, 1861, 1862, 1863, 1864, 1865, 1866, 1867, 1868, 1869]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Run far-jitter holdout for seed ${{ matrix.seed }}
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run python scripts/diagnose_flyvis_type_pair_far_jitter_holdout.py \
+            --seed ${{ matrix.seed }} \
+            --out results/generated/flyvis_type_pair_far_jitter_seed${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: type-pair-far-jitter-seed${{ matrix.seed }}
+          path: results/generated/flyvis_type_pair_far_jitter_seed${{ matrix.seed }}.csv
+
+  aggregate:
+    needs: diagnose
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: type-pair-far-jitter-seed*
+          path: artifacts
+          merge-multiple: true
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Aggregate far-jitter holdout
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run --with scipy python - <<'PY'
+          from pathlib import Path
+
+          import numpy as np
+          import pandas as pd
+          from scipy import stats
+
+          paths = sorted(Path("artifacts").glob("*.csv"))
+          if len(paths) != 20:
+              raise RuntimeError(f"expected 20 seed artifacts, got {len(paths)}")
+          frame = pd.concat([pd.read_csv(path) for path in paths], ignore_index=True)
+          expected_rows = 20 * 3 * 4 * 4
+          if len(frame) != expected_rows:
+              raise RuntimeError(f"expected {expected_rows} rows, got {len(frame)}")
+          if not frame["finite"].all():
+              raise RuntimeError("non-finite far-jitter result detected")
+          frame.to_csv(
+              "results/generated/flyvis_type_pair_far_jitter.csv",
+              index=False,
+          )
+
+          metrics = (
+              "cross_entropy",
+              "accuracy",
+              "hard_margin",
+              "soft_margin",
+          )
+          columns = []
+          for metric in metrics:
+              columns.extend(
+                  (
+                      f"local_{metric}",
+                      f"standard_{metric}",
+                      f"standard_minus_local_{metric}",
+                  )
+              )
+
+          per_seed_base = frame.groupby(
+              ["seed", "horizon", "jitter_base"],
+              as_index=False,
+          )[columns].mean()
+
+          def summarize(values: np.ndarray) -> dict[str, float | int]:
+              mean = float(values.mean())
+              std = float(values.std(ddof=1))
+              if std > 0.0:
+                  ci_low, ci_high = stats.t.interval(
+                      0.95,
+                      len(values) - 1,
+                      loc=mean,
+                      scale=std / np.sqrt(len(values)),
+                  )
+                  p = float(stats.ttest_1samp(values, 0.0).pvalue)
+                  try:
+                      wilcoxon_p = float(stats.wilcoxon(values).pvalue)
+                  except ValueError:
+                      wilcoxon_p = float("nan")
+                  dz = mean / std
+              else:
+                  ci_low = ci_high = mean
+                  p = 1.0 if mean == 0.0 else 0.0
+                  wilcoxon_p = p
+                  dz = float("nan")
+              return {
+                  "n": len(values),
+                  "mean": mean,
+                  "ci_low": float(ci_low),
+                  "ci_high": float(ci_high),
+                  "positive": int((values > 0.0).sum()),
+                  "negative": int((values < 0.0).sum()),
+                  "t_p": p,
+                  "wilcoxon_p": wilcoxon_p,
+                  "cohen_dz": dz,
+              }
+
+          rows = []
+          for (horizon, jitter_base), subset in per_seed_base.groupby(
+              ["horizon", "jitter_base"]
+          ):
+              for column in columns:
+                  rows.append(
+                      {
+                          "scope": "single_base",
+                          "horizon": int(horizon),
+                          "jitter_base": str(int(jitter_base)),
+                          "metric": column,
+                          **summarize(subset[column].to_numpy(float)),
+                      }
+                  )
+
+          far = per_seed_base[per_seed_base["jitter_base"] != 9_100_000]
+          for horizon, subset in far.groupby("horizon"):
+              pooled = subset.groupby("seed", as_index=False)[columns].mean()
+              for column in columns:
+                  rows.append(
+                      {
+                          "scope": "all_far_bases",
+                          "horizon": int(horizon),
+                          "jitter_base": "far_pool",
+                          "metric": column,
+                          **summarize(pooled[column].to_numpy(float)),
+                      }
+                  )
+
+          summary = pd.DataFrame(rows)
+          summary.to_csv(
+              "results/generated/flyvis_type_pair_far_jitter_summary.csv",
+              index=False,
+          )
+
+          delta = "standard_minus_local_hard_margin"
+          pivot = per_seed_base.pivot(
+              index=["seed", "jitter_base"],
+              columns="horizon",
+              values=delta,
+          ).reset_index()
+          pivot["uturn_200_minus_100"] = pivot[200] - pivot[100]
+          pivot["late_200_minus_160"] = pivot[200] - pivot[160]
+          uturn_rows = []
+          for jitter_base, subset in pivot.groupby("jitter_base"):
+              for metric in ("uturn_200_minus_100", "late_200_minus_160"):
+                  uturn_rows.append(
+                      {
+                          "jitter_base": int(jitter_base),
+                          "metric": metric,
+                          **summarize(subset[metric].to_numpy(float)),
+                      }
+                  )
+          pd.DataFrame(uturn_rows).to_csv(
+              "results/generated/flyvis_type_pair_far_jitter_uturn_summary.csv",
+              index=False,
+          )
+
+          h200 = per_seed_base[per_seed_base["horizon"] == 200]
+          hard = h200.pivot(
+              index="seed",
+              columns="jitter_base",
+              values="standard_minus_local_hard_margin",
+          )
+          consistency = pd.DataFrame(
+              {
+                  "seed": hard.index,
+                  "all_four_hard_positive": (hard > 0.0).all(axis=1).to_numpy(),
+                  "all_three_far_hard_positive": (
+                      hard.drop(columns=9_100_000) > 0.0
+                  ).all(axis=1).to_numpy(),
+                  "min_hard_delta_across_bases": hard.min(axis=1).to_numpy(),
+                  "max_hard_delta_across_bases": hard.max(axis=1).to_numpy(),
+              }
+          )
+          consistency.to_csv(
+              "results/generated/flyvis_type_pair_far_jitter_consistency.csv",
+              index=False,
+          )
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-type-pair-far-jitter-aggregate
+          path: |
+            results/generated/flyvis_type_pair_far_jitter.csv
+            results/generated/flyvis_type_pair_far_jitter_summary.csv
+            results/generated/flyvis_type_pair_far_jitter_uturn_summary.csv
+            results/generated/flyvis_type_pair_far_jitter_consistency.csv
