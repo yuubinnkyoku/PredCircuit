@@ -162,9 +162,7 @@ def run_seed(
 
             for eval_rep in range(EVAL_REPS):
                 jitter_seed = EVAL_JITTER_BASE + eval_rep
-                local_readout, classes = _heldout_readout(
-                    models["local"], circuit, jitter_seed=jitter_seed
-                )
+                _, classes = _heldout_readout(models["local"], circuit, jitter_seed=jitter_seed)
                 for rule, model in models.items():
                     readout, paired_classes = _heldout_readout(
                         model, circuit, jitter_seed=jitter_seed
