@@ -23,7 +23,7 @@ EVAL_JITTER_BASE = 11_700_000
 INIT_SCALES = (0.12, 0.14, 0.16)
 SHARED_COEFFICIENT = 2.5
 OUTWARD_GAINS = (0.0, 0.25, 0.5, 0.75, 1.0, 1.25)
-BRANCHES = tuple(f"out{int(round(gain * 100)):03d}" for gain in OUTWARD_GAINS) + ("local",)
+BRANCHES = tuple(f"out{round(gain * 100):03d}" for gain in OUTWARD_GAINS) + ("local",)
 METRICS = ("cross_entropy", "accuracy", "hard_margin", "soft_margin")
 
 
@@ -160,7 +160,7 @@ def run_seed(*, seed: int, learning_rate: float, max_update: float) -> pd.DataFr
     rows: list[dict[str, float | int | bool | str]] = []
 
     gain_by_branch = {
-        f"out{int(round(gain * 100)):03d}": gain for gain in OUTWARD_GAINS
+        f"out{round(gain * 100):03d}": gain for gain in OUTWARD_GAINS
     }
 
     for init_scale in INIT_SCALES:
