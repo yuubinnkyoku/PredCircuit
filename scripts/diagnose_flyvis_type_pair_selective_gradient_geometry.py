@@ -54,7 +54,9 @@ def _masked_cosine(left: torch.Tensor, right: torch.Tensor, mask: torch.Tensor) 
     return _cosine(left[mask], right[mask])
 
 
-def _objective_values(circuit, weight: torch.Tensor, bias: torch.Tensor) -> tuple[float, float, float]:
+def _objective_values(
+    circuit, weight: torch.Tensor, bias: torch.Tensor
+) -> tuple[float, float, float]:
     ce, hard_margin, soft_margin = _heldout_objectives(circuit, weight, bias)
     return float(ce.detach()), float(hard_margin.detach()), float(soft_margin.detach())
 
