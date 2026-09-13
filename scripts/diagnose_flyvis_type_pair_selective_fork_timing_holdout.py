@@ -148,9 +148,7 @@ def run_seed(*, seed: int, learning_rate: float = 160.0, max_update: float = 0.0
             }
             for eval_rep in range(EVAL_REPS):
                 jitter_seed = EVAL_JITTER_BASE + eval_rep
-                _, classes = _heldout_readout(
-                    models["standard"], circuit, jitter_seed=jitter_seed
-                )
+                _, classes = _heldout_readout(models["standard"], circuit, jitter_seed=jitter_seed)
                 for rule, model in models.items():
                     readout, paired_classes = _heldout_readout(
                         model, circuit, jitter_seed=jitter_seed
