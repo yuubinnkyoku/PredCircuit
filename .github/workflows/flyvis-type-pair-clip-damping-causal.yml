@@ -1,0 +1,173 @@
+name: FlyVis type-pair clip damping causal
+
+on:
+  push:
+    paths:
+      - ".github/triggers/run-type-pair-clip-damping-causal-1950-1969"
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [1950, 1951, 1952, 1953, 1954, 1955, 1956, 1957, 1958, 1959, 1960, 1961, 1962, 1963, 1964, 1965, 1966, 1967, 1968, 1969]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Run clip damping causal diagnostic for seed ${{ matrix.seed }}
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run python scripts/diagnose_flyvis_type_pair_clip_damping_causal.py \
+            --seed ${{ matrix.seed }} \
+            --out results/generated/flyvis_type_pair_clip_damping_causal_seed${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: type-pair-clip-damping-causal-seed${{ matrix.seed }}
+          path: results/generated/flyvis_type_pair_clip_damping_causal_seed${{ matrix.seed }}.csv
+
+  aggregate:
+    needs: diagnose
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: type-pair-clip-damping-causal-seed*
+          path: artifacts
+          merge-multiple: true
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Aggregate clip damping causal diagnostic
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run --with scipy python - <<'PY'
+          from pathlib import Path
+          import numpy as np
+          import pandas as pd
+          from scipy import stats
+
+          paths = sorted(Path("artifacts").glob("*.csv"))
+          if len(paths) != 20:
+              raise RuntimeError(f"expected 20 seed artifacts, got {len(paths)}")
+          frame = pd.concat([pd.read_csv(path) for path in paths], ignore_index=True)
+          if len(frame) != 240:
+              raise RuntimeError(f"expected 240 rows, got {len(frame)}")
+          if frame["seed"].nunique() != 20:
+              raise RuntimeError("expected 20 unique seeds")
+          if not frame["finite"].all():
+              raise RuntimeError("non-finite clip-damping result detected")
+          frame.to_csv(
+              "results/generated/flyvis_type_pair_clip_damping_causal.csv",
+              index=False,
+          )
+
+          metrics = (
+              "cross_entropy",
+              "accuracy",
+              "hard_margin",
+              "soft_margin",
+              "weight_norm",
+          )
+          pivot = frame.pivot(
+              index=["seed", "init_scale"], columns="rule", values=list(metrics)
+          )
+          pivot.columns = [f"{metric}_{rule}" for metric, rule in pivot.columns]
+          pivot = pivot.reset_index()
+          contrasts = (
+              (
+                  "matched_clip_minus_clip",
+                  "standard_clip_groupnorm",
+                  "standard_clip",
+              ),
+              (
+                  "group_rescale_minus_matched_clip",
+                  "standard_group_rescale",
+                  "standard_clip_groupnorm",
+              ),
+              (
+                  "group_rescale_minus_clip",
+                  "standard_group_rescale",
+                  "standard_clip",
+              ),
+              (
+                  "matched_clip_minus_local",
+                  "standard_clip_groupnorm",
+                  "local",
+              ),
+              (
+                  "group_rescale_minus_local",
+                  "standard_group_rescale",
+                  "local",
+              ),
+              ("clip_minus_local", "standard_clip", "local"),
+          )
+          rows = []
+          for scale, subset in pivot.groupby("init_scale"):
+              for name, left, right in contrasts:
+                  for metric in metrics:
+                      values = (
+                          subset[f"{metric}_{left}"] - subset[f"{metric}_{right}"]
+                      ).to_numpy(float)
+                      mean = float(values.mean())
+                      std = float(values.std(ddof=1))
+                      if std > 0.0:
+                          ci_low, ci_high = stats.t.interval(
+                              0.95,
+                              len(values) - 1,
+                              loc=mean,
+                              scale=std / np.sqrt(len(values)),
+                          )
+                          p = float(stats.ttest_1samp(values, 0.0).pvalue)
+                          try:
+                              w_p = float(stats.wilcoxon(values).pvalue)
+                          except ValueError:
+                              w_p = float("nan")
+                          dz = mean / std
+                      else:
+                          ci_low = ci_high = mean
+                          p = 1.0 if mean == 0.0 else 0.0
+                          w_p = p
+                          dz = float("nan")
+                      rows.append(
+                          {
+                              "init_scale": float(scale),
+                              "contrast": name,
+                              "metric": metric,
+                              "n": len(values),
+                              "mean": mean,
+                              "ci_low": float(ci_low),
+                              "ci_high": float(ci_high),
+                              "positive": int((values > 0.0).sum()),
+                              "negative": int((values < 0.0).sum()),
+                              "t_p": p,
+                              "wilcoxon_p": w_p,
+                              "cohen_dz": dz,
+                          }
+                      )
+          pd.DataFrame(rows).to_csv(
+              "results/generated/flyvis_type_pair_clip_damping_causal_summary.csv",
+              index=False,
+          )
+
+          geometry_columns = [
+              column for column in frame.columns if column.startswith("branch_")
+          ]
+          frame[["seed", "init_scale", *geometry_columns]].drop_duplicates().to_csv(
+              "results/generated/flyvis_type_pair_clip_damping_causal_geometry.csv",
+              index=False,
+          )
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-type-pair-clip-damping-causal-aggregate
+          path: |
+            results/generated/flyvis_type_pair_clip_damping_causal.csv
+            results/generated/flyvis_type_pair_clip_damping_causal_summary.csv
+            results/generated/flyvis_type_pair_clip_damping_causal_geometry.csv
