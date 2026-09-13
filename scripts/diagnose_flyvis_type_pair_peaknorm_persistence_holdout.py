@@ -73,10 +73,10 @@ def _persistent_peaknorm_update(
         weights.append(len(indices))
 
     total_weight = max(sum(weights), 1)
-    weighted_multiplier = sum(
-        value * weight
-        for value, weight in zip(multipliers, weights, strict=True)
-    ) / total_weight
+    weighted_multiplier = (
+        sum(value * weight for value, weight in zip(multipliers, weights, strict=True))
+        / total_weight
+    )
     return applied, {
         "mean_multiplier": float(sum(multipliers) / max(len(multipliers), 1)),
         "edge_weighted_multiplier": float(weighted_multiplier),
@@ -113,9 +113,7 @@ def _apply_persistent_peaknorm(
     return diagnostics
 
 
-def run_seed(
-    *, seed: int, learning_rate: float = 160.0, max_update: float = 0.05
-) -> pd.DataFrame:
+def run_seed(*, seed: int, learning_rate: float = 160.0, max_update: float = 0.05) -> pd.DataFrame:
     circuit = graph_from_flyvis_retinotopy(load_flyvis_spec(), extent=2)
     groups = _named_groups(circuit)
     rows: list[dict[str, float | int | bool | str]] = []
@@ -145,9 +143,7 @@ def run_seed(
             epoch = step - 1
             for rule, model in models.items():
                 raw_edge, raw_bias = credit(model, circuit, seed=seed, epoch=epoch)
-                direction = raw_edge if rule == "local" else _standard_direction(
-                    raw_edge, groups
-                )
+                direction = raw_edge if rule == "local" else _standard_direction(raw_edge, groups)
                 if rule in {"local", "standard"}:
                     apply_local_credit(
                         model,
@@ -176,9 +172,7 @@ def run_seed(
 
             for eval_rep in range(EVAL_REPS):
                 jitter_seed = EVAL_JITTER_BASE + eval_rep
-                _, classes = _heldout_readout(
-                    models["local"], circuit, jitter_seed=jitter_seed
-                )
+                _, classes = _heldout_readout(models["local"], circuit, jitter_seed=jitter_seed)
                 for rule, model in models.items():
                     readout, paired_classes = _heldout_readout(
                         model, circuit, jitter_seed=jitter_seed
@@ -187,26 +181,16 @@ def run_seed(
                         raise RuntimeError("held-out class mismatch")
                     weight = model.weight.detach().clone().requires_grad_(True)
                     bias = model.bias.detach().clone()
-                    ce, hard_margin, soft_margin = _heldout_objectives(
-                        circuit, weight, bias
-                    )
+                    ce, hard_margin, soft_margin = _heldout_objectives(circuit, weight, bias)
                     values = {
                         "cross_entropy": float(ce.detach()),
-                        "accuracy": float(
-                            (readout.argmax(dim=1) == classes).float().mean()
-                        ),
+                        "accuracy": float((readout.argmax(dim=1) == classes).float().mean()),
                         "hard_margin": float(hard_margin.detach()),
                         "soft_margin": float(soft_margin.detach()),
-                        "weight_norm": float(
-                            torch.linalg.vector_norm(model.weight.detach())
-                        ),
+                        "weight_norm": float(torch.linalg.vector_norm(model.weight.detach())),
                     }
                     diagnostics = {
-                        key: (
-                            diag_sums[rule][key] / step
-                            if rule in PERSISTENCE
-                            else math.nan
-                        )
+                        key: (diag_sums[rule][key] / step if rule in PERSISTENCE else math.nan)
                         for key in diag_sums[rule]
                     }
                     finite = (
