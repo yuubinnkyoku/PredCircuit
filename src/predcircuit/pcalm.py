@@ -6,7 +6,6 @@ from typing import Literal
 
 import torch
 
-
 WeightCreditTiming = Literal["pre_dual_energy", "post_dual_energy"]
 MethodFamily = Literal["bp", "pc", "pcalm"]
 
