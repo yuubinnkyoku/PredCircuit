@@ -1,0 +1,177 @@
+name: FlyVis type-pair assignment shuffle reuse cohorts
+
+on:
+  push:
+    paths:
+      - ".github/triggers/run-type-pair-assignment-shuffle-reuse-2250-2289"
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  holdout:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [2250, 2251, 2252, 2253, 2254, 2255, 2256, 2257, 2258, 2259, 2260, 2261, 2262, 2263, 2264, 2265, 2266, 2267, 2268, 2269, 2270, 2271, 2272, 2273, 2274, 2275, 2276, 2277, 2278, 2279, 2280, 2281, 2282, 2283, 2284, 2285, 2286, 2287, 2288, 2289]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Run shuffle-only reuse diagnostic for seed ${{ matrix.seed }}
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run python scripts/diagnose_flyvis_type_pair_selective_assignment_shuffle_reuse.py \
+            --seed ${{ matrix.seed }} \
+            --out results/generated/flyvis_type_pair_assignment_shuffle_reuse_seed${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: type-pair-assignment-shuffle-reuse-seed${{ matrix.seed }}
+          path: results/generated/flyvis_type_pair_assignment_shuffle_reuse_seed${{ matrix.seed }}.csv
+
+  aggregate:
+    needs: holdout
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: type-pair-assignment-shuffle-reuse-seed*
+          path: artifacts/current
+          merge-multiple: true
+      - name: Download existing positive-cohort aggregates
+        shell: bash
+        run: |
+          mkdir -p artifacts/prior/phase artifacts/prior/preservation
+          gh run download 34794948618 \
+            --repo "${{ github.repository }}" \
+            --name flyvis-type-pair-selective-phase-factorial-aggregate \
+            --dir artifacts/prior/phase
+          gh run download 34798235614 \
+            --repo "${{ github.repository }}" \
+            --name flyvis-type-pair-selective-preservation-factorial-aggregate \
+            --dir artifacts/prior/preservation
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Aggregate with reused soft/global results
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run --with scipy python - <<'PY'
+          from pathlib import Path
+
+          import numpy as np
+          import pandas as pd
+          from scipy import stats
+
+          current_paths = sorted(Path("artifacts/current").glob("*.csv"))
+          if len(current_paths) != 40:
+              raise RuntimeError(f"expected 40 new shuffle artifacts, got {len(current_paths)}")
+          shuffle = pd.concat([pd.read_csv(path) for path in current_paths], ignore_index=True)
+          if len(shuffle) != 160 or shuffle["seed"].nunique() != 40:
+              raise RuntimeError("unexpected shuffle-only artifact shape")
+          if not shuffle["finite"].all():
+              raise RuntimeError("non-finite shuffle-only result detected")
+          for column in ("early_matched_l2_relative_error", "late_matched_l2_relative_error"):
+              maximum = float(shuffle[column].max())
+              if maximum > 2e-5:
+                  raise RuntimeError(f"{column} exceeded 2e-5: {maximum}")
+
+          phase = pd.read_csv(
+              "artifacts/prior/phase/flyvis_type_pair_selective_phase_factorial_holdout.csv"
+          )
+          preservation = pd.read_csv(
+              "artifacts/prior/preservation/"
+              "flyvis_type_pair_selective_preservation_factorial_holdout.csv"
+          )
+          phase = phase.loc[
+              phase["seed"].between(2250, 2269)
+              & phase["policy"].isin(["soft_global", "global_global"])
+          ].copy()
+          preservation = preservation.loc[
+              preservation["seed"].between(2270, 2289)
+              & preservation["policy"].isin(["soft_global", "global_global"])
+          ].copy()
+          prior = pd.concat([phase, preservation], ignore_index=True)
+          if len(prior) != 320 or prior["seed"].nunique() != 40:
+              raise RuntimeError("unexpected reused prior artifact shape")
+          if not prior["finite"].all():
+              raise RuntimeError("non-finite reused prior result detected")
+
+          combined = pd.concat([prior, shuffle], ignore_index=True, sort=False)
+          metrics = ["cross_entropy", "accuracy", "hard_margin", "soft_margin", "weight_norm"]
+          seed_mean = combined.groupby(["seed", "policy"], as_index=False)[metrics].mean()
+          pivot = seed_mean.pivot(index="seed", columns="policy", values=metrics)
+          if len(pivot) != 40:
+              raise RuntimeError("expected 40 paired seeds after reuse merge")
+
+          def summarize(values: np.ndarray) -> dict[str, float | int]:
+              mean = float(values.mean())
+              std = float(values.std(ddof=1))
+              ci_low, ci_high = stats.t.interval(
+                  0.95,
+                  len(values) - 1,
+                  loc=mean,
+                  scale=std / np.sqrt(len(values)),
+              )
+              try:
+                  wilcoxon_p = float(stats.wilcoxon(values).pvalue)
+              except ValueError:
+                  wilcoxon_p = float("nan")
+              return {
+                  "n": len(values),
+                  "mean": mean,
+                  "ci_low": float(ci_low),
+                  "ci_high": float(ci_high),
+                  "positive": int((values > 0.0).sum()),
+                  "negative": int((values < 0.0).sum()),
+                  "t_p": float(stats.ttest_1samp(values, 0.0).pvalue),
+                  "wilcoxon_p": wilcoxon_p,
+                  "cohen_dz": mean / std if std > 0.0 else float("nan"),
+              }
+
+          rows = []
+          for cohort, subset in (
+              ("all_2250_2289", pivot),
+              ("phase_2250_2269", pivot.loc[2250:2269]),
+              ("preservation_2270_2289", pivot.loc[2270:2289]),
+          ):
+              for left, right in (
+                  ("soft_global", "shuffle_global"),
+                  ("shuffle_global", "global_global"),
+                  ("soft_global", "global_global"),
+              ):
+                  for metric in metrics:
+                      values = (subset[metric][left] - subset[metric][right]).to_numpy(float)
+                      rows.append(
+                          {
+                              "cohort": cohort,
+                              "contrast": f"{left}-{right}",
+                              "metric": metric,
+                              **summarize(values),
+                          }
+                      )
+
+          combined.to_csv(
+              "results/generated/flyvis_type_pair_assignment_shuffle_reuse_holdout.csv",
+              index=False,
+          )
+          pd.DataFrame(rows).to_csv(
+              "results/generated/flyvis_type_pair_assignment_shuffle_reuse_summary.csv",
+              index=False,
+          )
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-type-pair-assignment-shuffle-reuse-aggregate
+          path: |
+            results/generated/flyvis_type_pair_assignment_shuffle_reuse_holdout.csv
+            results/generated/flyvis_type_pair_assignment_shuffle_reuse_summary.csv
