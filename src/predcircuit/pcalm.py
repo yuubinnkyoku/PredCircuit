@@ -232,7 +232,9 @@ def run_pc(
         )
         if record_trace:
             assert trace is not None
-            residual_norms, dual_norms, max_abs_dual, finite = _trace_snapshot(model, x, free, duals)
+            residual_norms, dual_norms, max_abs_dual, finite = _trace_snapshot(
+                model, x, free, duals
+            )
             trace.residual_norms.append(residual_norms)
             trace.dual_norms.append(dual_norms)
             trace.max_abs_dual.append(max_abs_dual)
