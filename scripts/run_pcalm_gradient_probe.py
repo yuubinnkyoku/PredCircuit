@@ -67,19 +67,26 @@ def main() -> None:
             rho=args.rho,
         )
 
+        weight_scalars = sum(weight.numel() for weight in model.weights)
+        hidden_scalars = args.batch_size * (depth - 1) * args.width
+        scalar_bytes = x.element_size()
+
         for budget in budgets:
+            total_primal_steps = budget * args.inner_steps
             for method in ("pc", "pcalm"):
                 if method == "pc":
-                    schedule = Schedule("pc", budget=budget * args.inner_steps)
+                    schedule = Schedule("pc", budget=total_primal_steps)
                     _, _, trace = run_pc(
                         model,
                         x,
                         y,
                         state_lr=args.state_lr,
                         rho=args.rho,
-                        steps=budget * args.inner_steps,
+                        steps=total_primal_steps,
                         record_trace=True,
                     )
+                    persistent_state_scalars = hidden_scalars
+                    dual_scalar_updates = 0
                 else:
                     schedule = Schedule(
                         "pcalm",
@@ -98,6 +105,8 @@ def main() -> None:
                         inner_steps=args.inner_steps,
                         record_trace=True,
                     )
+                    persistent_state_scalars = 2 * hidden_scalars
+                    dual_scalar_updates = budget * hidden_scalars
 
                 grad = method_grad(
                     model,
@@ -115,7 +124,7 @@ def main() -> None:
                         "width": args.width,
                         "budget": budget,
                         "inner_steps": args.inner_steps,
-                        "total_primal_steps": budget * args.inner_steps,
+                        "total_primal_steps": total_primal_steps,
                         "gradient_cosine_to_bp": gradient_cosine(grad, bp),
                         "gradient_relative_error_to_bp": gradient_relative_error(grad, bp),
                         "finite": trace.finite,
@@ -123,6 +132,15 @@ def main() -> None:
                         "final_mean_residual_norm": (
                             sum(trace.residual_norms[-1]) / len(trace.residual_norms[-1])
                         ),
+                        "weight_scalars": weight_scalars,
+                        "persistent_state_scalars_min": persistent_state_scalars,
+                        "persistent_state_bytes_min": persistent_state_scalars * scalar_bytes,
+                        # Each primal step needs prediction and reverse credit matvecs.
+                        # This is a bookkeeping estimate, not a cycle-accurate hardware count.
+                        "local_matvec_macs_estimate": (
+                            2 * weight_scalars * args.batch_size * total_primal_steps
+                        ),
+                        "dual_scalar_updates": dual_scalar_updates,
                     }
                 )
 
