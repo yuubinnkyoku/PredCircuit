@@ -33,21 +33,15 @@ def main() -> None:
         mean_max_abs_dual=("max_abs_dual_seen", "mean"),
     )
 
-    per_seed_leak = (
-        frame.groupby(["seed", "dual_leak"], as_index=False)
-        .agg(
-            any_useful=("useful_first_layer_credit", "max"),
-            useful_budget_count=("useful_first_layer_credit", "sum"),
-        )
+    per_seed_leak = frame.groupby(["seed", "dual_leak"], as_index=False).agg(
+        any_useful=("useful_first_layer_credit", "max"),
+        useful_budget_count=("useful_first_layer_credit", "sum"),
     )
-    leak_summary = (
-        per_seed_leak.groupby("dual_leak", as_index=False)
-        .agg(
-            oracle_seed_count=("any_useful", "sum"),
-            oracle_seed_rate=("any_useful", "mean"),
-            mean_useful_budget_count=("useful_budget_count", "mean"),
-            median_useful_budget_count=("useful_budget_count", "median"),
-        )
+    leak_summary = per_seed_leak.groupby("dual_leak", as_index=False).agg(
+        oracle_seed_count=("any_useful", "sum"),
+        oracle_seed_rate=("any_useful", "mean"),
+        mean_useful_budget_count=("useful_budget_count", "mean"),
+        median_useful_budget_count=("useful_budget_count", "median"),
     )
 
     best_fixed = summary.loc[summary.groupby("dual_leak")["useful_count"].idxmax()].copy()
