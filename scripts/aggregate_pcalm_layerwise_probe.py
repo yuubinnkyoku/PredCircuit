@@ -70,7 +70,7 @@ def main() -> None:
                 "budget": int(budget),
                 "layer": int(layer),
                 "distance_from_output": int(distance),
-                "n": int(len(finite_diff)),
+                "n": len(finite_diff),
                 "mean_cosine_pc": float(group["pc"].mean()),
                 "mean_cosine_pcalm": float(group["pcalm"].mean()),
                 "mean_diff": mean,
@@ -93,7 +93,7 @@ def main() -> None:
         for threshold in (0.8, 0.9):
             reached = group[group["layer_gradient_cosine_to_bp"] >= threshold]
             suffix = str(threshold).replace(".", "p")
-            row[f"layers_ge_{suffix}"] = int(len(reached))
+            row[f"layers_ge_{suffix}"] = len(reached)
             row[f"max_distance_ge_{suffix}"] = (
                 int(reached["distance_from_output"].max()) if len(reached) else -1
             )
