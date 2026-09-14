@@ -16,7 +16,7 @@ METRICS = [
     "first_layer_grad_norm_ratio_to_bp",
     "final_residual_total",
     "late_residual_cv",
-    "max_abs_post_dual",
+    "max_abs_post_dual_over_trace",
     "max_abs_weight_credit_dual",
 ]
 
@@ -42,23 +42,24 @@ def main() -> None:
     seed_count = all_rows["seed"].nunique()
     if seed_count != args.expected_seeds:
         raise RuntimeError(f"expected {args.expected_seeds} distinct seeds, found {seed_count}")
-    if not bool(all_rows["finite"].all()):
-        bad = all_rows.loc[~all_rows["finite"]]
-        raise RuntimeError(f"non-finite sweep rows:\n{bad.to_string(index=False)}")
 
     records: list[dict[str, float | int | str]] = []
     for key, group in all_rows.groupby(KEYS, dropna=False, sort=True):
         record: dict[str, float | int | str] = dict(zip(KEYS, key, strict=True))
         record["n"] = len(group)
+        record["finite_rate"] = float(group["finite"].mean())
         record["useful_credit_rate"] = float(group["useful_first_layer_credit"].mean())
+        finite_group = group[group["finite"]]
         for metric in METRICS:
-            record[f"{metric}_mean"] = float(group[metric].mean())
-            record[f"{metric}_ci95"] = ci95(group[metric])
+            record[f"{metric}_mean"] = float(finite_group[metric].mean())
+            record[f"{metric}_ci95"] = ci95(finite_group[metric])
         records.append(record)
     summary = pd.DataFrame(records)
 
     pcalm = summary[summary["method"] == "pcalm"].copy()
-    qualifying = pcalm[pcalm["useful_credit_rate"] >= 0.8].copy()
+    qualifying = pcalm[
+        (pcalm["finite_rate"] == 1.0) & (pcalm["useful_credit_rate"] >= 0.8)
+    ].copy()
     if not qualifying.empty:
         qualifying = qualifying.sort_values(
             [
@@ -72,7 +73,9 @@ def main() -> None:
 
     minima_rows: list[pd.Series] = []
     for _, group in pcalm.groupby(["state_lr", "rho", "alpha"], sort=True):
-        passed = group[group["useful_credit_rate"] >= 0.8].sort_values("budget")
+        passed = group[
+            (group["finite_rate"] == 1.0) & (group["useful_credit_rate"] >= 0.8)
+        ].sort_values("budget")
         if not passed.empty:
             minima_rows.append(passed.iloc[0])
     minima = pd.DataFrame(minima_rows, columns=summary.columns)
@@ -123,6 +126,7 @@ def main() -> None:
             "rho",
             "alpha",
             "budget",
+            "finite_rate",
             "useful_credit_rate",
             "first_layer_gradient_cosine_to_bp_mean",
             "first_layer_grad_norm_ratio_to_bp_mean",
