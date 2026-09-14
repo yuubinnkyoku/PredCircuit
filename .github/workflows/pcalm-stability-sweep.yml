@@ -1,0 +1,70 @@
+name: PC-ALM depth-32 stability sweep
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/pcalm-stability-sweep.yml"
+      - "scripts/run_pcalm_stability_sweep.py"
+      - "scripts/aggregate_pcalm_stability_sweep.py"
+      - "src/predcircuit/pcalm.py"
+
+jobs:
+  sweep:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [200, 201, 202, 203, 204, 205, 206, 207, 208, 209]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync --extra malecns
+      - name: Run fresh hold-out coefficient sweep
+        run: |
+          uv run python scripts/run_pcalm_stability_sweep.py \
+            --depth 32 \
+            --width 8 \
+            --activation relu \
+            --budgets 16,32,48,64 \
+            --state-lrs 0.125,0.25 \
+            --rhos 0.5,1.0,2.0 \
+            --alphas 0.5,1.0 \
+            --seed ${{ matrix.seed }} \
+            --out results/generated/pcalm_stability_sweep_seed${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pcalm-stability-sweep-seed-${{ matrix.seed }}
+          path: results/generated/pcalm_stability_sweep_seed${{ matrix.seed }}.csv
+          if-no-files-found: error
+
+  aggregate:
+    needs: sweep
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync --extra malecns
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: pcalm-stability-sweep-seed-*
+          path: artifacts
+          merge-multiple: true
+      - name: Aggregate sweep and select minimum T
+        run: |
+          uv run python scripts/aggregate_pcalm_stability_sweep.py \
+            --input artifacts \
+            --expected-seeds 10 \
+            --out-dir results/generated
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pcalm-stability-sweep-aggregate
+          path: |
+            results/generated/pcalm_stability_all.csv
+            results/generated/pcalm_stability_summary.csv
+            results/generated/pcalm_stability_qualifying.csv
+            results/generated/pcalm_stability_minimum_t.csv
+            results/generated/pcalm_stability_paired.csv
+          if-no-files-found: error
