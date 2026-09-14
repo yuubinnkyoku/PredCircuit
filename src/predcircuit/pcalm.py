@@ -177,10 +177,7 @@ def _solve_inner(
         variables = [z.detach().requires_grad_(True) for z in current]
         energy = al_energy_shifted(model, x, y, variables, fixed_duals, rho=rho)
         grads = torch.autograd.grad(energy, variables)
-        current = [
-            (z - effective_lr * g).detach()
-            for z, g in zip(variables, grads, strict=True)
-        ]
+        current = [(z - effective_lr * g).detach() for z, g in zip(variables, grads, strict=True)]
     return current
 
 
@@ -216,9 +213,7 @@ def run_pc(
 
     if record_trace:
         assert trace is not None
-        residual_norms, dual_norms, max_abs_dual, finite = _trace_snapshot(
-            model, x, free, duals
-        )
+        residual_norms, dual_norms, max_abs_dual, finite = _trace_snapshot(model, x, free, duals)
         trace.residual_norms.append(residual_norms)
         trace.dual_norms.append(dual_norms)
         trace.max_abs_dual.append(max_abs_dual)
@@ -237,9 +232,7 @@ def run_pc(
         )
         if record_trace:
             assert trace is not None
-            residual_norms, dual_norms, max_abs_dual, finite = _trace_snapshot(
-                model, x, free, duals
-            )
+            residual_norms, dual_norms, max_abs_dual, finite = _trace_snapshot(model, x, free, duals)
             trace.residual_norms.append(residual_norms)
             trace.dual_norms.append(dual_norms)
             trace.max_abs_dual.append(max_abs_dual)
@@ -273,9 +266,7 @@ def run_pcalm(
 
     if record_trace:
         assert trace is not None
-        residual_norms, dual_norms, max_abs_dual, finite = _trace_snapshot(
-            model, x, free, duals
-        )
+        residual_norms, dual_norms, max_abs_dual, finite = _trace_snapshot(model, x, free, duals)
         trace.residual_norms.append(residual_norms)
         trace.dual_norms.append(dual_norms)
         trace.max_abs_dual.append(max_abs_dual)
