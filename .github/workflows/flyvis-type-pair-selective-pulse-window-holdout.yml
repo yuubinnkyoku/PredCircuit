@@ -1,0 +1,140 @@
+name: FlyVis type-pair selective pulse-window holdout
+
+on:
+  push:
+    paths:
+      - ".github/triggers/run-type-pair-selective-pulse-window-2230-2249"
+  workflow_dispatch:
+
+jobs:
+  holdout:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [2230, 2231, 2232, 2233, 2234, 2235, 2236, 2237, 2238, 2239, 2240, 2241, 2242, 2243, 2244, 2245, 2246, 2247, 2248, 2249]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Run pulse-window holdout for seed ${{ matrix.seed }}
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run python scripts/diagnose_flyvis_type_pair_selective_pulse_window_holdout.py \
+            --seed ${{ matrix.seed }} \
+            --out results/generated/flyvis_type_pair_selective_pulse_window_seed${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: type-pair-selective-pulse-window-seed${{ matrix.seed }}
+          path: results/generated/flyvis_type_pair_selective_pulse_window_seed${{ matrix.seed }}.csv
+
+  aggregate:
+    needs: holdout
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: type-pair-selective-pulse-window-seed*
+          path: artifacts
+          merge-multiple: true
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Aggregate pulse-window holdout
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run --with scipy python - <<'PY'
+          from pathlib import Path
+          import numpy as np
+          import pandas as pd
+          from scipy import stats
+
+          paths = sorted(Path("artifacts").glob("*.csv"))
+          if len(paths) != 20:
+              raise RuntimeError(f"expected 20 seed artifacts, got {len(paths)}")
+          frame = pd.concat([pd.read_csv(path) for path in paths], ignore_index=True)
+          if len(frame) != 1440:
+              raise RuntimeError(f"expected 1440 rows, got {len(frame)}")
+          if frame["seed"].nunique() != 20:
+              raise RuntimeError("expected 20 unique seeds")
+          if not frame["finite"].all():
+              raise RuntimeError("non-finite pulse-window result detected")
+          global_rows = frame[frame["rule"] == "global035"]
+          if global_rows["matched_l2_relative_error"].max() > 2e-5:
+              raise RuntimeError("global L2 match relative error exceeded 2e-5")
+          frame.to_csv(
+              "results/generated/flyvis_type_pair_selective_pulse_window_holdout.csv",
+              index=False,
+          )
+
+          metrics = ["cross_entropy", "accuracy", "hard_margin", "soft_margin", "weight_norm"]
+          seed_mean = frame.groupby(
+              ["seed", "window_start", "window_end", "rule"], as_index=False
+          )[metrics].mean()
+          comparisons = [
+              ("soft035", "global035"),
+              ("soft035", "standard"),
+              ("global035", "standard"),
+          ]
+          rows = []
+          for (window_start, window_end), subset in seed_mean.groupby(
+              ["window_start", "window_end"]
+          ):
+              pivot = subset.pivot(index="seed", columns="rule", values=metrics)
+              for left, right in comparisons:
+                  for metric in metrics:
+                      values = (pivot[metric][left] - pivot[metric][right]).to_numpy(float)
+                      if len(values) != 20:
+                          raise RuntimeError("paired comparison lost a seed")
+                      mean = float(values.mean())
+                      std = float(values.std(ddof=1))
+                      if std > 0.0:
+                          ci_low, ci_high = stats.t.interval(
+                              0.95,
+                              len(values) - 1,
+                              loc=mean,
+                              scale=std / np.sqrt(len(values)),
+                          )
+                          p = float(stats.ttest_1samp(values, 0.0).pvalue)
+                          try:
+                              w_p = float(stats.wilcoxon(values).pvalue)
+                          except ValueError:
+                              w_p = float("nan")
+                          dz = mean / std
+                      else:
+                          ci_low = ci_high = mean
+                          p = 1.0 if mean == 0.0 else 0.0
+                          w_p = p
+                          dz = float("nan")
+                      rows.append(
+                          {
+                              "window_start": int(window_start),
+                              "window_end": int(window_end),
+                              "comparison": f"{left}-{right}",
+                              "metric": metric,
+                              "n": len(values),
+                              "mean": mean,
+                              "ci_low": float(ci_low),
+                              "ci_high": float(ci_high),
+                              "positive": int((values > 0.0).sum()),
+                              "negative": int((values < 0.0).sum()),
+                              "t_p": p,
+                              "wilcoxon_p": w_p,
+                              "cohen_dz": dz,
+                          }
+                      )
+          pd.DataFrame(rows).to_csv(
+              "results/generated/flyvis_type_pair_selective_pulse_window_summary.csv",
+              index=False,
+          )
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-type-pair-selective-pulse-window-aggregate
+          path: |
+            results/generated/flyvis_type_pair_selective_pulse_window_holdout.csv
+            results/generated/flyvis_type_pair_selective_pulse_window_summary.csv
