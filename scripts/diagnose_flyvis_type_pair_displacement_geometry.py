@@ -91,9 +91,7 @@ def run_seed(*, seed: int, learning_rate: float = 160.0, max_update: float = 0.0
 
         displacement = (soft_model.weight - global_model.weight).detach()
         displacement_l2 = float(torch.linalg.vector_norm(displacement))
-        bias_displacement_l2 = float(
-            torch.linalg.vector_norm(soft_model.bias - global_model.bias)
-        )
+        bias_displacement_l2 = float(torch.linalg.vector_norm(soft_model.bias - global_model.bias))
         soft_values = _objective_values(circuit, soft_model.weight, soft_model.bias)
         global_values = _objective_values(circuit, global_model.weight, global_model.bias)
         soft_grads = _gradient_geometry(circuit, soft_model)
@@ -115,16 +113,10 @@ def run_seed(*, seed: int, learning_rate: float = 160.0, max_update: float = 0.0
             soft_dot = float(torch.dot(soft_grad, displacement))
             values[f"global_{name}_grad_dot_displacement"] = global_dot
             values[f"soft_{name}_grad_dot_displacement"] = soft_dot
-            values[f"global_{name}_grad_cos_displacement"] = _cosine(
-                global_grad, displacement
-            )
-            values[f"soft_{name}_grad_cos_displacement"] = _cosine(
-                soft_grad, displacement
-            )
+            values[f"global_{name}_grad_cos_displacement"] = _cosine(global_grad, displacement)
+            values[f"soft_{name}_grad_cos_displacement"] = _cosine(soft_grad, displacement)
             observed = values[
-                "observed_ce_difference"
-                if name == "ce"
-                else f"observed_{name}_difference"
+                "observed_ce_difference" if name == "ce" else f"observed_{name}_difference"
             ]
             values[f"global_{name}_linearization_residual"] = observed - global_dot
             values[f"soft_{name}_linearization_residual"] = observed - soft_dot
