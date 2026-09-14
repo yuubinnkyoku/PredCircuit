@@ -1,0 +1,38 @@
+name: PC-ALM depth gradient probe
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/pcalm-gradient-probe.yml"
+
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync --extra malecns
+      - name: Run matched-primal-step gradient probe
+        run: |
+          uv run python scripts/run_pcalm_gradient_probe.py \
+            --depths 8,16,32 \
+            --budgets 4,8,16,32,64 \
+            --width 8 \
+            --activation relu \
+            --state-lr 0.25 \
+            --rho 1.0 \
+            --alpha 1.0 \
+            --inner-steps 1 \
+            --seed ${{ matrix.seed }} \
+            --out results/generated/pcalm_gradient_probe_seed${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pcalm-gradient-probe-seed-${{ matrix.seed }}
+          path: results/generated/pcalm_gradient_probe_seed${{ matrix.seed }}.csv
+          if-no-files-found: error
