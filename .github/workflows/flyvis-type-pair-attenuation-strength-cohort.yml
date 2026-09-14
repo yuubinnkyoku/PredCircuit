@@ -1,0 +1,306 @@
+name: FlyVis type-pair attenuation strength cohort
+
+on:
+  push:
+    paths:
+      - ".github/triggers/run-type-pair-attenuation-strength-cohort-2250-2329"
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [2250, 2251, 2252, 2253, 2254, 2255, 2256, 2257, 2258, 2259, 2260, 2261, 2262, 2263, 2264, 2265, 2266, 2267, 2268, 2269, 2270, 2271, 2272, 2273, 2274, 2275, 2276, 2277, 2278, 2279, 2280, 2281, 2282, 2283, 2284, 2285, 2286, 2287, 2288, 2289, 2310, 2311, 2312, 2313, 2314, 2315, 2316, 2317, 2318, 2319, 2320, 2321, 2322, 2323, 2324, 2325, 2326, 2327, 2328, 2329]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Measure attenuation strength for seed ${{ matrix.seed }}
+        shell: bash
+        env:
+          PYTHONPATH: scripts
+        run: |
+          mkdir -p results/generated
+          uv run python - --seed ${{ matrix.seed }} --out results/generated/flyvis_type_pair_attenuation_strength_seed${{ matrix.seed }}.csv <<'PY'
+          from __future__ import annotations
+
+          import argparse
+          import math
+          from pathlib import Path
+
+          import pandas as pd
+          import torch
+          from diagnose_flyvis_type_pair_adaptive_mean_gain_holdout import _standard_direction
+          from diagnose_flyvis_type_pair_mi9_causal import _named_groups
+          from diagnose_flyvis_type_pair_peaknorm_global_l2_match_holdout import _candidate_soft_update
+          from run_flyvis_temporal_coherence_gate import apply_local_credit
+          from run_flyvis_type_pair_axis_identity_control import credit
+
+          from predcircuit.flyvis import load_flyvis_spec
+          from predcircuit.flyvis_retinotopy import graph_from_flyvis_retinotopy
+          from predcircuit.model import PredictiveCodingGraph
+
+          FOCUS_START = 140
+          FOCUS_END = 160
+          PROBABILITY = 0.35
+
+          def cosine(left: torch.Tensor, right: torch.Tensor) -> float:
+              denominator = float(torch.linalg.vector_norm(left) * torch.linalg.vector_norm(right))
+              if denominator <= 0.0:
+                  return 1.0
+              return float(torch.dot(left, right) / denominator)
+
+          def effective_fraction(values: torch.Tensor) -> float:
+              total = float(values.sum())
+              squared = float(torch.square(values).sum())
+              if total <= 0.0 or squared <= 0.0:
+                  return 0.0
+              return (total * total / squared) / len(values)
+
+          def top_fraction_mass(values: torch.Tensor, fraction: float) -> float:
+              total = float(values.sum())
+              if total <= 0.0:
+                  return 0.0
+              count = max(1, math.ceil(len(values) * fraction))
+              return float(torch.topk(values, count).values.sum()) / total
+
+          def gini(values: torch.Tensor) -> float:
+              total = float(values.sum())
+              if total <= 0.0:
+                  return 0.0
+              sorted_values = torch.sort(values).values.to(torch.float64)
+              n = len(sorted_values)
+              ranks = torch.arange(1, n + 1, dtype=torch.float64)
+              return float(2.0 * torch.dot(ranks, sorted_values) / (n * total) - (n + 1) / n)
+
+          parser = argparse.ArgumentParser()
+          parser.add_argument("--seed", type=int, required=True)
+          parser.add_argument("--out", type=Path, required=True)
+          args = parser.parse_args()
+
+          circuit = graph_from_flyvis_retinotopy(load_flyvis_spec(), extent=2)
+          groups = _named_groups(circuit)
+          model = PredictiveCodingGraph(
+              circuit.graph,
+              seed=args.seed,
+              init_scale=0.115,
+              use_biological_strength=True,
+          )
+
+          coefficients = []
+          removed = []
+          update_l2_ratios = []
+          for epoch in range(FOCUS_END):
+              raw_edge, raw_bias = credit(model, circuit, seed=args.seed, epoch=epoch)
+              direction = _standard_direction(raw_edge, groups)
+              if epoch >= FOCUS_START:
+                  clipped = (160.0 * direction).clamp(-0.05, 0.05)
+                  soft, diagnostics = _candidate_soft_update(
+                      direction,
+                      learning_rate=160.0,
+                      max_update=0.05,
+                      groups=groups,
+                      probability=PROBABILITY,
+                  )
+                  coefficient = torch.zeros(len(groups), dtype=torch.float64)
+                  removed_l2 = torch.zeros(len(groups), dtype=torch.float64)
+                  for group_idx, (_, _, indices) in enumerate(groups):
+                      clipped_group = clipped[indices]
+                      soft_group = soft[indices]
+                      clipped_norm = float(torch.linalg.vector_norm(clipped_group))
+                      soft_norm = float(torch.linalg.vector_norm(soft_group))
+                      multiplier = soft_norm / clipped_norm if clipped_norm > 0.0 else 1.0
+                      coefficient[group_idx] = max(0.0, 1.0 - multiplier)
+                      removed_l2[group_idx] = float(
+                          torch.linalg.vector_norm(clipped_group - soft_group)
+                      )
+                  coefficients.append(coefficient)
+                  removed.append(removed_l2)
+                  update_l2_ratios.append(diagnostics["update_l2_ratio"])
+              apply_local_credit(
+                  model,
+                  direction,
+                  raw_bias,
+                  learning_rate=160.0,
+                  weight_decay=0.0,
+                  max_update=0.05,
+              )
+
+          coefficient_stack = torch.stack(coefficients)
+          removed_stack = torch.stack(removed)
+          cumulative_coefficient = coefficient_stack.sum(dim=0)
+          cumulative_removed = removed_stack.sum(dim=0)
+          coefficient_cosines = [
+              cosine(coefficient_stack[i], coefficient_stack[i + 1])
+              for i in range(len(coefficients) - 1)
+          ]
+          removed_cosines = [
+              cosine(removed_stack[i], removed_stack[i + 1])
+              for i in range(len(removed) - 1)
+          ]
+          active = coefficient_stack > 0.0
+          values = {
+              "attenuation_mass_mean": float(coefficient_stack.mean()),
+              "attenuation_mass_sd_over_epochs": float(
+                  coefficient_stack.mean(dim=1).std(unbiased=True)
+              ),
+              "active_group_fraction_mean": float(
+                  active.sum(dim=1).to(torch.float64).mean() / len(groups)
+              ),
+              "update_l2_ratio_mean": sum(update_l2_ratios) / len(update_l2_ratios),
+              "coefficient_consecutive_cosine_mean": sum(coefficient_cosines)
+              / len(coefficient_cosines),
+              "removed_l2_consecutive_cosine_mean": sum(removed_cosines) / len(removed_cosines),
+              "cumulative_coefficient_effective_fraction": effective_fraction(
+                  cumulative_coefficient
+              ),
+              "cumulative_coefficient_top10_mass_fraction": top_fraction_mass(
+                  cumulative_coefficient, 0.10
+              ),
+              "cumulative_coefficient_gini": gini(cumulative_coefficient),
+              "cumulative_coefficient_max": float(cumulative_coefficient.max()),
+              "cumulative_removed_l2_effective_fraction": effective_fraction(cumulative_removed),
+              "cumulative_removed_l2_top10_mass_fraction": top_fraction_mass(
+                  cumulative_removed, 0.10
+              ),
+              "cumulative_removed_l2_gini": gini(cumulative_removed),
+              "cumulative_removed_l2_max": float(cumulative_removed.max()),
+              "ever_attenuated_group_fraction": float(
+                  active.any(dim=0).to(torch.float64).mean()
+              ),
+          }
+          finite = (
+              bool(torch.isfinite(model.weight).all())
+              and bool(torch.isfinite(model.bias).all())
+              and bool(torch.isfinite(coefficient_stack).all())
+              and bool(torch.isfinite(removed_stack).all())
+              and all(math.isfinite(value) for value in values.values())
+          )
+          frame = pd.DataFrame([
+              {
+                  "seed": args.seed,
+                  "init_scale": 0.115,
+                  "n_groups": len(groups),
+                  "focus_start": FOCUS_START,
+                  "focus_end_exclusive": FOCUS_END,
+                  **values,
+                  "finite": finite,
+              }
+          ])
+          args.out.parent.mkdir(parents=True, exist_ok=True)
+          frame.to_csv(args.out, index=False)
+          print(frame.to_string(index=False))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: type-pair-attenuation-strength-seed${{ matrix.seed }}
+          path: results/generated/flyvis_type_pair_attenuation_strength_seed${{ matrix.seed }}.csv
+
+  aggregate:
+    needs: diagnose
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: type-pair-attenuation-strength-seed*
+          path: artifacts
+          merge-multiple: true
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Aggregate attenuation-strength cohort contrast
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run --with scipy python - <<'PY'
+          from pathlib import Path
+          import numpy as np
+          import pandas as pd
+          from scipy import stats
+
+          paths = sorted(Path("artifacts").glob("*.csv"))
+          if len(paths) != 60:
+              raise RuntimeError(f"expected 60 seed artifacts, got {len(paths)}")
+          frame = pd.concat([pd.read_csv(path) for path in paths], ignore_index=True)
+          if len(frame) != 60 or frame["seed"].nunique() != 60:
+              raise RuntimeError("expected one row for each of 60 unique seeds")
+          if not frame["finite"].all():
+              raise RuntimeError("non-finite attenuation-strength result detected")
+          frame["cohort"] = np.where(
+              frame["seed"].between(2250, 2289),
+              "positive_2250_2289",
+              "null_2310_2329",
+          )
+          frame.to_csv(
+              "results/generated/flyvis_type_pair_attenuation_strength_cohort.csv",
+              index=False,
+          )
+
+          metrics = [
+              "attenuation_mass_mean",
+              "attenuation_mass_sd_over_epochs",
+              "active_group_fraction_mean",
+              "update_l2_ratio_mean",
+              "coefficient_consecutive_cosine_mean",
+              "removed_l2_consecutive_cosine_mean",
+              "cumulative_coefficient_effective_fraction",
+              "cumulative_coefficient_top10_mass_fraction",
+              "cumulative_coefficient_gini",
+              "cumulative_coefficient_max",
+              "cumulative_removed_l2_effective_fraction",
+              "cumulative_removed_l2_top10_mass_fraction",
+              "cumulative_removed_l2_gini",
+              "cumulative_removed_l2_max",
+              "ever_attenuated_group_fraction",
+          ]
+          pos = frame[frame.cohort == "positive_2250_2289"]
+          null = frame[frame.cohort == "null_2310_2329"]
+          rows = []
+          for metric in metrics:
+              x = pos[metric].to_numpy(float)
+              y = null[metric].to_numpy(float)
+              diff = float(x.mean() - y.mean())
+              vx = float(x.var(ddof=1))
+              vy = float(y.var(ddof=1))
+              se = np.sqrt(vx / len(x) + vy / len(y))
+              if se > 0.0:
+                  df_num = (vx / len(x) + vy / len(y)) ** 2
+                  df_den = (vx / len(x)) ** 2 / (len(x) - 1) + (vy / len(y)) ** 2 / (len(y) - 1)
+                  df = df_num / df_den
+                  q = float(stats.t.ppf(0.975, df))
+                  ci_low = diff - q * se
+                  ci_high = diff + q * se
+              else:
+                  ci_low = ci_high = diff
+              pooled_num = (len(x) - 1) * vx + (len(y) - 1) * vy
+              pooled_den = len(x) + len(y) - 2
+              pooled_sd = np.sqrt(pooled_num / pooled_den) if pooled_num > 0.0 else np.nan
+              d = diff / pooled_sd if pooled_sd > 0.0 else np.nan
+              test = stats.ttest_ind(x, y, equal_var=False)
+              rows.append({
+                  "metric": metric,
+                  "n_positive": len(x),
+                  "n_null": len(y),
+                  "mean_positive": float(x.mean()),
+                  "mean_null": float(y.mean()),
+                  "positive_minus_null": diff,
+                  "ci_low": float(ci_low),
+                  "ci_high": float(ci_high),
+                  "welch_p": float(test.pvalue),
+                  "cohen_d": float(d),
+              })
+          pd.DataFrame(rows).to_csv(
+              "results/generated/flyvis_type_pair_attenuation_strength_cohort_summary.csv",
+              index=False,
+          )
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-type-pair-attenuation-strength-cohort-aggregate
+          path: |
+            results/generated/flyvis_type_pair_attenuation_strength_cohort.csv
+            results/generated/flyvis_type_pair_attenuation_strength_cohort_summary.csv
