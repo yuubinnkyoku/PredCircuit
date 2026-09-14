@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-import diagnose_flyvis_type_pair_selective_gradient_geometry as geometry
+from diagnose_flyvis_type_pair_selective_gradient_geometry import run_seed
 
 
 EARLY_HORIZONS = (120, 140)
@@ -23,12 +23,12 @@ def main() -> None:
     parser.add_argument("--out", type=Path, required=True)
     args = parser.parse_args()
 
-    setattr(geometry, "INIT_SCALES", INIT_SCALES)
-    setattr(geometry, "HORIZONS", EARLY_HORIZONS)
-    frame = geometry.run_seed(
+    frame = run_seed(
         seed=args.seed,
         learning_rate=args.learning_rate,
         max_update=args.max_update,
+        init_scales=INIT_SCALES,
+        horizons=EARLY_HORIZONS,
     )
     args.out.parent.mkdir(parents=True, exist_ok=True)
     frame.to_csv(args.out, index=False)
