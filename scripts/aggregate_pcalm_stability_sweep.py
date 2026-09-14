@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import math
 from pathlib import Path
+from typing import cast
 
 import pandas as pd
 
@@ -45,10 +46,17 @@ def main() -> None:
 
     records: list[dict[str, float | int | str]] = []
     for key, group in all_rows.groupby(KEYS, dropna=False, sort=True):
-        record: dict[str, float | int | str] = dict(zip(KEYS, key, strict=True))
-        record["n"] = len(group)
-        record["finite_rate"] = float(group["finite"].mean())
-        record["useful_credit_rate"] = float(group["useful_first_layer_credit"].mean())
+        method, state_lr, rho, alpha, budget = cast(tuple[str, float, float, float, int], key)
+        record: dict[str, float | int | str] = {
+            "method": method,
+            "state_lr": float(state_lr),
+            "rho": float(rho),
+            "alpha": float(alpha),
+            "budget": int(budget),
+            "n": len(group),
+            "finite_rate": float(group["finite"].mean()),
+            "useful_credit_rate": float(group["useful_first_layer_credit"].mean()),
+        }
         finite_group = group[group["finite"]]
         for metric in METRICS:
             record[f"{metric}_mean"] = float(finite_group[metric].mean())
