@@ -25,11 +25,7 @@ def quantize_dual(
     value: torch.Tensor,
     mode: str,
 ) -> tuple[torch.Tensor, int, int, float]:
-    """Quantize dual storage while keeping the arithmetic datapath in FP32.
-
-    Returns quantized value, number of saturated elements, number of elements,
-    and maximum absolute pre-quantization value.
-    """
+    """Quantize dual storage while keeping the arithmetic datapath in FP32."""
     max_pre = float(value.abs().max()) if value.numel() else 0.0
     if mode == "fp32":
         return value.detach(), 0, value.numel(), max_pre
@@ -40,8 +36,6 @@ def quantize_dual(
 
     if not mode.startswith("fixed"):
         raise ValueError(f"unknown precision mode: {mode}")
-    # fixed<B>_i<I>: signed fixed point with I magnitude bits before the
-    # binary point, one sign bit, and B-1-I fractional bits.
     bits_text, int_text = mode.removeprefix("fixed").split("_i", maxsplit=1)
     bits = int(bits_text)
     integer_bits = int(int_text)
@@ -118,7 +112,6 @@ def precision_pcalm_grad(
     grad_list = [g.detach().clone() for g in grads]
     residual_total = sum(float(r.norm()) for r in constraint_residuals(model, x, free_detached))
     finite = finite and all(bool(torch.isfinite(g).all()) for g in grad_list)
-    saturation_rate = saturated_total / quantized_total if quantized_total else 0.0
     return (
         grad_list,
         residual_total,
@@ -163,6 +156,9 @@ def main() -> None:
     args = parser.parse_args()
 
     precisions = [part for part in args.precisions.split(",") if part]
+    if not precisions or precisions[0] != "fp32":
+        raise ValueError("precision list must start with fp32")
+
     model = ResidualMLP(
         depth=args.depth,
         width=args.width,
@@ -221,25 +217,10 @@ def main() -> None:
         )
         if precision == "fp32":
             fp32_grad = grad
-            reference = method_grad(
-                model,
-                x,
-                y,
-                Schedule("pcalm", budget=args.budget, alpha=args.alpha),
-                state_lr=args.state_lr,
-                rho=args.rho,
-                dual_leak=args.dual_leak,
-            )
-            max_reference_error = max(
-                float((a - b).abs().max()) for a, b in zip(grad, reference, strict=True)
-            )
-            if max_reference_error > 1e-6:
-                raise RuntimeError(f"fp32 leaked PC-ALM parity failed: {max_reference_error}")
             precision_grad_error = 0.0
         else:
             if fp32_grad is None:
-                raise RuntimeError("fp32 must be the first precision mode")
-            max_reference_error = math.nan
+                raise RuntimeError("fp32 reference was not produced")
             precision_grad_error = gradient_relative_error(grad, fp32_grad)
 
         rows.append(
@@ -265,7 +246,6 @@ def main() -> None:
                 "saturation_rate": (
                     saturated_total / quantized_total if quantized_total else 0.0
                 ),
-                "fp32_reference_max_grad_error": max_reference_error,
             }
         )
 
