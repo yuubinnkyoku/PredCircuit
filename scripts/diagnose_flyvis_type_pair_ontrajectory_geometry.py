@@ -144,9 +144,7 @@ def run_seed(*, seed: int, learning_rate: float = 160.0, max_update: float = 0.0
         _apply_precomputed(soft_model, soft_on_soft, soft_bias)
         _apply_precomputed(global_model, global_on_global, global_bias)
 
-        soft_post = _objective_values(
-            circuit, soft_model.weight.detach(), soft_model.bias.detach()
-        )
+        soft_post = _objective_values(circuit, soft_model.weight.detach(), soft_model.bias.detach())
         global_post = _objective_values(
             circuit, global_model.weight.detach(), global_model.bias.detach()
         )
