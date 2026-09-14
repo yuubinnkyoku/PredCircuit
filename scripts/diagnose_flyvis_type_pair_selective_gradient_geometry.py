@@ -61,12 +61,19 @@ def _objective_values(
     return float(ce.detach()), float(hard_margin.detach()), float(soft_margin.detach())
 
 
-def run_seed(*, seed: int, learning_rate: float = 160.0, max_update: float = 0.05) -> pd.DataFrame:
+def run_seed(
+    *,
+    seed: int,
+    learning_rate: float = 160.0,
+    max_update: float = 0.05,
+    init_scales: tuple[float, ...] = INIT_SCALES,
+    horizons: tuple[int, ...] = HORIZONS,
+) -> pd.DataFrame:
     circuit = graph_from_flyvis_retinotopy(load_flyvis_spec(), extent=2)
     groups = _named_groups(circuit)
     rows: list[dict[str, float | int | bool]] = []
 
-    for scale in INIT_SCALES:
+    for scale in init_scales:
         model = PredictiveCodingGraph(
             circuit.graph,
             seed=seed,
@@ -74,7 +81,7 @@ def run_seed(*, seed: int, learning_rate: float = 160.0, max_update: float = 0.0
             use_biological_strength=True,
         )
         trained = 0
-        for horizon in HORIZONS:
+        for horizon in horizons:
             for epoch in range(trained, horizon):
                 raw_edge, raw_bias = credit(model, circuit, seed=seed, epoch=epoch)
                 direction = _standard_direction(raw_edge, groups)
