@@ -23,8 +23,8 @@ def main() -> None:
     parser.add_argument("--out", type=Path, required=True)
     args = parser.parse_args()
 
-    geometry.INIT_SCALES = INIT_SCALES
-    geometry.HORIZONS = EARLY_HORIZONS
+    setattr(geometry, "INIT_SCALES", INIT_SCALES)
+    setattr(geometry, "HORIZONS", EARLY_HORIZONS)
     frame = geometry.run_seed(
         seed=args.seed,
         learning_rate=args.learning_rate,
