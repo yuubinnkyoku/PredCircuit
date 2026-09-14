@@ -1,0 +1,147 @@
+name: FlyVis type-pair gradient geometry cohort heterogeneity
+
+on:
+  push:
+    paths:
+      - ".github/triggers/run-type-pair-gradient-geometry-cohort-heterogeneity-2250-2329"
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [2250, 2251, 2252, 2253, 2254, 2255, 2256, 2257, 2258, 2259, 2260, 2261, 2262, 2263, 2264, 2265, 2266, 2267, 2268, 2269, 2270, 2271, 2272, 2273, 2274, 2275, 2276, 2277, 2278, 2279, 2280, 2281, 2282, 2283, 2284, 2285, 2286, 2287, 2288, 2289, 2310, 2311, 2312, 2313, 2314, 2315, 2316, 2317, 2318, 2319, 2320, 2321, 2322, 2323, 2324, 2325, 2326, 2327, 2328, 2329]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Run early selective gradient geometry for seed ${{ matrix.seed }}
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run python scripts/diagnose_flyvis_type_pair_selective_gradient_geometry_early_holdout.py \
+            --seed ${{ matrix.seed }} \
+            --out results/generated/flyvis_type_pair_selective_gradient_geometry_cohort_seed${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: type-pair-gradient-geometry-cohort-seed${{ matrix.seed }}
+          path: results/generated/flyvis_type_pair_selective_gradient_geometry_cohort_seed${{ matrix.seed }}.csv
+
+  aggregate:
+    needs: diagnose
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: type-pair-gradient-geometry-cohort-seed*
+          path: artifacts
+          merge-multiple: true
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Aggregate cohort heterogeneity
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run --with scipy python - <<'PY'
+          from pathlib import Path
+          import numpy as np
+          import pandas as pd
+          from scipy import stats
+
+          paths = sorted(Path("artifacts").glob("*.csv"))
+          if len(paths) != 60:
+              raise RuntimeError(f"expected 60 seed artifacts, got {len(paths)}")
+          frame = pd.concat([pd.read_csv(path) for path in paths], ignore_index=True)
+          if len(frame) != 120:
+              raise RuntimeError(f"expected 120 rows, got {len(frame)}")
+          if frame["seed"].nunique() != 60:
+              raise RuntimeError("expected 60 unique seeds")
+          if set(frame["horizon"].unique()) != {120, 140}:
+              raise RuntimeError("unexpected horizons")
+          if not frame["finite"].all():
+              raise RuntimeError("non-finite gradient geometry result detected")
+          if frame["l2_match_relative_error"].max() > 2e-5:
+              raise RuntimeError("global L2 match relative error exceeded 2e-5")
+
+          frame["cohort"] = np.where(
+              frame["seed"].between(2250, 2289),
+              "positive_2250_2289",
+              "null_2310_2329",
+          )
+          frame.to_csv(
+              "results/generated/flyvis_type_pair_gradient_geometry_cohort_heterogeneity.csv",
+              index=False,
+          )
+
+          metrics = [
+              "candidate_edge_fraction",
+              "candidate_group_fraction",
+              "redistribution_l2",
+              "ce_grad_dot_redistribution",
+              "hard_grad_dot_redistribution",
+              "soft_grad_dot_redistribution",
+              "candidate_ce_grad_cos_standard",
+              "candidate_hard_grad_cos_standard",
+              "candidate_soft_grad_cos_standard",
+              "noncandidate_ce_grad_cos_standard",
+              "noncandidate_hard_grad_cos_standard",
+              "noncandidate_soft_grad_cos_standard",
+              "soft_minus_global_next_ce",
+              "soft_minus_global_next_hard",
+              "soft_minus_global_next_soft",
+          ]
+          rows = []
+          for horizon in (120, 140):
+              h = frame[frame.horizon == horizon]
+              pos = h[h.cohort == "positive_2250_2289"]
+              null = h[h.cohort == "null_2310_2329"]
+              for metric in metrics:
+                  x = pos[metric].to_numpy(float)
+                  y = null[metric].to_numpy(float)
+                  diff = float(x.mean() - y.mean())
+                  vx = float(x.var(ddof=1))
+                  vy = float(y.var(ddof=1))
+                  se = np.sqrt(vx / len(x) + vy / len(y))
+                  if se > 0.0:
+                      df_num = (vx / len(x) + vy / len(y)) ** 2
+                      df_den = (vx / len(x)) ** 2 / (len(x) - 1) + (vy / len(y)) ** 2 / (len(y) - 1)
+                      df = df_num / df_den
+                      q = float(stats.t.ppf(0.975, df))
+                      ci_low = diff - q * se
+                      ci_high = diff + q * se
+                  else:
+                      ci_low = ci_high = diff
+                  pooled_num = (len(x) - 1) * vx + (len(y) - 1) * vy
+                  pooled_den = len(x) + len(y) - 2
+                  pooled_sd = np.sqrt(pooled_num / pooled_den) if pooled_num > 0.0 else np.nan
+                  d = diff / pooled_sd if pooled_sd > 0.0 else np.nan
+                  test = stats.ttest_ind(x, y, equal_var=False)
+                  rows.append({
+                      "horizon": horizon,
+                      "metric": metric,
+                      "n_positive": len(x),
+                      "n_null": len(y),
+                      "mean_positive": float(x.mean()),
+                      "mean_null": float(y.mean()),
+                      "positive_minus_null": diff,
+                      "ci_low": float(ci_low),
+                      "ci_high": float(ci_high),
+                      "welch_p": float(test.pvalue),
+                      "cohen_d": float(d),
+                  })
+          pd.DataFrame(rows).to_csv(
+              "results/generated/flyvis_type_pair_gradient_geometry_cohort_heterogeneity_summary.csv",
+              index=False,
+          )
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-type-pair-gradient-geometry-cohort-heterogeneity-aggregate
+          path: |
+            results/generated/flyvis_type_pair_gradient_geometry_cohort_heterogeneity.csv
+            results/generated/flyvis_type_pair_gradient_geometry_cohort_heterogeneity_summary.csv
