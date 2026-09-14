@@ -6,6 +6,7 @@ on:
     paths:
       - ".github/workflows/pcalm-stability-interpolation.yml"
 
+# Interpolate only new alpha values; existing 0.75 and 1.0 artifacts are reused.
 jobs:
   sweep:
     runs-on: ubuntu-24.04
