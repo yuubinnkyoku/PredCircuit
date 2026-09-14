@@ -3,8 +3,6 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-import pandas as pd
-
 from diagnose_flyvis_type_pair_selective_gradient_geometry import run_seed
 
 DYNAMIC_HORIZONS = tuple(range(140, 160))
