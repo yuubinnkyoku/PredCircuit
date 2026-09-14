@@ -1,0 +1,57 @@
+name: PC-ALM dual leak holdout
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "scripts/diagnose_pcalm_dual_leak.py"
+      - "scripts/aggregate_pcalm_dual_leak.py"
+      - ".github/workflows/pcalm-dual-leak.yml"
+
+jobs:
+  seed:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [400, 401, 402, 403, 404, 405, 406, 407, 408, 409, 410, 411, 412, 413, 414, 415, 416, 417, 418, 419]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - name: Run dual leak diagnostic
+        run: >-
+          uv run python scripts/diagnose_pcalm_dual_leak.py
+          --seed ${{ matrix.seed }}
+          --out results/generated/pcalm_dual_leak_seed${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pcalm-dual-leak-seed-${{ matrix.seed }}
+          path: results/generated/pcalm_dual_leak_seed${{ matrix.seed }}.csv
+          if-no-files-found: error
+
+  aggregate:
+    needs: seed
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: pcalm-dual-leak-seed-*
+          path: artifacts
+          merge-multiple: true
+      - name: Aggregate fresh holdout
+        run: >-
+          uv run python scripts/aggregate_pcalm_dual_leak.py
+          --input artifacts
+          --expected-seeds 20
+          --out-dir results/generated
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pcalm-dual-leak-aggregate
+          path: |
+            results/generated/pcalm_dual_leak_all.csv
+            results/generated/pcalm_dual_leak_summary.csv
+            results/generated/pcalm_dual_leak_window_summary.csv
+            results/generated/pcalm_dual_leak_best_fixed.csv
+          if-no-files-found: error
