@@ -34,6 +34,40 @@ def test_alpha_zero_matches_pc_same_primal_budget() -> None:
         assert torch.count_nonzero(dual) == 0
 
 
+def test_alpha_zero_matches_pc_gradient() -> None:
+    model = ResidualMLP(
+        depth=4,
+        width=5,
+        input_dim=3,
+        output_dim=2,
+        activation="tanh",
+        seed=0,
+    )
+    gen = torch.Generator().manual_seed(1)
+    x = torch.randn(7, 3, generator=gen)
+    y = torch.nn.functional.one_hot(torch.arange(7) % 2, 2).float()
+
+    pc_grad = method_grad(
+        model,
+        x,
+        y,
+        Schedule("pc", budget=3),
+        state_lr=0.1,
+        rho=1.0,
+    )
+    alm_grad = method_grad(
+        model,
+        x,
+        y,
+        Schedule("pcalm", budget=3, alpha=0.0),
+        state_lr=0.1,
+        rho=1.0,
+    )
+
+    for pc_layer, alm_layer in zip(pc_grad, alm_grad, strict=True):
+        torch.testing.assert_close(pc_layer, alm_layer, atol=1e-5, rtol=1e-5)
+
+
 def test_batch_duplication_preserves_per_sample_state_step() -> None:
     model = ResidualMLP(depth=4, width=3, input_dim=2, output_dim=1, seed=4)
     x = torch.tensor([[0.25, -0.5]])
@@ -51,6 +85,44 @@ def test_batch_duplication_preserves_per_sample_state_step() -> None:
             atol=2e-7,
             rtol=1e-6,
         )
+
+
+def test_pcalm_sample_is_invariant_to_other_batch_members() -> None:
+    model = ResidualMLP(
+        depth=4,
+        width=5,
+        input_dim=3,
+        output_dim=2,
+        activation="tanh",
+        seed=0,
+    )
+    gen = torch.Generator().manual_seed(1)
+    x = torch.randn(7, 3, generator=gen)
+    y = torch.nn.functional.one_hot(torch.arange(7) % 2, 2).float()
+
+    single, _, _ = run_pcalm(
+        model,
+        x[:1],
+        y[:1],
+        state_lr=0.1,
+        rho=1.0,
+        alpha=1.0,
+        budget=3,
+        inner_steps=1,
+    )
+    batch, _, _ = run_pcalm(
+        model,
+        x,
+        y,
+        state_lr=0.1,
+        rho=1.0,
+        alpha=1.0,
+        budget=3,
+        inner_steps=1,
+    )
+
+    for single_state, batch_state in zip(single, batch, strict=True):
+        torch.testing.assert_close(single_state[0], batch_state[0], atol=1e-5, rtol=1e-5)
 
 
 def test_pre_and_post_dual_credit_are_distinct() -> None:
