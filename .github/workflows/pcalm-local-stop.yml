@@ -2,11 +2,6 @@ name: PC-ALM local stopping diagnostic
 
 on:
   workflow_dispatch:
-  push:
-    paths:
-      - "scripts/diagnose_pcalm_local_stop.py"
-      - ".github/workflows/pcalm-local-stop.yml"
-      - "src/predcircuit/pcalm.py"
 
 jobs:
   seed:
