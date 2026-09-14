@@ -1,0 +1,54 @@
+name: PC-ALM dual precision holdout
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/pcalm-dual-precision.yml
+
+jobs:
+  seed:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [500, 501, 502, 503, 504, 505, 506, 507, 508, 509, 510, 511, 512, 513, 514, 515, 516, 517, 518, 519]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - name: Run dual precision diagnostic
+        run: >-
+          uv run python scripts/diagnose_pcalm_dual_precision.py
+          --seed ${{ matrix.seed }}
+          --out results/generated/pcalm_dual_precision_seed${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pcalm-dual-precision-seed-${{ matrix.seed }}
+          path: results/generated/pcalm_dual_precision_seed${{ matrix.seed }}.csv
+          if-no-files-found: error
+
+  aggregate:
+    needs: seed
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: pcalm-dual-precision-seed-*
+          path: artifacts
+          merge-multiple: true
+      - name: Aggregate fresh holdout
+        run: >-
+          uv run python scripts/aggregate_pcalm_dual_precision.py
+          --input artifacts
+          --expected-seeds 20
+          --out-dir results/generated
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pcalm-dual-precision-aggregate
+          path: |
+            results/generated/pcalm_dual_precision_all.csv
+            results/generated/pcalm_dual_precision_summary.csv
+          if-no-files-found: error
