@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import math
 from pathlib import Path
+from typing import cast
 
 import numpy as np
 import pandas as pd
@@ -51,9 +52,10 @@ def main() -> None:
     paired = frame.pivot(index=keys, columns="method", values="layer_gradient_cosine_to_bp")
     paired = paired.dropna(subset=["pc", "pcalm"]).reset_index()
     paired["cosine_diff_pcalm_minus_pc"] = paired["pcalm"] - paired["pc"]
-    for (depth, budget, layer, distance), group in paired.groupby(
+    for key, group in paired.groupby(
         ["depth", "budget", "layer", "distance_from_output"], sort=True
     ):
+        depth, budget, layer, distance = cast(tuple[int, int, int, int], key)
         diff = group["cosine_diff_pcalm_minus_pc"].to_numpy(dtype=float)
         mean, low, high = mean_ci95(diff)
         finite_diff = diff[np.isfinite(diff)]
@@ -80,9 +82,8 @@ def main() -> None:
         )
 
     front_rows: list[dict[str, float | int | str]] = []
-    for (seed, method, depth, budget), group in frame.groupby(
-        ["seed", "method", "depth", "budget"], sort=True
-    ):
+    for key, group in frame.groupby(["seed", "method", "depth", "budget"], sort=True):
+        seed, method, depth, budget = cast(tuple[int, str, int, int], key)
         row: dict[str, float | int | str] = {
             "seed": int(seed),
             "method": str(method),
@@ -104,7 +105,8 @@ def main() -> None:
 
     front = pd.DataFrame(front_rows)
     threshold_rows: list[dict[str, float | int | str]] = []
-    for (seed, method, depth), group in frame.groupby(["seed", "method", "depth"], sort=True):
+    for key, group in frame.groupby(["seed", "method", "depth"], sort=True):
+        seed, method, depth = cast(tuple[int, str, int], key)
         first = group[group["layer"] == 0].sort_values("budget")
         row: dict[str, float | int | str] = {
             "seed": int(seed),
