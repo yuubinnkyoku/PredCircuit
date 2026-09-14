@@ -1,0 +1,141 @@
+name: FlyVis type-pair selective gradient geometry early holdout
+
+on:
+  push:
+    paths:
+      - ".github/triggers/run-type-pair-selective-gradient-geometry-early-2290-2309"
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [2290, 2291, 2292, 2293, 2294, 2295, 2296, 2297, 2298, 2299, 2300, 2301, 2302, 2303, 2304, 2305, 2306, 2307, 2308, 2309]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Run early selective gradient geometry for seed ${{ matrix.seed }}
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run python scripts/diagnose_flyvis_type_pair_selective_gradient_geometry_early_holdout.py \
+            --seed ${{ matrix.seed }} \
+            --out results/generated/flyvis_type_pair_selective_gradient_geometry_early_seed${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: type-pair-selective-gradient-geometry-early-seed${{ matrix.seed }}
+          path: results/generated/flyvis_type_pair_selective_gradient_geometry_early_seed${{ matrix.seed }}.csv
+
+  aggregate:
+    needs: diagnose
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: type-pair-selective-gradient-geometry-early-seed*
+          path: artifacts
+          merge-multiple: true
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Aggregate early selective gradient geometry
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run --with scipy python - <<'PY'
+          from pathlib import Path
+          import numpy as np
+          import pandas as pd
+          from scipy import stats
+
+          paths = sorted(Path("artifacts").glob("*.csv"))
+          if len(paths) != 20:
+              raise RuntimeError(f"expected 20 seed artifacts, got {len(paths)}")
+          frame = pd.concat([pd.read_csv(path) for path in paths], ignore_index=True)
+          if len(frame) != 40:
+              raise RuntimeError(f"expected 40 rows, got {len(frame)}")
+          if frame["seed"].nunique() != 20:
+              raise RuntimeError("expected 20 unique seeds")
+          if set(frame["horizon"].unique()) != {120, 140}:
+              raise RuntimeError("unexpected horizons")
+          if not frame["finite"].all():
+              raise RuntimeError("non-finite early selective gradient geometry result detected")
+          if frame["l2_match_relative_error"].max() > 2e-5:
+              raise RuntimeError("global L2 match relative error exceeded 2e-5")
+          frame.to_csv(
+              "results/generated/flyvis_type_pair_selective_gradient_geometry_early.csv",
+              index=False,
+          )
+
+          metrics = [
+              "candidate_edge_fraction",
+              "candidate_group_fraction",
+              "redistribution_l2",
+              "ce_grad_dot_redistribution",
+              "hard_grad_dot_redistribution",
+              "soft_grad_dot_redistribution",
+              "candidate_ce_grad_cos_standard",
+              "candidate_hard_grad_cos_standard",
+              "candidate_soft_grad_cos_standard",
+              "noncandidate_ce_grad_cos_standard",
+              "noncandidate_hard_grad_cos_standard",
+              "noncandidate_soft_grad_cos_standard",
+              "soft_minus_global_next_ce",
+              "soft_minus_global_next_hard",
+              "soft_minus_global_next_soft",
+          ]
+          rows = []
+          for horizon, subset in frame.groupby("horizon"):
+              for metric in metrics:
+                  values = subset[metric].to_numpy(float)
+                  mean = float(values.mean())
+                  std = float(values.std(ddof=1))
+                  if std > 0.0:
+                      ci_low, ci_high = stats.t.interval(
+                          0.95,
+                          len(values) - 1,
+                          loc=mean,
+                          scale=std / np.sqrt(len(values)),
+                      )
+                      t_p = float(stats.ttest_1samp(values, 0.0).pvalue)
+                      try:
+                          wilcoxon_p = float(stats.wilcoxon(values).pvalue)
+                      except ValueError:
+                          wilcoxon_p = float("nan")
+                      dz = mean / std
+                  else:
+                      ci_low = ci_high = mean
+                      t_p = 1.0 if mean == 0.0 else 0.0
+                      wilcoxon_p = t_p
+                      dz = float("nan")
+                  rows.append(
+                      {
+                          "horizon": int(horizon),
+                          "metric": metric,
+                          "n": len(values),
+                          "mean": mean,
+                          "ci_low": float(ci_low),
+                          "ci_high": float(ci_high),
+                          "positive": int((values > 0.0).sum()),
+                          "negative": int((values < 0.0).sum()),
+                          "t_p": t_p,
+                          "wilcoxon_p": wilcoxon_p,
+                          "cohen_dz": dz,
+                      }
+                  )
+          pd.DataFrame(rows).to_csv(
+              "results/generated/flyvis_type_pair_selective_gradient_geometry_early_summary.csv",
+              index=False,
+          )
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-type-pair-selective-gradient-geometry-early-aggregate
+          path: |
+            results/generated/flyvis_type_pair_selective_gradient_geometry_early.csv
+            results/generated/flyvis_type_pair_selective_gradient_geometry_early_summary.csv
