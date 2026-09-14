@@ -178,12 +178,7 @@ def main() -> None:
             reference = grads
         error_to_fp32 = gradient_relative_error(grads, reference)
         finite = bool(metrics["finite"])
-        useful = (
-            finite
-            and cosine >= 0.9
-            and 0.5 <= ratio <= 2.0
-            and relative_error <= 0.6
-        )
+        useful = finite and cosine >= 0.9 and 0.5 <= ratio <= 2.0 and relative_error <= 0.6
         rows.append(
             {
                 "seed": args.seed,
