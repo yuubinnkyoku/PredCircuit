@@ -72,7 +72,7 @@ def main() -> None:
             for method in ("pc", "pcalm"):
                 if method == "pc":
                     schedule = Schedule("pc", budget=total_primal_steps)
-                    _, _, trace = run_pc(
+                    _, credit_duals, trace = run_pc(
                         model,
                         x,
                         y,
@@ -88,7 +88,7 @@ def main() -> None:
                         alpha=args.alpha,
                         inner_steps=args.inner_steps,
                     )
-                    _, _, trace = run_pcalm(
+                    _, credit_duals, trace = run_pcalm(
                         model,
                         x,
                         y,
@@ -110,15 +110,18 @@ def main() -> None:
                 )
                 assert trace is not None
                 final_residuals = trace.residual_norms[-1]
-                final_duals = trace.dual_norms[-1]
+                post_dual_norms = trace.dual_norms[-1]
                 max_abs_dual = max(trace.max_abs_dual)
 
-                for layer_ix, (layer_grad, layer_bp) in enumerate(
-                    zip(grad, bp, strict=True)
-                ):
+                # The trace records the post-update dual state. The duals returned
+                # by run_pcalm match the configured weight-credit timing.
+                for layer_ix, (layer_grad, layer_bp) in enumerate(zip(grad, bp, strict=True)):
                     hidden_layer = layer_ix < depth - 1
                     residual_norm = final_residuals[layer_ix] if hidden_layer else math.nan
-                    dual_norm = final_duals[layer_ix] if hidden_layer else math.nan
+                    post_dual_norm = post_dual_norms[layer_ix] if hidden_layer else math.nan
+                    credit_dual_norm = (
+                        float(credit_duals[layer_ix].norm()) if hidden_layer else math.nan
+                    )
                     rows.append(
                         {
                             "seed": args.seed,
@@ -138,7 +141,8 @@ def main() -> None:
                             "layer_grad_norm": float(layer_grad.norm()),
                             "bp_layer_grad_norm": float(layer_bp.norm()),
                             "final_residual_norm": residual_norm,
-                            "final_dual_norm": dual_norm,
+                            "post_dual_norm": post_dual_norm,
+                            "weight_credit_dual_norm": credit_dual_norm,
                             "max_abs_dual_over_trace": max_abs_dual,
                             "trace_finite": trace.finite,
                         }
