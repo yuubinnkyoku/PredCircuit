@@ -63,9 +63,7 @@ def main() -> None:
             "first_layer_relative_error_to_bp",
             "residual_total",
         ):
-            row[f"delta_vs_fp32_{metric}_mean"] = float(
-                (aligned[metric] - fp32[metric]).mean()
-            )
+            row[f"delta_vs_fp32_{metric}_mean"] = float((aligned[metric] - fp32[metric]).mean())
 
         reference_useful = fp32["useful_first_layer_credit"].astype(bool)
         current_useful = aligned["useful_first_layer_credit"].astype(bool)
