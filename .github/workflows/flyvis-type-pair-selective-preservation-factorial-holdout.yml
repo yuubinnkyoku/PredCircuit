@@ -1,0 +1,165 @@
+name: FlyVis type-pair selective preservation factorial holdout
+
+on:
+  push:
+    paths:
+      - ".github/triggers/run-type-pair-selective-preservation-factorial-2270-2289"
+  workflow_dispatch:
+
+jobs:
+  holdout:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [2270, 2271, 2272, 2273, 2274, 2275, 2276, 2277, 2278, 2279, 2280, 2281, 2282, 2283, 2284, 2285, 2286, 2287, 2288, 2289]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Run preservation factorial holdout for seed ${{ matrix.seed }}
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run python scripts/diagnose_flyvis_type_pair_selective_preservation_factorial_holdout.py \
+            --seed ${{ matrix.seed }} \
+            --out results/generated/flyvis_type_pair_selective_preservation_factorial_seed${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: type-pair-selective-preservation-factorial-seed${{ matrix.seed }}
+          path: results/generated/flyvis_type_pair_selective_preservation_factorial_seed${{ matrix.seed }}.csv
+
+  aggregate:
+    needs: holdout
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: type-pair-selective-preservation-factorial-seed*
+          path: artifacts
+          merge-multiple: true
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Aggregate preservation factorial holdout
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run --with scipy python - <<'PY'
+          from pathlib import Path
+          import numpy as np
+          import pandas as pd
+          from scipy import stats
+
+          paths = sorted(Path("artifacts").glob("*.csv"))
+          if len(paths) != 20:
+              raise RuntimeError(f"expected 20 seed artifacts, got {len(paths)}")
+          frame = pd.concat([pd.read_csv(path) for path in paths], ignore_index=True)
+          if len(frame) != 400:
+              raise RuntimeError(f"expected 400 rows, got {len(frame)}")
+          if frame["seed"].nunique() != 20:
+              raise RuntimeError("expected 20 unique seeds")
+          if not frame["finite"].all():
+              raise RuntimeError("non-finite preservation-factorial result detected")
+
+          checks = [
+              ("global_standard", "early_matched_l2_relative_error"),
+              ("global_global", "early_matched_l2_relative_error"),
+              ("global_global", "late_matched_l2_relative_error"),
+              ("soft_global", "late_matched_l2_relative_error"),
+          ]
+          for policy, column in checks:
+              maximum = frame.loc[frame["policy"] == policy, column].max()
+              if maximum > 2e-5:
+                  raise RuntimeError(f"{policy} {column} exceeded 2e-5: {maximum}")
+
+          frame.to_csv(
+              "results/generated/flyvis_type_pair_selective_preservation_factorial_holdout.csv",
+              index=False,
+          )
+
+          metrics = ["cross_entropy", "accuracy", "hard_margin", "soft_margin", "weight_norm"]
+          seed_mean = frame.groupby(["seed", "policy"], as_index=False)[metrics].mean()
+          pivot = seed_mean.pivot(index="seed", columns="policy", values=metrics)
+
+          def summarize(values: np.ndarray) -> dict[str, float | int]:
+              mean = float(values.mean())
+              std = float(values.std(ddof=1))
+              if std > 0.0:
+                  ci_low, ci_high = stats.t.interval(
+                      0.95,
+                      len(values) - 1,
+                      loc=mean,
+                      scale=std / np.sqrt(len(values)),
+                  )
+                  p = float(stats.ttest_1samp(values, 0.0).pvalue)
+                  try:
+                      w_p = float(stats.wilcoxon(values).pvalue)
+                  except ValueError:
+                      w_p = float("nan")
+                  dz = mean / std
+              else:
+                  ci_low = ci_high = mean
+                  p = 1.0 if mean == 0.0 else 0.0
+                  w_p = p
+                  dz = float("nan")
+              return {
+                  "n": len(values),
+                  "mean": mean,
+                  "ci_low": float(ci_low),
+                  "ci_high": float(ci_high),
+                  "positive": int((values > 0.0).sum()),
+                  "negative": int((values < 0.0).sum()),
+                  "t_p": p,
+                  "wilcoxon_p": w_p,
+                  "cohen_dz": dz,
+              }
+
+          comparisons = [
+              ("soft_standard", "global_standard"),
+              ("soft_global", "global_global"),
+              ("soft_global", "soft_standard"),
+              ("global_global", "global_standard"),
+              ("soft_global", "standard"),
+              ("global_global", "standard"),
+          ]
+          rows = []
+          for left, right in comparisons:
+              for metric in metrics:
+                  values = (pivot[metric][left] - pivot[metric][right]).to_numpy(float)
+                  rows.append(
+                      {
+                          "contrast": f"{left}-{right}",
+                          "metric": metric,
+                          **summarize(values),
+                      }
+                  )
+
+          for metric in metrics:
+              interaction = (
+                  pivot[metric]["soft_global"]
+                  - pivot[metric]["global_global"]
+                  - pivot[metric]["soft_standard"]
+                  + pivot[metric]["global_standard"]
+              ).to_numpy(float)
+              rows.append(
+                  {
+                      "contrast": "early_selectivity_x_late_global_damping_interaction",
+                      "metric": metric,
+                      **summarize(interaction),
+                  }
+              )
+
+          pd.DataFrame(rows).to_csv(
+              "results/generated/flyvis_type_pair_selective_preservation_factorial_summary.csv",
+              index=False,
+          )
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-type-pair-selective-preservation-factorial-aggregate
+          path: |
+            results/generated/flyvis_type_pair_selective_preservation_factorial_holdout.csv
+            results/generated/flyvis_type_pair_selective_preservation_factorial_summary.csv
