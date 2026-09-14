@@ -65,9 +65,7 @@ def main() -> None:
     summary = pd.DataFrame(records)
 
     pcalm = summary[summary["method"] == "pcalm"].copy()
-    qualifying = pcalm[
-        (pcalm["finite_rate"] == 1.0) & (pcalm["useful_credit_rate"] >= 0.8)
-    ].copy()
+    qualifying = pcalm[(pcalm["finite_rate"] == 1.0) & (pcalm["useful_credit_rate"] >= 0.8)].copy()
     if not qualifying.empty:
         qualifying = qualifying.sort_values(
             [
@@ -114,8 +112,7 @@ def main() -> None:
         - paired["first_layer_gradient_relative_error_to_bp_pc"]
     )
     paired["delta_global_cosine"] = (
-        paired["global_gradient_cosine_to_bp_pcalm"]
-        - paired["global_gradient_cosine_to_bp_pc"]
+        paired["global_gradient_cosine_to_bp_pcalm"] - paired["global_gradient_cosine_to_bp_pc"]
     )
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
