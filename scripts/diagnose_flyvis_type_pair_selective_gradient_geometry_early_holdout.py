@@ -5,7 +5,6 @@ from pathlib import Path
 
 from diagnose_flyvis_type_pair_selective_gradient_geometry import run_seed
 
-
 EARLY_HORIZONS = (120, 140)
 INIT_SCALES = (0.115,)
 
