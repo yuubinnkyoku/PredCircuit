@@ -243,9 +243,7 @@ def main() -> None:
                 "max_abs_dual_pre_quant": max_abs_pre_quant,
                 "saturated_values": saturated_total,
                 "quantized_values": quantized_total,
-                "saturation_rate": (
-                    saturated_total / quantized_total if quantized_total else 0.0
-                ),
+                "saturation_rate": (saturated_total / quantized_total if quantized_total else 0.0),
             }
         )
 
