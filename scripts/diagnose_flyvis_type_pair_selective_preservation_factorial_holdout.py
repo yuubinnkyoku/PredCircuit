@@ -11,7 +11,6 @@ from diagnose_flyvis_type_pair_biological_logit_balance import _heldout_readout
 from diagnose_flyvis_type_pair_l1_gain_geometry import _heldout_objectives
 from diagnose_flyvis_type_pair_mi9_causal import _named_groups
 from diagnose_flyvis_type_pair_selective_phase_factorial_holdout import (
-    DIAG_KEYS,
     _advance_phase,
     _advance_standard,
 )
