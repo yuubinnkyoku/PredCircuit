@@ -60,9 +60,7 @@ def main() -> None:
         mean, low, high = mean_ci95(diff)
         finite_diff = diff[np.isfinite(diff)]
         pvalue = (
-            float(stats.ttest_1samp(finite_diff, 0.0).pvalue)
-            if len(finite_diff) >= 2
-            else math.nan
+            float(stats.ttest_1samp(finite_diff, 0.0).pvalue) if len(finite_diff) >= 2 else math.nan
         )
         pair_rows.append(
             {
@@ -99,7 +97,9 @@ def main() -> None:
             )
             first = group[group["layer"] == 0]
             row[f"first_layer_ge_{suffix}"] = int(
-                bool(len(first) and float(first.iloc[0]["layer_gradient_cosine_to_bp"]) >= threshold)
+                bool(
+                    len(first) and float(first.iloc[0]["layer_gradient_cosine_to_bp"]) >= threshold
+                )
             )
         front_rows.append(row)
 
