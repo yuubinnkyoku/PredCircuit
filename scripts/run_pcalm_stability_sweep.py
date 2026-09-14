@@ -52,7 +52,7 @@ def row_for(
     trace_finite: bool,
     final_residual_total: float,
     late_residual_cv_value: float,
-    max_abs_post_dual: float,
+    max_abs_post_dual_over_trace: float,
     max_abs_weight_credit_dual: float,
 ) -> dict[str, float | int | str | bool]:
     first_grad = grad[0]
@@ -88,7 +88,7 @@ def row_for(
         "first_layer_grad_norm_ratio_to_bp": norm_ratio,
         "final_residual_total": final_residual_total,
         "late_residual_cv": late_residual_cv_value,
-        "max_abs_post_dual": max_abs_post_dual,
+        "max_abs_post_dual_over_trace": max_abs_post_dual_over_trace,
         "max_abs_weight_credit_dual": max_abs_weight_credit_dual,
         "finite": finite,
         "useful_first_layer_credit": useful_credit,
@@ -179,7 +179,7 @@ def main() -> None:
                         trace_finite=pc_trace.finite,
                         final_residual_total=sum(pc_trace.residual_norms[-1]),
                         late_residual_cv_value=late_residual_cv(pc_trace.residual_norms),
-                        max_abs_post_dual=max(pc_trace.max_abs_dual),
+                        max_abs_post_dual_over_trace=max(pc_trace.max_abs_dual),
                         max_abs_weight_credit_dual=max(
                             (float(d.abs().max()) for d in pc_duals), default=0.0
                         ),
@@ -222,7 +222,7 @@ def main() -> None:
                             trace_finite=trace.finite,
                             final_residual_total=sum(trace.residual_norms[-1]),
                             late_residual_cv_value=late_residual_cv(trace.residual_norms),
-                            max_abs_post_dual=max(trace.max_abs_dual),
+                            max_abs_post_dual_over_trace=max(trace.max_abs_dual),
                             max_abs_weight_credit_dual=max(
                                 (float(d.abs().max()) for d in credit_duals), default=0.0
                             ),
