@@ -2,12 +2,6 @@ name: PC-ALM depth-32 stability sweep
 
 on:
   workflow_dispatch:
-  push:
-    paths:
-      - ".github/workflows/pcalm-stability-sweep.yml"
-      - "scripts/run_pcalm_stability_sweep.py"
-      - "scripts/aggregate_pcalm_stability_sweep.py"
-      - "src/predcircuit/pcalm.py"
 
 jobs:
   sweep:
