@@ -43,7 +43,8 @@ def main() -> None:
     if len(fp32) != args.expected_seeds:
         raise RuntimeError("fp32 reference row missing for one or more seeds")
 
-    for precision, group in frame.groupby("precision", sort=False):
+    for precision_key, group in frame.groupby("precision", sort=False):
+        precision = str(precision_key)
         aligned = group.set_index("seed").loc[fp32.index]
         row: dict[str, float | int | str] = {
             "precision": precision,
