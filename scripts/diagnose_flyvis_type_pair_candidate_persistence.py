@@ -95,8 +95,7 @@ def run_seed(
         for group_idx in all_focus
     }
     consecutive_jaccard = [
-        _jaccard(by_epoch[epoch], by_epoch[epoch + 1])
-        for epoch in range(FOCUS_START, END_EPOCH)
+        _jaccard(by_epoch[epoch], by_epoch[epoch + 1]) for epoch in range(FOCUS_START, END_EPOCH)
     ]
     reference_jaccard = [
         _jaccard(by_epoch[FOCUS_START], by_epoch[epoch])
@@ -107,29 +106,24 @@ def run_seed(
 
     persistent_half = sum(frequency >= 0.5 for frequency in frequencies.values())
     persistent_three_quarters = sum(frequency >= 0.75 for frequency in frequencies.values())
-    mean_frequency = (
-        sum(frequencies.values()) / len(frequencies) if frequencies else 0.0
-    )
+    mean_frequency = sum(frequencies.values()) / len(frequencies) if frequencies else 0.0
     max_frequency = max(frequencies.values()) if frequencies else 0.0
 
     values = {
         "candidate_group_fraction_epoch120": len(by_epoch[120]) / total_groups,
         "candidate_group_fraction_epoch140": len(by_epoch[140]) / total_groups,
         "candidate_group_fraction_epoch160": len(by_epoch[160]) / total_groups,
-        "candidate_group_fraction_focus_mean": sum(counts)
-        / (len(counts) * total_groups),
+        "candidate_group_fraction_focus_mean": sum(counts) / (len(counts) * total_groups),
         "candidate_group_fraction_focus_sd": float(
             torch.tensor(counts, dtype=torch.float64).std(unbiased=True)
         )
         / total_groups,
         "ever_candidate_group_fraction_focus": len(all_focus) / total_groups,
         "persistent_half_group_fraction_focus": persistent_half / total_groups,
-        "persistent_three_quarters_group_fraction_focus": persistent_three_quarters
-        / total_groups,
+        "persistent_three_quarters_group_fraction_focus": persistent_three_quarters / total_groups,
         "mean_candidate_frequency_among_ever": mean_frequency,
         "max_candidate_frequency": max_frequency,
-        "consecutive_jaccard_mean": sum(consecutive_jaccard)
-        / len(consecutive_jaccard),
+        "consecutive_jaccard_mean": sum(consecutive_jaccard) / len(consecutive_jaccard),
         "reference140_jaccard_mean": sum(reference_jaccard) / len(reference_jaccard),
         "jaccard_140_160": _jaccard(by_epoch[140], by_epoch[160]),
     }
