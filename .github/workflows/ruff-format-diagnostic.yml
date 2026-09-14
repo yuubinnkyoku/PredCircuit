@@ -1,0 +1,26 @@
+name: Ruff format diagnostic
+
+on:
+  push:
+    paths:
+      - ".github/workflows/ruff-format-diagnostic.yml"
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync --extra malecns
+      - name: Capture Ruff format diff
+        run: |
+          set +e
+          uv run ruff format --diff src tests scripts > ruff-format.diff 2>&1
+          cat ruff-format.diff
+          exit 0
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ruff-format-diagnostic
+          path: ruff-format.diff
+          if-no-files-found: error
