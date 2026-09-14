@@ -1,0 +1,152 @@
+name: FlyVis type-pair attenuation identity cohort
+
+on:
+  push:
+    paths:
+      - ".github/triggers/run-type-pair-attenuation-identity-cohort-2250-2329"
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [2250, 2251, 2252, 2253, 2254, 2255, 2256, 2257, 2258, 2259, 2260, 2261, 2262, 2263, 2264, 2265, 2266, 2267, 2268, 2269, 2270, 2271, 2272, 2273, 2274, 2275, 2276, 2277, 2278, 2279, 2280, 2281, 2282, 2283, 2284, 2285, 2286, 2287, 2288, 2289, 2310, 2311, 2312, 2313, 2314, 2315, 2316, 2317, 2318, 2319, 2320, 2321, 2322, 2323, 2324, 2325, 2326, 2327, 2328, 2329]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Measure attenuation identity for seed ${{ matrix.seed }}
+        shell: bash
+        env:
+          PYTHONPATH: scripts
+        run: |
+          mkdir -p results/generated
+          uv run python - --seed ${{ matrix.seed }} --out results/generated/flyvis_type_pair_attenuation_identity_seed${{ matrix.seed }}.csv <<'PY'
+          from __future__ import annotations
+          import argparse
+          from pathlib import Path
+          import pandas as pd
+          import torch
+          from diagnose_flyvis_type_pair_adaptive_mean_gain_holdout import _standard_direction
+          from diagnose_flyvis_type_pair_mi9_causal import _named_groups
+          from diagnose_flyvis_type_pair_peaknorm_global_l2_match_holdout import _candidate_soft_update
+          from run_flyvis_temporal_coherence_gate import apply_local_credit
+          from run_flyvis_type_pair_axis_identity_control import credit
+          from predcircuit.flyvis import load_flyvis_spec
+          from predcircuit.flyvis_retinotopy import graph_from_flyvis_retinotopy
+          from predcircuit.model import PredictiveCodingGraph
+
+          parser = argparse.ArgumentParser()
+          parser.add_argument("--seed", type=int, required=True)
+          parser.add_argument("--out", type=Path, required=True)
+          args = parser.parse_args()
+          circuit = graph_from_flyvis_retinotopy(load_flyvis_spec(), extent=2)
+          groups = _named_groups(circuit)
+          model = PredictiveCodingGraph(circuit.graph, seed=args.seed, init_scale=0.115, use_biological_strength=True)
+          coefficient_sum = torch.zeros(len(groups), dtype=torch.float64)
+          removed_l2_sum = torch.zeros(len(groups), dtype=torch.float64)
+          active_epochs = torch.zeros(len(groups), dtype=torch.int64)
+          for epoch in range(160):
+              raw_edge, raw_bias = credit(model, circuit, seed=args.seed, epoch=epoch)
+              direction = _standard_direction(raw_edge, groups)
+              if epoch >= 140:
+                  clipped = (160.0 * direction).clamp(-0.05, 0.05)
+                  soft, _ = _candidate_soft_update(direction, learning_rate=160.0, max_update=0.05, groups=groups, probability=0.35)
+                  for group_idx, (_, _, indices) in enumerate(groups):
+                      clipped_group = clipped[indices]
+                      soft_group = soft[indices]
+                      clipped_norm = float(torch.linalg.vector_norm(clipped_group))
+                      soft_norm = float(torch.linalg.vector_norm(soft_group))
+                      coefficient = max(0.0, 1.0 - soft_norm / clipped_norm) if clipped_norm > 0.0 else 0.0
+                      removed = float(torch.linalg.vector_norm(clipped_group - soft_group))
+                      coefficient_sum[group_idx] += coefficient
+                      removed_l2_sum[group_idx] += removed
+                      active_epochs[group_idx] += int(coefficient > 0.0)
+              apply_local_credit(model, direction, raw_bias, learning_rate=160.0, weight_decay=0.0, max_update=0.05)
+          rows = []
+          for group_idx, (source_type, target_type, indices) in enumerate(groups):
+              rows.append({
+                  "seed": args.seed,
+                  "group_idx": group_idx,
+                  "source_type": source_type,
+                  "target_type": target_type,
+                  "n_edges": len(indices),
+                  "coefficient_sum": float(coefficient_sum[group_idx]),
+                  "removed_l2_sum": float(removed_l2_sum[group_idx]),
+                  "active_epochs": int(active_epochs[group_idx]),
+                  "finite": bool(torch.isfinite(coefficient_sum[group_idx]) and torch.isfinite(removed_l2_sum[group_idx])),
+              })
+          frame = pd.DataFrame(rows)
+          args.out.parent.mkdir(parents=True, exist_ok=True)
+          frame.to_csv(args.out, index=False)
+          print(frame.nlargest(10, "removed_l2_sum").to_string(index=False))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: type-pair-attenuation-identity-seed${{ matrix.seed }}
+          path: results/generated/flyvis_type_pair_attenuation_identity_seed${{ matrix.seed }}.csv
+
+  aggregate:
+    needs: diagnose
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: type-pair-attenuation-identity-seed*
+          path: artifacts
+          merge-multiple: true
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Aggregate identity-level cohort contrast
+        shell: bash
+        run: |
+          mkdir -p results/generated
+          uv run --with scipy python - <<'PY'
+          from pathlib import Path
+          import numpy as np
+          import pandas as pd
+          from scipy import stats
+
+          paths = sorted(Path("artifacts").glob("*.csv"))
+          if len(paths) != 60:
+              raise RuntimeError(f"expected 60 seed artifacts, got {len(paths)}")
+          frame = pd.concat([pd.read_csv(path) for path in paths], ignore_index=True)
+          if frame["seed"].nunique() != 60 or not frame["finite"].all():
+              raise RuntimeError("incomplete or non-finite identity diagnostic")
+          counts = frame.groupby("seed").size()
+          if counts.nunique() != 1:
+              raise RuntimeError("group count differs across seeds")
+          frame["cohort"] = np.where(frame["seed"].between(2250, 2289), "positive_2250_2289", "null_2310_2329")
+          frame.to_csv("results/generated/flyvis_type_pair_attenuation_identity_cohort.csv", index=False)
+          rows = []
+          for keys, sub in frame.groupby(["group_idx", "source_type", "target_type"], sort=False):
+              pos = sub[sub.cohort == "positive_2250_2289"]
+              null = sub[sub.cohort == "null_2310_2329"]
+              for metric in ("coefficient_sum", "removed_l2_sum", "active_epochs"):
+                  x = pos[metric].to_numpy(float); y = null[metric].to_numpy(float)
+                  diff = float(x.mean() - y.mean())
+                  test = stats.ttest_ind(x, y, equal_var=False)
+                  pooled = ((len(x)-1)*x.var(ddof=1)+(len(y)-1)*y.var(ddof=1))/(len(x)+len(y)-2)
+                  d = diff / np.sqrt(pooled) if pooled > 0 else np.nan
+                  rows.append({"group_idx": keys[0], "source_type": keys[1], "target_type": keys[2], "metric": metric, "mean_positive": float(x.mean()), "mean_null": float(y.mean()), "positive_minus_null": diff, "welch_p": float(test.pvalue) if np.isfinite(test.pvalue) else 1.0, "cohen_d": float(d) if np.isfinite(d) else 0.0})
+          summary = pd.DataFrame(rows)
+          for metric in summary.metric.unique():
+              mask = summary.metric == metric
+              p = summary.loc[mask, "welch_p"].to_numpy()
+              order = np.argsort(p); ranked = p[order] * len(p) / np.arange(1, len(p)+1)
+              adjusted = np.empty_like(ranked); adjusted[order] = np.minimum.accumulate(ranked[::-1])[::-1]
+              summary.loc[mask, "fdr_bh"] = np.clip(adjusted, 0.0, 1.0)
+          summary.sort_values(["metric", "fdr_bh", "welch_p"]).to_csv("results/generated/flyvis_type_pair_attenuation_identity_summary.csv", index=False)
+          print(summary.sort_values("fdr_bh").head(30).to_string(index=False))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flyvis-type-pair-attenuation-identity-cohort-aggregate
+          path: |
+            results/generated/flyvis_type_pair_attenuation_identity_cohort.csv
+            results/generated/flyvis_type_pair_attenuation_identity_summary.csv
