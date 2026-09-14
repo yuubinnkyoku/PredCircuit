@@ -1,0 +1,67 @@
+name: PC-ALM depth-32 stability interpolation
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/pcalm-stability-interpolation.yml"
+
+jobs:
+  sweep:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [200, 201, 202, 203, 204, 205, 206, 207, 208, 209]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync --extra malecns
+      - name: Run alpha interpolation without repeating existing grid points
+        run: |
+          uv run python scripts/run_pcalm_stability_sweep.py \
+            --depth 32 \
+            --width 8 \
+            --activation relu \
+            --budgets 80,96,112,128 \
+            --state-lrs 0.2,0.25 \
+            --rhos 1.0 \
+            --alphas 0.825,0.875,0.925 \
+            --seed ${{ matrix.seed }} \
+            --out results/generated/pcalm_stability_interpolation_seed${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pcalm-stability-interpolation-seed-${{ matrix.seed }}
+          path: results/generated/pcalm_stability_interpolation_seed${{ matrix.seed }}.csv
+          if-no-files-found: error
+
+  aggregate:
+    needs: sweep
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync --extra malecns
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: pcalm-stability-interpolation-seed-*
+          path: artifacts
+          merge-multiple: true
+      - name: Aggregate interpolation and select minimum T
+        run: |
+          uv run python scripts/aggregate_pcalm_stability_sweep.py \
+            --input artifacts \
+            --expected-seeds 10 \
+            --out-dir results/generated
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pcalm-stability-interpolation-aggregate
+          path: |
+            results/generated/pcalm_stability_all.csv
+            results/generated/pcalm_stability_summary.csv
+            results/generated/pcalm_stability_qualifying.csv
+            results/generated/pcalm_stability_minimum_t.csv
+            results/generated/pcalm_stability_paired.csv
+          if-no-files-found: error
