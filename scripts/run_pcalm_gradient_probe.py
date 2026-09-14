@@ -29,11 +29,11 @@ def main() -> None:
     parser.add_argument("--input-dim", type=int, default=8)
     parser.add_argument("--output-dim", type=int, default=4)
     parser.add_argument("--batch-size", type=int, default=4)
-    parser.add_argument("--state-lr", type=float, default=0.01)
+    parser.add_argument("--state-lr", type=float, default=0.25)
     parser.add_argument("--rho", type=float, default=1.0)
-    parser.add_argument("--alpha", type=float, default=0.1)
+    parser.add_argument("--alpha", type=float, default=1.0)
     parser.add_argument("--inner-steps", type=int, default=1)
-    parser.add_argument("--activation", choices=["linear", "tanh", "relu"], default="tanh")
+    parser.add_argument("--activation", choices=["linear", "tanh", "relu"], default="relu")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument(
         "--out",
