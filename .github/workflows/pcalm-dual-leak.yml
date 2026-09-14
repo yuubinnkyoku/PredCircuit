@@ -2,11 +2,6 @@ name: PC-ALM dual leak holdout
 
 on:
   workflow_dispatch:
-  push:
-    paths:
-      - "scripts/diagnose_pcalm_dual_leak.py"
-      - "scripts/aggregate_pcalm_dual_leak.py"
-      - ".github/workflows/pcalm-dual-leak.yml"
 
 jobs:
   seed:
