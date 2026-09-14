@@ -36,7 +36,7 @@ def main() -> None:
     parser.add_argument("--out-dir", type=Path, default=Path("results/generated"))
     args = parser.parse_args()
 
-    files = sorted(args.input.rglob("pcalm_stability_sweep_seed*.csv"))
+    files = sorted(args.input.rglob("pcalm_stability*_seed*.csv"))
     if len(files) != args.expected_seeds:
         raise RuntimeError(f"expected {args.expected_seeds} seed files, found {len(files)}")
     all_rows = pd.concat((pd.read_csv(path) for path in files), ignore_index=True)
