@@ -4,6 +4,11 @@
 // Eight-lane shared PC-ALM dual engine for the depth-32,width-8,batch-4 point.
 // 8 banks x 124 entries = 992 persistent lambda values. One address selects
 // one entry in every bank, so a full dual sweep takes exactly 124 cycles.
+//
+// clear_all starts a sequential zero-fill sweep instead of resetting every
+// memory word in one cycle. This avoids a reset port on the inferred memories
+// and keeps the storage compatible with FPGA RAM inference. While clearing is
+// asserted through clear_busy, normal dual updates are paused.
 module dual_engine_8lane #(
     parameter int DATA_W = 12,
     parameter int DEPTH = 124,
@@ -18,7 +23,8 @@ module dual_engine_8lane #(
     output logic signed [DATA_W-1:0] dual_q [0:7],
     output logic signed [DATA_W-1:0] credit_q [0:7],
     output logic [7:0] dual_saturated,
-    output logic [7:0] credit_saturated
+    output logic [7:0] credit_saturated,
+    output logic clear_busy
 );
     localparam int DYADIC_FRAC = 8;
     localparam int WIDE_W = DATA_W + DYADIC_FRAC + 3;
@@ -33,7 +39,8 @@ module dual_engine_8lane #(
     logic signed [WIDE_W-1:0] dual_rounded [0:7];
     logic signed [WIDE_W-1:0] credit_wide [0:7];
     logic [7:0] dual_sat_next;
-    integer i, j;
+    logic [ADDR_W-1:0] clear_addr;
+    integer i;
 
     function automatic logic signed [WIDE_W-1:0] round_shift_dyadic(
         input logic signed [WIDE_W-1:0] value
@@ -90,15 +97,23 @@ module dual_engine_8lane #(
 
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            for (i = 0; i < 8; i = i + 1)
-                for (j = 0; j < DEPTH; j = j + 1)
-                    dual_mem[i][j] <= '0;
+            clear_busy <= 1'b0;
+            clear_addr <= '0;
             dual_saturated <= '0;
-        end else if (clear_all) begin
-            for (i = 0; i < 8; i = i + 1)
-                for (j = 0; j < DEPTH; j = j + 1)
-                    dual_mem[i][j] <= '0;
+        end else if (clear_all && !clear_busy) begin
+            clear_busy <= 1'b1;
+            clear_addr <= '0;
             dual_saturated <= '0;
+        end else if (clear_busy) begin
+            for (i = 0; i < 8; i = i + 1)
+                dual_mem[i][clear_addr] <= '0;
+            dual_saturated <= '0;
+            if (clear_addr == DEPTH-1) begin
+                clear_busy <= 1'b0;
+                clear_addr <= '0;
+            end else begin
+                clear_addr <= clear_addr + 1'b1;
+            end
         end else if (enable && addr < DEPTH) begin
             for (i = 0; i < 8; i = i + 1)
                 dual_mem[i][addr] <= dual_next[i];
