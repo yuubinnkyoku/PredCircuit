@@ -17,10 +17,8 @@ module tb_pcalm_dual_update_exhaustive;
     logic dual_saturated;
     logic credit_saturated;
 
-    integer dual_state;
     integer expected_dual;
     integer expected_credit;
-    integer scaled;
     integer magnitude;
     integer residual_i;
     integer dual_i;
@@ -65,10 +63,14 @@ module tb_pcalm_dual_update_exhaustive;
 
     task automatic load_dual(input integer value);
         begin
-            // Use the DUT's own recurrence with r=0 to construct arbitrary
-            // states would be slow and incomplete.  For exhaustive arithmetic
-            // verification, set the physical state directly, then compare only
-            // externally visible combinational/next-state behavior.
+            // Exhaustive arithmetic checking intentionally seeds the physical
+            // state directly.  Keep mode_pcalm asserted before doing so: if a
+            // clock edge races with this task while mode_pcalm=0, the DUT's
+            // sequential sPC-clear branch can overwrite the injected state.
+            mode_pcalm = 1'b1;
+            enable = 1'b0;
+            clear_dual = 1'b0;
+            @(negedge clk);
             dut.dual_reg = value;
             #0;
         end
@@ -81,7 +83,6 @@ module tb_pcalm_dual_update_exhaustive;
         integer expected_credit_sat;
         begin
             load_dual(d);
-            mode_pcalm = 1'b1;
             residual_q = r;
             #0;
 
@@ -99,19 +100,19 @@ module tb_pcalm_dual_update_exhaustive;
             expected_dual = sat12(expected_rounded);
             expected_dual_sat = (expected_rounded > DATA_MAX) || (expected_rounded < DATA_MIN);
 
-            enable = 1'b1;
-            @(posedge clk);
-            #0;
-            enable = 1'b0;
-            if ($signed(dual_q) !== expected_dual || dual_saturated !== expected_dual_sat) begin
+            // Compare the combinational next-state arithmetic directly.  The
+            // ordinary smoke test separately verifies the sequential register,
+            // enable, clear and sPC-mode behavior.  Avoiding a clock per pair
+            // also makes all 2^24 arithmetic combinations practical in CI.
+            if ($signed(dut.dual_next) !== expected_dual ||
+                dut.dual_saturated_next !== expected_dual_sat) begin
                 $display("FAIL dual d=%0d r=%0d scaled=%0d rounded=%0d got=%0d/%0b exp=%0d/%0d",
                          d, r, expected_scaled, expected_rounded,
-                         $signed(dual_q), dual_saturated,
+                         $signed(dut.dual_next), dut.dual_saturated_next,
                          expected_dual, expected_dual_sat);
                 $fatal(1);
             end
             checked = checked + 1;
-            @(negedge clk);
         end
     endtask
 
@@ -121,7 +122,10 @@ module tb_pcalm_dual_update_exhaustive;
         rst_n = 1'b0;
         #2;
         rst_n = 1'b1;
-        load_dual(1234);
+        @(negedge clk);
+        mode_pcalm = 1'b1;
+        dut.dual_reg = 1234;
+        #0;
         mode_pcalm = 1'b0;
         residual_q = -321;
         #0;
@@ -129,6 +133,7 @@ module tb_pcalm_dual_update_exhaustive;
 
         // Exhaust all 2^24 signed 12-bit (lambda,residual) combinations.
         // This checks rounding, both saturation boundaries and pre-dual credit.
+        mode_pcalm = 1'b1;
         for (dual_i = DATA_MIN; dual_i <= DATA_MAX; dual_i = dual_i + 1) begin
             for (residual_i = DATA_MIN; residual_i <= DATA_MAX; residual_i = residual_i + 1) begin
                 check_pair(dual_i, residual_i);
