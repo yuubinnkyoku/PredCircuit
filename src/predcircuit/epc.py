@@ -47,7 +47,9 @@ def error_energy(
 ) -> torch.Tensor:
     """Official ePC error-coordinate energy, using sum reduction for inference."""
     _, output = states_from_errors(model, x, errors)
-    error_term = sum(0.5 * error.square().sum() for error in errors)
+    error_term = torch.zeros((), dtype=x.dtype, device=x.device)
+    for error in errors:
+        error_term = error_term + 0.5 * error.square().sum()
     supervised = 0.5 * (output - y).square().sum()
     return error_term + supervised
 
@@ -107,7 +109,10 @@ def run_epc(
         variables = [error.detach().requires_grad_(True) for error in current]
         energy = error_energy(model, x, y, variables)
         grads = torch.autograd.grad(energy, variables)
-        current = [(error - error_lr * grad).detach() for error, grad in zip(variables, grads, strict=True)]
+        current = [
+            (error - error_lr * grad).detach()
+            for error, grad in zip(variables, grads, strict=True)
+        ]
 
         if trace is not None:
             trace.energy.append(float(energy.detach()))
@@ -130,7 +135,14 @@ def epc_grad(
     steps: int,
 ) -> tuple[list[torch.Tensor], bool]:
     """Return local ePC weight credit after error-coordinate inference."""
-    errors, trace = run_epc(model, x, y, error_lr=error_lr, steps=steps, record_trace=True)
+    errors, trace = run_epc(
+        model,
+        x,
+        y,
+        error_lr=error_lr,
+        steps=steps,
+        record_trace=True,
+    )
     energy = local_weight_energy(model, x, y, errors)
     grads = torch.autograd.grad(energy, tuple(model.weights), allow_unused=False)
     result = [grad.detach().clone() for grad in grads]
