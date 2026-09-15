@@ -20,6 +20,11 @@ def main() -> None:
         type=Path,
         default=Path("results/generated/pcalm_matched_credit_summary.csv"),
     )
+    parser.add_argument(
+        "--curve-out",
+        type=Path,
+        default=Path("results/generated/pcalm_matched_credit_common_budget.csv"),
+    )
     args = parser.parse_args()
 
     paths = sorted(args.input.rglob("pcalm_matched_credit_budget_seed*.csv"))
@@ -134,14 +139,31 @@ def main() -> None:
     )
 
     summary = pd.DataFrame(summary_rows)
+    curve = (
+        frame.groupby(["method", "budget"], as_index=False)
+        .agg(
+            seeds=("seed", "nunique"),
+            useful_rate=("useful_first_layer_credit", "mean"),
+            finite_rate=("finite", "mean"),
+            cosine_mean=("first_layer_cosine_to_bp", "mean"),
+            norm_ratio_mean=("first_layer_grad_norm_ratio_to_bp", "mean"),
+            relative_error_mean=("first_layer_relative_error_to_bp", "mean"),
+        )
+        .sort_values(["method", "budget"])
+    )
+
     args.detail_out.parent.mkdir(parents=True, exist_ok=True)
     args.summary_out.parent.mkdir(parents=True, exist_ok=True)
+    args.curve_out.parent.mkdir(parents=True, exist_ok=True)
     minimums.to_csv(args.detail_out, index=False)
     summary.to_csv(args.summary_out, index=False)
+    curve.to_csv(args.curve_out, index=False)
     print("minimums")
     print(minimums.to_string(index=False))
     print("\nsummary")
     print(summary.to_string(index=False))
+    print("\ncommon-budget curve")
+    print(curve.to_string(index=False))
     print(
         "\nCycle thresholds use the current 128-MAC/32-dual-lane model: overlap wins at "
         "T_pcalm/T_spc < 1; serialized wins below 0.80255. The pessimistic state-traffic "
