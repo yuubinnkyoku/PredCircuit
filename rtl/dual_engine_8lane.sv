@@ -108,7 +108,9 @@ module dual_engine_8lane #(
         end
     end
 
-    always_ff @(posedge clk or negedge rst_n) begin
+    // Keep reset synchronous so the RAM write/read process has only one clock
+    // edge. The dual memory itself is never reset; clear_all zero-fills it.
+    always_ff @(posedge clk) begin
         if (!rst_n) begin
             clear_busy <= 1'b0;
             clear_addr <= '0;
