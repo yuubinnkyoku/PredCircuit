@@ -1,0 +1,41 @@
+name: PC-ALM MAC operand precision holdout
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: [.github/workflows/pcalm-mac-operand-precision.yml]
+
+jobs:
+  seed:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [800,801,802,803,804,805,806,807,808,809,810,811,812,813,814,815,816,817,818,819]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv run python scripts/diagnose_pcalm_mac_operand_precision.py --seed ${{ matrix.seed }} --out results/generated/pcalm_mac_operand_precision_seed${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pcalm-mac-operand-precision-seed-${{ matrix.seed }}
+          path: results/generated/pcalm_mac_operand_precision_seed${{ matrix.seed }}.csv
+          if-no-files-found: error
+  aggregate:
+    needs: seed
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: pcalm-mac-operand-precision-seed-*
+          path: artifacts
+          merge-multiple: true
+      - run: uv run python scripts/aggregate_pcalm_mac_operand_precision.py --input artifacts --out results/generated/pcalm_mac_operand_precision_summary.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pcalm-mac-operand-precision-aggregate
+          path: results/generated/pcalm_mac_operand_precision_summary.csv
+          if-no-files-found: error
