@@ -59,6 +59,7 @@ def main() -> None:
         reached = subset[subset["reached"].astype(bool)]
         summary_rows.append(
             {
+                "row_type": "method",
                 "method": method,
                 "seeds": len(subset),
                 "reach_count": len(reached),
@@ -78,58 +79,57 @@ def main() -> None:
                 ),
                 "all_finite_rate": float(subset["all_finite"].astype(bool).mean()),
                 "max_budget_tested": int(subset["max_budget_tested"].max()),
+                "paired_count": float("nan"),
+                "paired_t_ratio_median": float("nan"),
+                "paired_overlap_cycle_win_rate": float("nan"),
+                "paired_serial_cycle_win_rate": float("nan"),
+                "paired_state_traffic_proxy_win_rate": float("nan"),
+                "pcalm_reached_spc_censored_count": float("nan"),
+                "censored_proven_state_traffic_win_count": float("nan"),
             }
         )
 
     wide = minimums.pivot(index="seed", columns="method", values="minimum_budget")
     reached_wide = minimums.pivot(index="seed", columns="method", values="reached").astype(bool)
-    spc_max = int(
-        minimums.loc[minimums["method"] == "spc", "max_budget_tested"].max()
-    )
+    spc_max = int(minimums.loc[minimums["method"] == "spc", "max_budget_tested"].max())
 
     paired = wide.dropna(subset=["spc", "pcalm_leak"])
     if not paired.empty:
         ratios = paired["pcalm_leak"] / paired["spc"]
-        paired_count = len(paired)
         ratio_median = float(ratios.median())
         overlap_win_rate = float((ratios < 1.0).mean())
         serialized_win_rate = float((ratios < 0.80255).mean())
         traffic_win_rate = float((ratios < 0.5).mean())
     else:
-        paired_count = 0
+        ratios = pd.Series(dtype=float)
         ratio_median = float("nan")
         overlap_win_rate = float("nan")
         serialized_win_rate = float("nan")
         traffic_win_rate = float("nan")
 
     pcalm_reached_spc_censored = reached_wide["pcalm_leak"] & ~reached_wide["spc"]
-    censored = wide.loc[pcalm_reached_spc_censored, "pcalm_leak"]
-    proven_traffic_wins_censored = int((censored / spc_max < 0.5).sum())
+    censored_pcalm_t = wide.loc[pcalm_reached_spc_censored, "pcalm_leak"]
+    proven_traffic_wins_censored = int((censored_pcalm_t / spc_max < 0.5).sum())
 
     summary_rows.append(
         {
-            "method": "paired_pcalm_leak_vs_spc",
+            "row_type": "comparison",
+            "method": "pcalm_leak_vs_spc",
             "seeds": len(seeds),
-            "reach_count": paired_count,
-            "reach_rate": float(paired_count / len(seeds)),
-            "minimum_budget_median_reached": ratio_median,
-            "minimum_budget_q25_reached": overlap_win_rate,
-            "minimum_budget_q75_reached": serialized_win_rate,
-            "all_finite_rate": traffic_win_rate,
-            "max_budget_tested": spc_max,
-        }
-    )
-    summary_rows.append(
-        {
-            "method": "censored_spc_break_even",
-            "seeds": len(seeds),
-            "reach_count": int(pcalm_reached_spc_censored.sum()),
-            "reach_rate": float(pcalm_reached_spc_censored.mean()),
-            "minimum_budget_median_reached": float(proven_traffic_wins_censored),
+            "reach_count": float("nan"),
+            "reach_rate": float("nan"),
+            "minimum_budget_median_reached": float("nan"),
             "minimum_budget_q25_reached": float("nan"),
             "minimum_budget_q75_reached": float("nan"),
             "all_finite_rate": float("nan"),
             "max_budget_tested": spc_max,
+            "paired_count": len(ratios),
+            "paired_t_ratio_median": ratio_median,
+            "paired_overlap_cycle_win_rate": overlap_win_rate,
+            "paired_serial_cycle_win_rate": serialized_win_rate,
+            "paired_state_traffic_proxy_win_rate": traffic_win_rate,
+            "pcalm_reached_spc_censored_count": int(pcalm_reached_spc_censored.sum()),
+            "censored_proven_state_traffic_win_count": proven_traffic_wins_censored,
         }
     )
 
@@ -143,12 +143,9 @@ def main() -> None:
     print("\nsummary")
     print(summary.to_string(index=False))
     print(
-        "\npaired row encodes: median T_ratio, overlap win rate, serialized win rate, "
-        "traffic-proxy win rate in the median/q25/q75/all_finite columns respectively."
-    )
-    print(
-        "censored row reach_count = PC-ALM-leak reached while sPC missed by its max budget; "
-        "median column = subset already proving T_pcalm/T_spc < 0.5 from censoring alone."
+        "\nCycle thresholds use the current 128-MAC/32-dual-lane model: overlap wins at "
+        "T_pcalm/T_spc < 1; serialized wins below 0.80255. The pessimistic state-traffic "
+        "proxy wins below 0.5."
     )
 
 
