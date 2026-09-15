@@ -146,9 +146,7 @@ def main() -> None:
                     grads, reference
                 ),
                 "operand_saturation_rate": (
-                    model.operand_saturated / model.operand_total
-                    if model.operand_total
-                    else 0.0
+                    model.operand_saturated / model.operand_total if model.operand_total else 0.0
                 ),
                 "max_abs_operand_pre_quant": model.max_abs_operand_pre_quant,
                 **metrics,
