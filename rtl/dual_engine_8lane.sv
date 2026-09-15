@@ -27,6 +27,8 @@ module dual_engine_8lane #(
 
     logic signed [DATA_W-1:0] dual_mem [0:7][0:DEPTH-1];
     logic signed [DATA_W-1:0] dual_next [0:7];
+    logic signed [WIDE_W-1:0] dual_ext [0:7];
+    logic signed [WIDE_W-1:0] residual_ext [0:7];
     logic signed [WIDE_W-1:0] dual_scaled [0:7];
     logic signed [WIDE_W-1:0] dual_rounded [0:7];
     logic signed [WIDE_W-1:0] credit_wide [0:7];
@@ -52,13 +54,15 @@ module dual_engine_8lane #(
     always_comb begin
         for (i = 0; i < 8; i = i + 1) begin
             dual_q[i] = dual_mem[i][addr];
+            dual_ext[i] = {{(WIDE_W-DATA_W){dual_q[i][DATA_W-1]}}, dual_q[i]};
+            residual_ext[i] = {{(WIDE_W-DATA_W){residual_q[i][DATA_W-1]}}, residual_q[i]};
             // lambda' = (253*lambda + 237*r)/256, using shifts/adds only.
             dual_scaled[i] =
-                ($signed(dual_q[i]) <<< 8) - ($signed(dual_q[i]) <<< 1) - $signed(dual_q[i])
-                + ($signed(residual_q[i]) <<< 8) - ($signed(residual_q[i]) <<< 4)
-                - ($signed(residual_q[i]) <<< 1) - $signed(residual_q[i]);
+                (dual_ext[i] <<< 8) - (dual_ext[i] <<< 1) - dual_ext[i]
+                + (residual_ext[i] <<< 8) - (residual_ext[i] <<< 4)
+                - (residual_ext[i] <<< 1) - residual_ext[i];
             dual_rounded[i] = round_shift_dyadic(dual_scaled[i]);
-            credit_wide[i] = $signed(dual_q[i]) + $signed(residual_q[i]);
+            credit_wide[i] = dual_ext[i] + residual_ext[i];
 
             dual_sat_next[i] = 1'b0;
             if (dual_rounded[i] > $signed(DATA_MAX)) begin
