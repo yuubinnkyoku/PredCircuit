@@ -1,0 +1,34 @@
+name: RTL smoke
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - rtl/**
+      - .github/workflows/rtl-smoke.yml
+  pull_request:
+    paths:
+      - rtl/**
+      - .github/workflows/rtl-smoke.yml
+
+jobs:
+  simulate-and-synthesize:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install RTL tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y iverilog yosys
+      - name: Run fixed-point dual-update simulation
+        run: |
+          mkdir -p build/rtl
+          iverilog -g2012 -Wall \
+            -s tb_pcalm_dual_update \
+            -o build/rtl/tb_pcalm_dual_update \
+            rtl/pcalm_dual_update.sv rtl/tb_pcalm_dual_update.sv
+          vvp build/rtl/tb_pcalm_dual_update
+      - name: Check synthesizability
+        run: |
+          yosys -p 'read_verilog -sv rtl/pcalm_dual_update.sv; hierarchy -top pcalm_dual_update; proc; opt; check; stat'
