@@ -110,8 +110,7 @@ def run_epc(
         energy = error_energy(model, x, y, variables)
         grads = torch.autograd.grad(energy, variables)
         current = [
-            (error - error_lr * grad).detach()
-            for error, grad in zip(variables, grads, strict=True)
+            (error - error_lr * grad).detach() for error, grad in zip(variables, grads, strict=True)
         ]
 
         if trace is not None:
@@ -119,8 +118,10 @@ def run_epc(
             trace.max_abs_error.append(
                 max((float(error.abs().max()) for error in current), default=0.0)
             )
-            trace.finite = trace.finite and bool(torch.isfinite(energy)) and all(
-                bool(torch.isfinite(error).all()) for error in current
+            trace.finite = (
+                trace.finite
+                and bool(torch.isfinite(energy))
+                and all(bool(torch.isfinite(error).all()) for error in current)
             )
 
     return current, trace
