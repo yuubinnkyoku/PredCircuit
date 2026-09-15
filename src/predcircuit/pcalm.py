@@ -1,37 +1,37 @@
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass
+import math
 from typing import Literal
 
 import torch
 
+
+ActivationName = Literal["linear", "tanh", "relu"]
 WeightCreditTiming = Literal["pre_dual_energy", "post_dual_energy"]
-MethodFamily = Literal["bp", "pc", "pcalm"]
+ScheduleFamily = Literal["pc", "pcalm", "pcalm_leak"]
 
 
 @dataclass(frozen=True)
-class Schedule:
-    family: MethodFamily
-    budget: int
-    alpha: float = 0.0
-    inner_steps: int = 1
+class PCALMSchedule:
+    family: ScheduleFamily
+    rho: float = 1.0
+    alpha: float = 1.0
+    dual_leak: float = 1.0
     weight_credit_timing: WeightCreditTiming = "pre_dual_energy"
 
 
 @dataclass
-class InferenceTrace:
-    residual_norms: list[list[float]]
-    dual_norms: list[list[float]]
-    max_abs_dual: list[float]
+class PCALMTrace:
     finite: bool
+    residual_norm: list[float]
+    dual_norm: list[float]
+    max_abs_dual: list[float]
     max_abs_residuals: list[list[float]] | None = None
     max_abs_dual_updates: list[list[float]] | None = None
 
 
-class ResidualMLP(torch.nn.Module):
-    """Residual MLP matching SakanaAI/pc-alm's reference parameterization."""
-
+class ResidualMLP:
     def __init__(
         self,
         *,
@@ -39,97 +39,80 @@ class ResidualMLP(torch.nn.Module):
         width: int,
         input_dim: int,
         output_dim: int,
-        activation: Literal["linear", "tanh", "relu"] = "tanh",
+        activation: ActivationName = "relu",
         seed: int = 0,
         dtype: torch.dtype = torch.float32,
     ) -> None:
-        super().__init__()
         if depth < 2:
-            raise ValueError("depth must include at least one hidden layer and one output layer")
-        if width < 1 or input_dim < 1 or output_dim < 1:
-            raise ValueError("width, input_dim, and output_dim must be positive")
-        if activation not in {"linear", "tanh", "relu"}:
-            raise ValueError(f"unknown activation: {activation}")
-
+            raise ValueError("depth must be at least 2")
         self.depth = depth
         self.width = width
         self.input_dim = input_dim
         self.output_dim = output_dim
-        self.activation_name = activation
-        self.scales = tuple(
-            [1.0 / math.sqrt(input_dim)]
-            + [1.0 / math.sqrt(width * depth)] * (depth - 2)
-            + [1.0 / width]
-        )
-        self.skips = tuple([False] + [True] * (depth - 2) + [False])
+        self.activation = activation
+        generator = torch.Generator().manual_seed(seed)
 
-        gen = torch.Generator().manual_seed(seed)
-        weights: list[torch.nn.Parameter] = []
-        for layer_ix in range(depth):
-            in_dim = input_dim if layer_ix == 0 else width
-            out_dim = output_dim if layer_ix == depth - 1 else width
-            value = torch.randn(out_dim, in_dim, generator=gen, dtype=dtype)
-            weights.append(torch.nn.Parameter(value))
-        self.weights = torch.nn.ParameterList(weights)
+        weights: list[torch.Tensor] = []
+        weights.append(torch.randn(width, input_dim, generator=generator, dtype=dtype))
+        for _ in range(1, depth - 1):
+            weights.append(torch.randn(width, width, generator=generator, dtype=dtype))
+        weights.append(torch.randn(output_dim, width, generator=generator, dtype=dtype))
+        self.weights = [w.requires_grad_(True) for w in weights]
 
-    def activation(self, x: torch.Tensor) -> torch.Tensor:
-        if self.activation_name == "linear":
-            return x
-        if self.activation_name == "tanh":
-            return torch.tanh(x)
-        return torch.relu(x)
+        self.scales = [1.0 / math.sqrt(input_dim)]
+        self.scales.extend([1.0 / math.sqrt(width * depth)] * (depth - 2))
+        self.scales.append(1.0 / width)
+        self.skips = [False] + [True] * (depth - 2) + [False]
 
-    def block_pred(self, layer_ix: int, z_prev: torch.Tensor) -> torch.Tensor:
-        inp = z_prev if layer_ix == 0 else self.activation(z_prev)
-        pred = self.scales[layer_ix] * (inp @ self.weights[layer_ix].T)
+    def activate(self, value: torch.Tensor) -> torch.Tensor:
+        if self.activation == "linear":
+            return value
+        if self.activation == "tanh":
+            return torch.tanh(value)
+        if self.activation == "relu":
+            return torch.relu(value)
+        raise ValueError(f"unknown activation: {self.activation}")
+
+    def block_pred(self, layer_ix: int, state: torch.Tensor) -> torch.Tensor:
+        pred = self.scales[layer_ix] * (state @ self.weights[layer_ix].T)
+        pred = self.activate(pred)
         if self.skips[layer_ix]:
-            pred = pred + z_prev
+            pred = pred + state
         return pred
 
-    def forward_activations(self, x: torch.Tensor) -> list[torch.Tensor]:
-        acts: list[torch.Tensor] = []
-        z_prev = x
-        for layer_ix in range(self.depth):
-            z_prev = self.block_pred(layer_ix, z_prev)
-            acts.append(z_prev)
-        return acts
+    def forward_hidden(self, x: torch.Tensor) -> list[torch.Tensor]:
+        hidden: list[torch.Tensor] = []
+        state = x
+        for layer_ix in range(self.depth - 1):
+            state = self.block_pred(layer_ix, state)
+            hidden.append(state)
+        return hidden
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.forward_activations(x)[-1]
+        hidden = self.forward_hidden(x)
+        return self.block_pred(self.depth - 1, hidden[-1])
 
 
 def free_init(model: ResidualMLP, x: torch.Tensor) -> list[torch.Tensor]:
-    return [z.detach().clone() for z in model.forward_activations(x)[:-1]]
+    return [state.detach().clone() for state in model.forward_hidden(x)]
 
 
 def constraint_residuals(
-    model: ResidualMLP,
-    x: torch.Tensor,
-    free: list[torch.Tensor],
+    model: ResidualMLP, x: torch.Tensor, free: list[torch.Tensor]
 ) -> list[torch.Tensor]:
     residuals: list[torch.Tensor] = []
-    for layer_ix, z_l in enumerate(free):
-        z_prev = x if layer_ix == 0 else free[layer_ix - 1]
-        residuals.append(z_l - model.block_pred(layer_ix, z_prev))
+    prev = x
+    for layer_ix, state in enumerate(free):
+        residuals.append(state - model.block_pred(layer_ix, prev))
+        prev = state
     return residuals
 
 
-def zero_duals_like(residuals: list[torch.Tensor]) -> list[torch.Tensor]:
-    return [torch.zeros_like(r) for r in residuals]
-
-
 def supervised_loss(
-    model: ResidualMLP,
-    y: torch.Tensor,
-    free: list[torch.Tensor],
+    model: ResidualMLP, y: torch.Tensor, free: list[torch.Tensor]
 ) -> torch.Tensor:
-    y_pred = model.block_pred(model.depth - 1, free[-1])
-    return 0.5 * (y_pred - y).square().sum(dim=-1).mean()
-
-
-def bp_loss(model: ResidualMLP, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
-    y_pred = model(x)
-    return 0.5 * (y_pred - y).square().sum(dim=-1).mean()
+    prediction = model.block_pred(model.depth - 1, free[-1])
+    return 0.5 * ((prediction - y) ** 2).sum(dim=1).mean()
 
 
 def al_energy_shifted(
@@ -141,17 +124,17 @@ def al_energy_shifted(
     *,
     rho: float,
 ) -> torch.Tensor:
-    if rho <= 0.0:
-        raise ValueError("rho must be positive")
     residuals = constraint_residuals(model, x, free)
-    if len(residuals) != len(duals):
-        raise ValueError("free and duals must describe the same hidden layers")
-    total = supervised_loss(model, y, free)
     batch_size = x.shape[0]
+    penalty = torch.zeros((), dtype=x.dtype, device=x.device)
     for residual, dual in zip(residuals, duals, strict=True):
         shifted = residual + dual / rho
-        total = total + 0.5 * rho * shifted.square().sum() / batch_size
-    return total
+        penalty = penalty + 0.5 * rho * (shifted**2).sum() / batch_size
+    return supervised_loss(model, y, free) + penalty
+
+
+def zero_duals_like(residuals: list[torch.Tensor]) -> list[torch.Tensor]:
+    return [torch.zeros_like(residual) for residual in residuals]
 
 
 def _solve_inner(
@@ -165,66 +148,16 @@ def _solve_inner(
     rho: float,
     steps: int,
 ) -> list[torch.Tensor]:
-    if steps < 0:
-        raise ValueError("steps must be non-negative")
-    if state_lr < 0.0:
-        raise ValueError("state_lr must be non-negative")
-    if steps == 0:
-        return [z.detach().clone() for z in free]
-
-    effective_lr = state_lr * x.shape[0]
-    current = [z.detach().clone() for z in free]
-    fixed_duals = [d.detach() for d in duals]
+    batch_size = x.shape[0]
     for _ in range(steps):
-        variables = [z.detach().requires_grad_(True) for z in current]
-        energy = al_energy_shifted(model, x, y, variables, fixed_duals, rho=rho)
-        grads = torch.autograd.grad(energy, variables)
-        current = [(z - effective_lr * g).detach() for z, g in zip(variables, grads, strict=True)]
-    return current
-
-
-def _trace_snapshot(
-    model: ResidualMLP,
-    x: torch.Tensor,
-    free: list[torch.Tensor],
-    duals: list[torch.Tensor],
-) -> tuple[list[float], list[float], float, bool, list[float]]:
-    with torch.no_grad():
-        residuals = constraint_residuals(model, x, free)
-        residual_norms = [float(r.norm()) for r in residuals]
-        dual_norms = [float(d.norm()) for d in duals]
-        max_abs_dual = max((float(d.abs().max()) for d in duals), default=0.0)
-        max_abs_residuals = [float(r.abs().max()) for r in residuals]
-        tensors = [*free, *duals, *residuals]
-        finite = all(bool(torch.isfinite(t).all()) for t in tensors)
-    return residual_norms, dual_norms, max_abs_dual, finite, max_abs_residuals
-
-
-def _new_trace() -> InferenceTrace:
-    return InferenceTrace([], [], [], True, [], [])
-
-
-def _append_trace_snapshot(
-    trace: InferenceTrace,
-    model: ResidualMLP,
-    x: torch.Tensor,
-    free: list[torch.Tensor],
-    duals: list[torch.Tensor],
-    *,
-    alpha: float | None = None,
-) -> None:
-    residual_norms, dual_norms, max_abs_dual, finite, max_abs_residuals = _trace_snapshot(
-        model, x, free, duals
-    )
-    trace.residual_norms.append(residual_norms)
-    trace.dual_norms.append(dual_norms)
-    trace.max_abs_dual.append(max_abs_dual)
-    assert trace.max_abs_residuals is not None
-    trace.max_abs_residuals.append(max_abs_residuals)
-    if alpha is not None:
-        assert trace.max_abs_dual_updates is not None
-        trace.max_abs_dual_updates.append([abs(alpha) * value for value in max_abs_residuals])
-    trace.finite = trace.finite and finite
+        vars_ = [state.detach().requires_grad_(True) for state in free]
+        loss = al_energy_shifted(model, x, y, vars_, duals, rho=rho)
+        grads = torch.autograd.grad(loss, tuple(vars_), allow_unused=False)
+        free = [
+            (state - state_lr * batch_size * grad).detach()
+            for state, grad in zip(vars_, grads, strict=True)
+        ]
+    return free
 
 
 def run_pc(
@@ -234,32 +167,22 @@ def run_pc(
     *,
     state_lr: float,
     rho: float,
-    steps: int,
-    record_trace: bool = False,
-) -> tuple[list[torch.Tensor], list[torch.Tensor], InferenceTrace | None]:
+    budget: int,
+) -> tuple[list[torch.Tensor], list[torch.Tensor]]:
     free = free_init(model, x)
-    duals = zero_duals_like(constraint_residuals(model, x, free))
-    trace = _new_trace() if record_trace else None
-
-    if record_trace:
-        assert trace is not None
-        _append_trace_snapshot(trace, model, x, free, duals)
-
-    for _ in range(steps):
-        free = _solve_inner(
-            model,
-            x,
-            y,
-            free,
-            duals,
-            state_lr=state_lr,
-            rho=rho,
-            steps=1,
-        )
-        if record_trace:
-            assert trace is not None
-            _append_trace_snapshot(trace, model, x, free, duals)
-    return free, duals, trace
+    residuals = constraint_residuals(model, x, free)
+    duals = zero_duals_like(residuals)
+    free = _solve_inner(
+        model,
+        x,
+        y,
+        free,
+        duals,
+        state_lr=state_lr,
+        rho=rho,
+        steps=budget,
+    )
+    return free, duals
 
 
 def run_pcalm(
@@ -271,95 +194,119 @@ def run_pcalm(
     rho: float,
     alpha: float,
     budget: int,
-    inner_steps: int = 1,
+    dual_leak: float = 1.0,
     weight_credit_timing: WeightCreditTiming = "pre_dual_energy",
     record_trace: bool = False,
-) -> tuple[list[torch.Tensor], list[torch.Tensor], InferenceTrace | None]:
-    if budget < 1:
-        raise ValueError("PC-ALM budget must be at least 1")
-    if inner_steps < 1:
-        raise ValueError("PC-ALM inner_steps must be at least 1")
-    if weight_credit_timing not in {"pre_dual_energy", "post_dual_energy"}:
-        raise ValueError("weight_credit_timing must be pre_dual_energy or post_dual_energy")
-
+) -> tuple[list[torch.Tensor], list[torch.Tensor], PCALMTrace | None]:
     free = free_init(model, x)
-    duals = zero_duals_like(constraint_residuals(model, x, free))
-    trace = _new_trace() if record_trace else None
+    residuals = constraint_residuals(model, x, free)
+    duals = zero_duals_like(residuals)
+    residual_norms: list[float] = []
+    dual_norms: list[float] = []
+    max_abs_dual: list[float] = []
+    max_abs_residuals: list[list[float]] | None = [] if record_trace else None
+    max_abs_dual_updates: list[list[float]] | None = [] if record_trace else None
+    finite = True
+    duals_weight = [dual.detach().clone() for dual in duals]
 
-    if record_trace:
-        assert trace is not None
-        _append_trace_snapshot(trace, model, x, free, duals)
-
-    duals_before = duals
-    for outer_ix in range(budget):
+    for _ in range(budget):
         free = _solve_inner(
             model,
             x,
             y,
             free,
-            duals_before,
+            duals,
             state_lr=state_lr,
             rho=rho,
-            steps=inner_steps,
+            steps=1,
         )
         residuals = constraint_residuals(model, x, free)
-        duals_after = [
-            (lam + alpha * residual).detach()
-            for lam, residual in zip(duals_before, residuals, strict=True)
+        duals_weight = [dual.detach().clone() for dual in duals]
+        dual_updates = [alpha * residual for residual in residuals]
+        duals = [
+            (dual_leak * dual + update).detach()
+            for dual, update in zip(duals, dual_updates, strict=True)
         ]
+        if weight_credit_timing == "post_dual_energy":
+            duals_weight = [dual.detach().clone() for dual in duals]
+        elif weight_credit_timing != "pre_dual_energy":
+            raise ValueError(f"unknown weight credit timing: {weight_credit_timing}")
 
         if record_trace:
-            assert trace is not None
-            _append_trace_snapshot(trace, model, x, free, duals_after, alpha=alpha)
-
-        if outer_ix == budget - 1:
-            duals_weight = (
-                duals_before if weight_credit_timing == "pre_dual_energy" else duals_after
+            residual_norms.append(
+                math.sqrt(sum(float((residual**2).sum()) for residual in residuals))
             )
-            return free, duals_weight, trace
-        duals_before = duals_after
+            dual_norms.append(math.sqrt(sum(float((dual**2).sum()) for dual in duals)))
+            max_abs_dual.append(max(float(dual.abs().max()) for dual in duals))
+            assert max_abs_residuals is not None
+            assert max_abs_dual_updates is not None
+            max_abs_residuals.append([float(residual.abs().max()) for residual in residuals])
+            max_abs_dual_updates.append([float(update.abs().max()) for update in dual_updates])
+            finite = finite and all(bool(torch.isfinite(state).all()) for state in free)
+            finite = finite and all(bool(torch.isfinite(dual).all()) for dual in duals)
 
-    raise AssertionError("unreachable")
+    trace = None
+    if record_trace:
+        trace = PCALMTrace(
+            finite=finite,
+            residual_norm=residual_norms,
+            dual_norm=dual_norms,
+            max_abs_dual=max_abs_dual,
+            max_abs_residuals=max_abs_residuals,
+            max_abs_dual_updates=max_abs_dual_updates,
+        )
+    return free, duals_weight, trace
+
+
+def bp_loss(model: ResidualMLP, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+    prediction = model.forward(x)
+    return 0.5 * ((prediction - y) ** 2).sum(dim=1).mean()
+
+
+def bp_grad(model: ResidualMLP, x: torch.Tensor, y: torch.Tensor) -> list[torch.Tensor]:
+    loss = bp_loss(model, x, y)
+    grads = torch.autograd.grad(loss, tuple(model.weights), allow_unused=False)
+    return [grad.detach().clone() for grad in grads]
 
 
 def method_grad(
     model: ResidualMLP,
     x: torch.Tensor,
     y: torch.Tensor,
-    schedule: Schedule,
     *,
+    schedule: PCALMSchedule,
     state_lr: float,
-    rho: float,
+    budget: int,
 ) -> list[torch.Tensor]:
-    if schedule.family == "bp":
-        loss = bp_loss(model, x, y)
-    elif schedule.family == "pc":
-        free, duals, _ = run_pc(
+    if schedule.family == "pc":
+        free, duals = run_pc(
             model,
             x,
             y,
             state_lr=state_lr,
-            rho=rho,
-            steps=schedule.budget,
+            rho=schedule.rho,
+            budget=budget,
         )
         free = [z.detach() for z in free]
         duals = [d.detach() for d in duals]
-        loss = al_energy_shifted(model, x, y, free, duals, rho=rho)
-    elif schedule.family == "pcalm":
+        loss = al_energy_shifted(model, x, y, free, duals, rho=schedule.rho)
+    elif schedule.family in ("pcalm", "pcalm_leak"):
+        dual_leak = schedule.dual_leak if schedule.family == "pcalm_leak" else 1.0
         free, duals, _ = run_pcalm(
             model,
             x,
             y,
             state_lr=state_lr,
-            rho=rho,
+            rho=schedule.rho,
             alpha=schedule.alpha,
-            budget=schedule.budget,
-            inner_steps=schedule.inner_steps,
+            budget=budget,
+            dual_leak=dual_leak,
             weight_credit_timing=schedule.weight_credit_timing,
+            record_trace=False,
         )
         free = [z.detach() for z in free]
         duals = [d.detach() for d in duals]
-        loss = al_energy_shifted(model, x, y, free, duals, rho=rho)
+        loss = al_energy_shifted(model, x, y, free, duals, rho=schedule.rho)
     else:
         raise ValueError(f"unknown schedule family: {schedule.family}")
 
