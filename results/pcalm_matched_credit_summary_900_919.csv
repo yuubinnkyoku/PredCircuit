@@ -1,0 +1,5 @@
+row_type,method,seeds,reach_count,reach_rate,minimum_budget_median_reached,minimum_budget_q25_reached,minimum_budget_q75_reached,all_finite_rate,max_budget_tested,paired_count,paired_t_ratio_median,paired_overlap_cycle_win_rate,paired_serial_cycle_win_rate,paired_state_traffic_proxy_win_rate,pcalm_reached_spc_censored_count,censored_proven_state_traffic_win_count
+method,spc,20,0,0.0,,,,1.0,256,,,,,,, 
+method,pcalm,20,17,0.85,96.0,64.0,112.0,1.0,160,,,,,,, 
+method,pcalm_leak,20,19,0.95,96.0,80.0,112.0,1.0,160,,,,,,, 
+comparison,pcalm_leak_vs_spc,20,,,,,,,256,0,,,,,19,17
