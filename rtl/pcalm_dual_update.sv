@@ -1,3 +1,4 @@
+`timescale 1ns/1ps
 `default_nettype none
 
 module pcalm_dual_update #(
@@ -28,6 +29,7 @@ module pcalm_dual_update #(
     logic signed [DATA_W-1:0] dual_reg;
     logic signed [DATA_W-1:0] dual_next;
     logic signed [DATA_W-1:0] effective_dual;
+    logic dual_saturated_next;
 
     logic signed [WIDE_W-1:0] dual_update_scaled;
     logic signed [WIDE_W-1:0] credit_scaled;
@@ -55,9 +57,9 @@ module pcalm_dual_update #(
     endfunction
 
     always_comb begin
-        // sPC is the alpha=0 / no-dual special case. Bypass lambda
-        // combinationally as soon as mode_pcalm is low; do not wait for the
-        // next clock edge that clears the physical dual register.
+        // sPC is the no-dual special case. Bypass lambda combinationally as
+        // soon as mode_pcalm is low; do not wait for the next clock edge that
+        // clears the physical dual register.
         effective_dual = mode_pcalm ? dual_reg : '0;
 
         // Keep lambda and residual in the same DATA_W fixed-point format.
@@ -71,13 +73,13 @@ module pcalm_dual_update #(
         dual_update_rounded = round_shift_nearest(dual_update_scaled);
         credit_rounded = round_shift_nearest(credit_scaled);
 
-        dual_saturated = 1'b0;
+        dual_saturated_next = 1'b0;
         if (dual_update_rounded > $signed(DATA_MAX)) begin
             dual_next = DATA_MAX;
-            dual_saturated = mode_pcalm;
+            dual_saturated_next = mode_pcalm;
         end else if (dual_update_rounded < $signed(DATA_MIN)) begin
             dual_next = DATA_MIN;
-            dual_saturated = mode_pcalm;
+            dual_saturated_next = mode_pcalm;
         end else begin
             dual_next = dual_update_rounded[DATA_W-1:0];
         end
@@ -97,10 +99,13 @@ module pcalm_dual_update #(
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             dual_reg <= '0;
+            dual_saturated <= 1'b0;
         end else if (clear_dual || !mode_pcalm) begin
             dual_reg <= '0;
+            dual_saturated <= 1'b0;
         end else if (enable) begin
             dual_reg <= dual_next;
+            dual_saturated <= dual_saturated_next;
         end
     end
 
