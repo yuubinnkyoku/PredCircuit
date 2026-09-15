@@ -10,6 +10,7 @@ jobs:
   probe:
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         seed: [940, 941, 942, 943, 944]
     steps:
