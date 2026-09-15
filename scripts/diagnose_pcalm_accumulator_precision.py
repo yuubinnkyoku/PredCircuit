@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import math
 from pathlib import Path
+from typing import Literal
 
 import pandas as pd
 import torch
@@ -29,8 +30,28 @@ class AccumulatorQuantizedResidualMLP(OperandQuantizedResidualMLP):
     accumulator precision from operand precision.
     """
 
-    def __init__(self, *, accumulator_precision: str, **kwargs: object) -> None:
-        super().__init__(operand_precision="fixed12_i3", **kwargs)
+    def __init__(
+        self,
+        *,
+        depth: int,
+        width: int,
+        input_dim: int,
+        output_dim: int,
+        activation: Literal["linear", "tanh", "relu"] = "tanh",
+        seed: int = 0,
+        dtype: torch.dtype = torch.float32,
+        accumulator_precision: str,
+    ) -> None:
+        super().__init__(
+            depth=depth,
+            width=width,
+            input_dim=input_dim,
+            output_dim=output_dim,
+            activation=activation,
+            seed=seed,
+            dtype=dtype,
+            operand_precision="fixed12_i3",
+        )
         self.accumulator_precision = accumulator_precision
         self.accumulator_saturated = 0
         self.accumulator_total = 0
