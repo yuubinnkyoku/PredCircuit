@@ -1,22 +1,55 @@
 # PC-ALM hardware break-even note (2026-09-15)
 
-This note turns the current depth-32 / width-8 experiment and the analytical cost model into explicit RTL go/no-go inequalities. It deliberately does **not** claim measured FPGA performance.
+This note turns the current depth-32 / width-8 experiments and analytical cost model into explicit RTL go/no-go conditions. It deliberately does **not** claim measured FPGA performance.
 
-## Current point
+## Current candidate
 
-For depth=32, width=8, input_dim=8, output_dim=4, batch=4, 12-bit state/weights/dual:
+For depth=32, width=8, input_dim=8, output_dim=4, batch=4:
 
 - major MACs per relaxation step: 16,128 for both sPC and PC-ALM
-- free hidden state: 992 scalars = 11,904 bit
-- PC-ALM dual state: +992 scalars = +11,904 bit
+- free hidden state: 992 scalars
+- PC-ALM dual state: +992 scalars
 - PC-ALM dual update: 992 scalar updates/step
-- current useful PC-ALM operating point: T=112, alpha=0.925, rho=1, eta_h=0.25, dual leak=0.01
+- engineering candidate: alpha=0.925, rho=1, eta_h=0.25, dual leak=0.01
+- robust common relaxation budget from the fresh holdout: T=128
 
-The precision experiments already support 12-bit hidden-state storage (range about +/-8), 12-bit lambda storage (range about +/-2), and 12-bit update signals at this operating point. The matrix-product datapath is still FP32 in those experiments, so this is not yet a full 12-bit-core claim.
+The dual leak is an engineering extension, not the unmodified Sakana PC-ALM baseline. The pure PC-ALM baseline remains in all comparisons.
+
+## Matched-credit holdout: the iteration advantage is now measured
+
+A fresh 20-seed depth-32 / width-8 holdout compared sPC, pure PC-ALM and leaky PC-ALM using the same strict first-layer credit criterion:
+
+- cosine to BP >= 0.9
+- gradient norm ratio to BP in [0.5, 2]
+- relative error to BP <= 0.6
+- all values finite
+
+Results:
+
+- sPC: **0/20** seeds reached the criterion by T=256
+- pure PC-ALM: **17/20** reached by T=160; median first successful T=96
+- leaky PC-ALM: **19/20** reached by T=160; median first successful T=96, IQR 80--112
+- at one fixed budget T=128, leaky PC-ALM was useful on **19/20 = 95%** of seeds
+
+At the common T=128 point, leaky PC-ALM averaged:
+
+- first-layer cosine to BP: **0.9491**
+- first-layer gradient-norm ratio to BP: **1.0135**
+- first-layer relative error to BP: **0.3412**
+
+At sPC T=256, sPC averaged:
+
+- first-layer cosine to BP: 0.8055
+- first-layer gradient-norm ratio to BP: **0.00439**
+- first-layer relative error to BP: 0.9964
+
+The critical failure is therefore not merely poor angle: the deep sPC credit magnitude is still only about **0.44% of BP** after 256 relaxation steps.
+
+The fixed-budget curve is stored in `pcalm_matched_credit_common_budget_900_919.csv`; the per-method minimum-budget summary is stored in `pcalm_matched_credit_summary_900_919.csv`.
 
 ## Cycle break-even
 
-With `P_mac` MAC lanes and `P_dual` dual-update lanes, the existing analytical model gives
+With `P_mac` MAC lanes and `P_dual` dual-update lanes,
 
 ```
 C_spc  = ceil(16128 / P_mac)
@@ -24,53 +57,96 @@ C_pcalm_overlap = max(ceil(16128 / P_mac), ceil(992 / P_dual))
 C_pcalm_serial  = ceil(16128 / P_mac) + ceil(992 / P_dual)
 ```
 
-For the concrete exploratory point P_mac=128, P_dual=32:
+For the exploratory point P_mac=128, P_dual=32:
 
 - sPC: 126 cycles/step
-- PC-ALM if dual update overlaps the MAC path: 126 cycles/step
-- PC-ALM if serialized: 157 cycles/step
+- PC-ALM with overlapped dual update: 126 cycles/step
+- PC-ALM with serialized dual update: 157 cycles/step
 
-Therefore PC-ALM beats sPC in relaxation cycles when
+Thus PC-ALM beats sPC when:
 
 - overlap: `T_pcalm < T_spc`
-- serialized: `157*T_pcalm < 126*T_spc`, i.e. `T_pcalm/T_spc < 0.80255`
+- serialized: `T_pcalm/T_spc < 126/157 = 0.80255`
 
-At the current PC-ALM point T=112, the serialized design needs the comparable-quality sPC point to require at least **140 steps** (strictly, T_spc > 139.56). With overlap, any comparable-quality sPC point above 112 steps loses on this lower-bound cycle model.
+For the 19 seeds where leaky PC-ALM succeeds at T=128 while sPC still fails at T=256, the useful sPC budget is known only to satisfy `T_spc > 256`. That censoring is already enough to prove:
 
-This makes overlap of the lambda update a first-class architectural requirement: it changes the required iteration-count advantage from about 20% to merely requiring fewer iterations.
+- overlapped cycle ratio `< 128/256 = 0.5`
+- serialized cycle ratio `< (157*128)/(126*256) = 0.623`
 
-## State-storage and state-traffic break-even are different
+So, on those 19/20 seeds, the current analytical model predicts **more than 2x** relaxation-cycle advantage if the dual update is hidden under the MAC path, and **more than about 1.60x** even if the dual update is serialized. These are model-based lower bounds, not measured FPGA speedups.
 
-At equal 12-bit precision, PC-ALM stores twice as many persistent relaxation-state bits as sPC because lambda is the same shape as the free hidden state:
+## State storage and pessimistic state-traffic break-even
 
-- sPC: 11,904 bit
-- PC-ALM: 23,808 bit
+At equal 12-bit storage precision PC-ALM carries twice as much persistent relaxation state because lambda has the same shape as the hidden state:
 
-The absolute PC-ALM state+lambda footprint is still only about 2.91 KiB for this small experiment, but the **relative** 2x cost matters when scaling width, depth, or batch size.
+- sPC hidden state: 11,904 bit
+- PC-ALM hidden + dual state: 23,808 bit
 
-A deliberately pessimistic lower-order traffic proxy is to assume every persistent scalar is read/written once per relaxation step. Under that proxy, total state traffic scales as
+For this small experiment the total is only about 2.91 KiB, but the 2x relative cost matters when scaling.
+
+A deliberately pessimistic proxy assumes every persistent scalar is read/written once per relaxation step:
 
 ```
 traffic_spc   ~ T_spc * S
 traffic_pcalm ~ T_pcalm * 2S
 ```
 
-so PC-ALM only wins state traffic if `T_pcalm/T_spc < 0.5`. For T_pcalm=112 this would require T_spc >224.
+PC-ALM therefore wins this proxy only when `T_pcalm/T_spc < 0.5`.
 
-This proxy is not an implementation claim: lambda may be kept in registers/local SRAM and state/dual accesses can be fused with the local datapath. Its value is that it exposes a real risk hidden by the MAC-only model. **A cycle advantage does not automatically imply a memory-energy advantage.**
+The T=128 holdout now reaches that boundary in a useful way: for 19/20 seeds, PC-ALM succeeds at 128 while sPC fails through 256, hence the unknown useful sPC budget is strictly greater than 256 and
 
-## Architectural consequence
+```
+2 * 128 < T_spc
+```
 
-The next hardware model should separate three regimes instead of reporting one generic FPGA advantage:
+for those seeds. In other words, **even the pessimistic 2x persistent-state traffic proxy is favorable on 19/20 seeds in this deep/narrow regime**. This still does not substitute for an SRAM/register-file energy model.
 
-1. **MAC-bound, dual-overlapped:** PC-ALM wins as soon as its useful T is lower than sPC's.
-2. **dual-update-bound or serialized:** PC-ALM needs roughly a 20% T reduction at the 128/32-lane point.
-3. **state-memory-bound with no locality benefit:** PC-ALM may need close to a 2x T reduction because of the extra lambda state.
+## Low-precision status
 
-Thus the most important hardware question is no longer just LUT/DSP cost of the lambda adder. It is whether layer-local state and lambda can remain close enough to the compute lanes that the extra lambda traffic does not reach the shared-memory bottleneck.
+The low-precision gate has also advanced substantially.
 
-## Immediate experimental implication
+Already supported at the current operating region:
 
-Do not move to full RTL solely because the 12-bit storage experiments passed. First finish quantizing `Wz` and `W^T r`, then compare sPC and PC-ALM at a matched credit-quality target and report **minimum T**, not a fixed common T. Feed those measured T values into both the cycle inequality and a locality-aware state-traffic model.
+- hidden-state storage: 12-bit fixed point
+- dual/lambda storage: 12-bit fixed point
+- state/dual update signals: 12-bit fixed point
+- MAC input operands (weights and activations): 12-bit fixed point
 
-A particularly informative target is the current strict input-credit criterion (cosine >=0.9, norm ratio in [0.5,2], relative error <=0.6). If sPC still cannot meet it by T=224 while PC-ALM remains useful around T=112, then even the pessimistic 2x-state traffic proxy becomes favorable to PC-ALM; if sPC reaches it well below 224, compute-cycle and memory-energy conclusions may diverge.
+A fresh 20-seed MAC-operand holdout using `fixed12_i3` operands preserved the same 0.8 useful-rate seen with FP32 operands at T=112. Relative gradient error versus the FP32-operand implementation averaged about **0.064**, with negligible saturation. The lower useful rate is therefore a property of the fixed T=112 operating point, not a 12-bit operand failure.
+
+Accumulator precision is being tested separately because its required integer range can scale with width. Until that sweep is complete, the first RTL prototype should use a wider accumulator than its 12-bit operands rather than claiming a full 12-bit datapath.
+
+## RTL gate decision
+
+The previous RTL gate required all three of the following:
+
+1. PC-ALM shows a meaningful advantage over sPC in depth, iteration count, width, or BP-gradient agreement.
+2. Low precision is realistic.
+3. A hardware cost model suggests the lambda overhead can be paid back.
+
+For the depth-32 / width-8 deep-narrow regime, all three are now satisfied strongly enough to justify a **minimal RTL prototype**:
+
+- sPC loses its first-layer credit magnitude even at T=256, while leaky PC-ALM is robust at T=128 on 19/20 seeds;
+- the major stored states, update values and MAC operands tolerate 12-bit fixed point;
+- the measured iteration gap exceeds both the current cycle break-even and, on 19/20 seeds, the pessimistic 2x state-traffic break-even.
+
+This is **not** yet a go-ahead for a large full-network FPGA accelerator. The next hardware milestone is a small PC/PC-ALM-switchable fixed-point core that validates the arithmetic, saturation behavior, dual-update overlap and synthesis cost. Width/depth scaling and accumulator precision should continue in parallel.
+
+## Immediate hardware target
+
+The first RTL block should expose the exact local operation that differs between sPC and PC-ALM:
+
+```
+lambda_next = (1 - leak) * lambda + alpha * residual
+credit      = rho * residual + lambda
+```
+
+with:
+
+- sPC mode forcing lambda to zero / disabling dual accumulation
+- PC-ALM mode enabling the dual register
+- saturating fixed-point arithmetic
+- parameterized coefficient precision
+- a deliberately wider MAC/accumulator path at first
+
+After bit-accurate simulation agrees with the Python fixed-point model, the next step is synthesis and a measured LUT/DSP/BRAM/Fmax comparison against the corresponding sPC block.
