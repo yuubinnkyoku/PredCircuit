@@ -10,7 +10,13 @@ import torch
 
 from diagnose_pcalm_dual_precision import quantize_dual
 from diagnose_pcalm_update_precision import run_precision
-from predcircuit.pcalm import ResidualMLP, Schedule, gradient_cosine, gradient_relative_error, method_grad
+from predcircuit.pcalm import (
+    ResidualMLP,
+    Schedule,
+    gradient_cosine,
+    gradient_relative_error,
+    method_grad,
+)
 
 
 class OperandQuantizedResidualMLP(ResidualMLP):
@@ -83,7 +89,14 @@ def main() -> None:
     x = torch.randn(4, 8, generator=generator)
     y = torch.randn(4, 4, generator=generator)
 
-    bp_model = ResidualMLP(depth=depth, width=width, input_dim=8, output_dim=4, activation="relu", seed=args.seed + depth)
+    bp_model = ResidualMLP(
+        depth=depth,
+        width=width,
+        input_dim=8,
+        output_dim=4,
+        activation="relu",
+        seed=args.seed + depth,
+    )
     bp = method_grad(bp_model, x, y, Schedule("bp", budget=0), state_lr=state_lr, rho=rho)
     bp_first = bp[0]
     bp_norm = float(bp_first.norm())
@@ -129,8 +142,14 @@ def main() -> None:
                 "first_layer_cosine_to_bp": cosine,
                 "first_layer_grad_norm_ratio_to_bp": ratio,
                 "first_layer_relative_error_to_bp": relative_error,
-                "all_gradient_relative_error_to_fp32_operands": gradient_relative_error(grads, reference),
-                "operand_saturation_rate": model.operand_saturated / model.operand_total if model.operand_total else 0.0,
+                "all_gradient_relative_error_to_fp32_operands": gradient_relative_error(
+                    grads, reference
+                ),
+                "operand_saturation_rate": (
+                    model.operand_saturated / model.operand_total
+                    if model.operand_total
+                    else 0.0
+                ),
                 "max_abs_operand_pre_quant": model.max_abs_operand_pre_quant,
                 **metrics,
             }
