@@ -70,7 +70,9 @@ def main() -> None:
     parser.add_argument("--state-lr", type=float, default=None)
     parser.add_argument("--activation", choices=["linear", "tanh", "relu"], default="relu")
     parser.add_argument("--seed", type=int, default=940)
-    parser.add_argument("--out", type=Path, default=Path("results/generated/pcalm_numeric_range.json"))
+    parser.add_argument(
+        "--out", type=Path, default=Path("results/generated/pcalm_numeric_range.json")
+    )
     args = parser.parse_args()
 
     state_lr = args.state_lr
@@ -132,7 +134,9 @@ def main() -> None:
             per_layer_max_update[layer] = max(
                 per_layer_max_update[layer], float(update_tensor.max())
             )
-            finite = finite and bool(torch.isfinite(residual).all()) and bool(torch.isfinite(dual).all())
+            finite = (
+                finite and bool(torch.isfinite(residual).all()) and bool(torch.isfinite(dual).all())
+            )
 
     global_max_dual = max(per_layer_max_dual)
     fixed_point = {
