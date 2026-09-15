@@ -46,10 +46,12 @@ jobs:
           --input artifacts
           --detail-out results/generated/pcalm_matched_credit_minimums.csv
           --summary-out results/generated/pcalm_matched_credit_summary.csv
+          --curve-out results/generated/pcalm_matched_credit_common_budget.csv
       - uses: actions/upload-artifact@v4
         with:
           name: pcalm-matched-credit-budget-aggregate
           path: |
             results/generated/pcalm_matched_credit_minimums.csv
             results/generated/pcalm_matched_credit_summary.csv
+            results/generated/pcalm_matched_credit_common_budget.csv
           if-no-files-found: error
