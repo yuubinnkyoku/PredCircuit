@@ -103,18 +103,28 @@ for those seeds. In other words, **even the pessimistic 2x persistent-state traf
 
 ## Low-precision status
 
-The low-precision gate has also advanced substantially.
+The low-precision gate has now been passed for the complete arithmetic skeleton at the current width-8 operating point.
 
-Already supported at the current operating region:
+Already supported:
 
 - hidden-state storage: 12-bit fixed point
 - dual/lambda storage: 12-bit fixed point
 - state/dual update signals: 12-bit fixed point
 - MAC input operands (weights and activations): 12-bit fixed point
+- sequential MAC accumulator: **12-bit fixed point at width=8**, with the caveat that its required integer range must still be checked as width grows
 
 A fresh 20-seed MAC-operand holdout using `fixed12_i3` operands preserved the same 0.8 useful-rate seen with FP32 operands at T=112. Relative gradient error versus the FP32-operand implementation averaged about **0.064**, with negligible saturation. The lower useful rate is therefore a property of the fixed T=112 operating point, not a 12-bit operand failure.
 
-Accumulator precision is being tested separately because its required integer range can scale with width. Until that sweep is complete, the first RTL prototype should use a wider accumulator than its 12-bit operands rather than claiming a full 12-bit datapath.
+The separate accumulator holdout used fixed12_i3 operands and quantized the running dot-product accumulator after every MAC. Results over 20 fresh seeds were:
+
+- FP32 accumulator: useful rate 0.90, cosine 0.9305
+- fixed16_i6: useful rate 0.90, FP32-accumulator gradient error 0.0547, no saturation
+- **fixed12_i5: useful rate 0.90, cosine 0.9314, FP32-accumulator gradient error 0.0625, no saturation**
+- fixed12_i6: useful rate 0.80, gradient error 0.1167
+
+The largest pre-quantization accumulator magnitude observed was about 23.7, so the signed `fixed12_i5` range (approximately -32 to +31.98) was sufficient at width=8. `fixed12_i6` spent one extra bit on integer range and lost one fractional bit, which was worse despite the larger range. This is a useful warning: accumulator format should follow measured dynamic range, not simply maximize integer bits.
+
+The summary is stored in `pcalm_accumulator_precision_summary_820_839.csv`.
 
 ## RTL gate decision
 
@@ -127,26 +137,36 @@ The previous RTL gate required all three of the following:
 For the depth-32 / width-8 deep-narrow regime, all three are now satisfied strongly enough to justify a **minimal RTL prototype**:
 
 - sPC loses its first-layer credit magnitude even at T=256, while leaky PC-ALM is robust at T=128 on 19/20 seeds;
-- the major stored states, update values and MAC operands tolerate 12-bit fixed point;
+- the stored states, update values, MAC operands and width-8 accumulator all tolerate 12-bit fixed point;
 - the measured iteration gap exceeds both the current cycle break-even and, on 19/20 seeds, the pessimistic 2x state-traffic break-even.
 
-This is **not** yet a go-ahead for a large full-network FPGA accelerator. The next hardware milestone is a small PC/PC-ALM-switchable fixed-point core that validates the arithmetic, saturation behavior, dual-update overlap and synthesis cost. Width/depth scaling and accumulator precision should continue in parallel.
+This is **not** yet a go-ahead for a large full-network FPGA accelerator. Width/depth scaling and target-device synthesis remain necessary.
 
-## Immediate hardware target
+## First RTL prototype status
 
-The first RTL block should expose the exact local operation that differs between sPC and PC-ALM:
+A minimal PC/PC-ALM-switchable block now exists as `rtl/pcalm_dual_update.sv`. It implements the local difference between the two algorithms:
 
 ```
 lambda_next = (1 - leak) * lambda + alpha * residual
 credit      = rho * residual + lambda
 ```
 
-with:
+with saturating fixed-point arithmetic, a persistent lambda register, explicit minibatch dual reset and immediate sPC-mode bypass of stale lambda.
 
-- sPC mode forcing lambda to zero / disabling dual accumulation
-- PC-ALM mode enabling the dual register
-- saturating fixed-point arithmetic
-- parameterized coefficient precision
-- a deliberately wider MAC/accumulator path at first
+`rtl/tb_pcalm_dual_update.sv` checks reset, sPC bypass, two nominal PC-ALM updates, update disable, dual clear, positive/negative saturation and mode switching. The GitHub `RTL smoke` workflow now passes both:
 
-After bit-accurate simulation agrees with the Python fixed-point model, the next step is synthesis and a measured LUT/DSP/BRAM/Fmax comparison against the corresponding sPC block.
+- Icarus Verilog simulation: `PASS tb_pcalm_dual_update`
+- Yosys generic synthesis/check: **0 problems**
+
+The generic Yosys netlist currently contains 38 cells, including 2 multipliers and 2 asynchronously reset/enabled registers. This count is only a synthesizability sanity check; it is **not** a LUT/DSP/BRAM or Fmax result for a specific FPGA family.
+
+## Next hardware questions
+
+The next steps are deliberately narrower than a full accelerator:
+
+1. check accumulator range as width grows beyond 8;
+2. compare the synthesized extra PC-ALM dual block against the corresponding sPC credit-only baseline;
+3. add randomized bit-accurate Python-vs-RTL vectors, not just hand-written cases;
+4. then synthesize for a concrete FPGA family and measure LUT/DSP/register/BRAM/Fmax deltas.
+
+Only after those pass should the MAC/state-update datapath be integrated into a complete layer engine.
