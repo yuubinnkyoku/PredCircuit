@@ -27,6 +27,7 @@ module pcalm_dual_update #(
 
     logic signed [DATA_W-1:0] dual_reg;
     logic signed [DATA_W-1:0] dual_next;
+    logic signed [DATA_W-1:0] effective_dual;
 
     logic signed [WIDE_W-1:0] dual_update_scaled;
     logic signed [WIDE_W-1:0] credit_scaled;
@@ -54,13 +55,18 @@ module pcalm_dual_update #(
     endfunction
 
     always_comb begin
+        // sPC is the alpha=0 / no-dual special case. Bypass lambda
+        // combinationally as soon as mode_pcalm is low; do not wait for the
+        // next clock edge that clears the physical dual register.
+        effective_dual = mode_pcalm ? dual_reg : '0;
+
         // Keep lambda and residual in the same DATA_W fixed-point format.
         // Multiplication by the Q*.COEF_FRAC constants adds COEF_FRAC
         // fractional bits; round once after the complete affine expression.
         dual_update_scaled =
-            $signed(dual_reg) * RETAIN_Q + $signed(residual_q) * ALPHA_Q;
+            $signed(effective_dual) * RETAIN_Q + $signed(residual_q) * ALPHA_Q;
         credit_scaled =
-            $signed(residual_q) * RHO_Q + ($signed(dual_reg) <<< COEF_FRAC);
+            $signed(residual_q) * RHO_Q + ($signed(effective_dual) <<< COEF_FRAC);
 
         dual_update_rounded = round_shift_nearest(dual_update_scaled);
         credit_rounded = round_shift_nearest(credit_scaled);
