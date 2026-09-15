@@ -58,14 +58,10 @@ class AccumulatorQuantizedResidualMLP(OperandQuantizedResidualMLP):
         self.max_abs_accumulator_pre_quant = 0.0
 
     def _quantize_accumulator_ste(self, value: torch.Tensor) -> torch.Tensor:
-        quantized, saturated, total, max_pre = quantize_dual(
-            value, self.accumulator_precision
-        )
+        quantized, saturated, total, max_pre = quantize_dual(value, self.accumulator_precision)
         self.accumulator_saturated += saturated
         self.accumulator_total += total
-        self.max_abs_accumulator_pre_quant = max(
-            self.max_abs_accumulator_pre_quant, max_pre
-        )
+        self.max_abs_accumulator_pre_quant = max(self.max_abs_accumulator_pre_quant, max_pre)
         return value + (quantized - value.detach())
 
     def block_pred(self, layer_ix: int, z_prev: torch.Tensor) -> torch.Tensor:
@@ -78,9 +74,7 @@ class AccumulatorQuantizedResidualMLP(OperandQuantizedResidualMLP):
             device=q_inp.device,
         )
         for feature_ix in range(q_inp.shape[1]):
-            product = q_inp[:, feature_ix : feature_ix + 1] * q_weight[
-                :, feature_ix
-            ].unsqueeze(0)
+            product = q_inp[:, feature_ix : feature_ix + 1] * q_weight[:, feature_ix].unsqueeze(0)
             accumulator = self._quantize_accumulator_ste(accumulator + product)
         pred = self.scales[layer_ix] * accumulator
         if self.skips[layer_ix]:
@@ -173,9 +167,7 @@ def main() -> None:
                     grads, reference
                 ),
                 "operand_saturation_rate": (
-                    model.operand_saturated / model.operand_total
-                    if model.operand_total
-                    else 0.0
+                    model.operand_saturated / model.operand_total if model.operand_total else 0.0
                 ),
                 "accumulator_saturation_rate": (
                     model.accumulator_saturated / model.accumulator_total
