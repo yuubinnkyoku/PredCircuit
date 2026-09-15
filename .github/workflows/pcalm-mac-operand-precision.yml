@@ -4,7 +4,11 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
-    paths: [.github/workflows/pcalm-mac-operand-precision.yml]
+    paths:
+      - .github/workflows/pcalm-mac-operand-precision.yml
+      - scripts/diagnose_pcalm_mac_operand_precision.py
+      - scripts/aggregate_pcalm_mac_operand_precision.py
+      - src/predcircuit/pcalm.py
 
 jobs:
   seed:
