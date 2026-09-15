@@ -48,6 +48,18 @@ jobs:
             | tee build/rtl/spc_xc7.log
           yosys -p 'read_verilog -sv rtl/pcalm_dual_update.sv; synth_xilinx -family xc7 -top pcalm_dual_update; stat' \
             | tee build/rtl/pcalm_xc7.log
+      - name: Fair common-core generic comparison
+        run: |
+          yosys -p 'read_verilog -sv rtl/credit_core_common.sv; hierarchy -top credit_core_spc; proc; opt; check; stat' \
+            | tee build/rtl/common_spc_generic.log
+          yosys -p 'read_verilog -sv rtl/credit_core_common.sv; hierarchy -top credit_core_pcalm; proc; opt; check; stat' \
+            | tee build/rtl/common_pcalm_generic.log
+      - name: Fair common-core XC7 comparison
+        run: |
+          yosys -p 'read_verilog -sv rtl/credit_core_common.sv; synth_xilinx -family xc7 -top credit_core_spc; stat' \
+            | tee build/rtl/common_spc_xc7.log
+          yosys -p 'read_verilog -sv rtl/credit_core_common.sv; synth_xilinx -family xc7 -top credit_core_pcalm; stat' \
+            | tee build/rtl/common_pcalm_xc7.log
       - uses: actions/upload-artifact@v4
         with:
           name: rtl-synthesis-smoke
