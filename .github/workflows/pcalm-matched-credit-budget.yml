@@ -1,5 +1,6 @@
 name: PC-ALM matched-credit minimum budget
 
+# Fresh 20-seed holdout for the current depth-32 operating point.
 on:
   workflow_dispatch:
   push:
