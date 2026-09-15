@@ -2,12 +2,7 @@
 `default_nettype none
 
 module pcalm_dual_update #(
-    parameter int DATA_W = 12,
-    parameter int COEF_FRAC = 12,
-    // Q*.COEF_FRAC constants for alpha=0.925, retain=(1-leak)=0.99, rho=1.
-    parameter int signed ALPHA_Q = 3789,
-    parameter int signed RETAIN_Q = 4055,
-    parameter int signed RHO_Q = 4096
+    parameter int DATA_W = 12
 ) (
     input  logic                         clk,
     input  logic                         rst_n,
@@ -20,9 +15,15 @@ module pcalm_dual_update #(
     output logic                         dual_saturated,
     output logic                         credit_saturated
 );
-    // Coefficients are 32-bit signed parameters, so DATA_W+32 bits are enough
-    // for one product. Two guard bits cover the following additions.
-    localparam int WIDE_W = DATA_W + 34;
+    // Hardware-co-designed coefficients validated by the fresh 920--939 holdout:
+    //   alpha  = 237/256 = 0.92578125
+    //   retain = 253/256 = 0.98828125  (dual leak = 3/256)
+    // rho remains exactly one.  Expressing the numerators as powers of two
+    // removes coefficient multipliers from the dual datapath:
+    //   253*x = 256*x - 2*x - x
+    //   237*x = 256*x - 16*x - 2*x - x
+    localparam int DYADIC_FRAC = 8;
+    localparam int WIDE_W = DATA_W + DYADIC_FRAC + 3;
     localparam logic signed [DATA_W-1:0] DATA_MAX = {1'b0, {(DATA_W-1){1'b1}}};
     localparam logic signed [DATA_W-1:0] DATA_MIN = {1'b1, {(DATA_W-1){1'b0}}};
 
@@ -31,27 +32,28 @@ module pcalm_dual_update #(
     logic signed [DATA_W-1:0] effective_dual;
     logic dual_saturated_next;
 
+    logic signed [WIDE_W-1:0] dual_ext;
+    logic signed [WIDE_W-1:0] residual_ext;
     logic signed [WIDE_W-1:0] dual_update_scaled;
-    logic signed [WIDE_W-1:0] credit_scaled;
     logic signed [WIDE_W-1:0] dual_update_rounded;
-    logic signed [WIDE_W-1:0] credit_rounded;
+    logic signed [WIDE_W-1:0] credit_wide;
 
-    function automatic logic signed [WIDE_W-1:0] round_shift_nearest(
+    function automatic logic signed [WIDE_W-1:0] round_shift_dyadic(
         input logic signed [WIDE_W-1:0] value
     );
         logic signed [WIDE_W:0] magnitude;
         logic signed [WIDE_W:0] rounded_magnitude;
         begin
-            if (COEF_FRAC == 0) begin
-                round_shift_nearest = value;
-            end else if (value >= 0) begin
-                round_shift_nearest =
-                    (value + ({{(WIDE_W-1){1'b0}}, 1'b1} <<< (COEF_FRAC-1))) >>> COEF_FRAC;
+            if (value >= 0) begin
+                round_shift_dyadic =
+                    (value + ({{(WIDE_W-1){1'b0}}, 1'b1} <<< (DYADIC_FRAC-1)))
+                    >>> DYADIC_FRAC;
             end else begin
                 magnitude = -$signed(value);
                 rounded_magnitude =
-                    (magnitude + ({{WIDE_W{1'b0}}, 1'b1} <<< (COEF_FRAC-1))) >>> COEF_FRAC;
-                round_shift_nearest = -$signed(rounded_magnitude[WIDE_W-1:0]);
+                    (magnitude + ({{WIDE_W{1'b0}}, 1'b1} <<< (DYADIC_FRAC-1)))
+                    >>> DYADIC_FRAC;
+                round_shift_dyadic = -$signed(rounded_magnitude[WIDE_W-1:0]);
             end
         end
     endfunction
@@ -61,17 +63,19 @@ module pcalm_dual_update #(
         // soon as mode_pcalm is low; do not wait for the next clock edge that
         // clears the physical dual register.
         effective_dual = mode_pcalm ? dual_reg : '0;
+        dual_ext = {{(WIDE_W-DATA_W){effective_dual[DATA_W-1]}}, effective_dual};
+        residual_ext = {{(WIDE_W-DATA_W){residual_q[DATA_W-1]}}, residual_q};
 
-        // Keep lambda and residual in the same DATA_W fixed-point format.
-        // Multiplication by the Q*.COEF_FRAC constants adds COEF_FRAC
-        // fractional bits; round once after the complete affine expression.
+        // lambda' = (253*lambda + 237*r) / 256, using only shifts/adds.
         dual_update_scaled =
-            $signed(effective_dual) * RETAIN_Q + $signed(residual_q) * ALPHA_Q;
-        credit_scaled =
-            $signed(residual_q) * RHO_Q + ($signed(effective_dual) <<< COEF_FRAC);
+            (dual_ext <<< 8) - (dual_ext <<< 1) - dual_ext
+            + (residual_ext <<< 8) - (residual_ext <<< 4)
+            - (residual_ext <<< 1) - residual_ext;
+        dual_update_rounded = round_shift_dyadic(dual_update_scaled);
 
-        dual_update_rounded = round_shift_nearest(dual_update_scaled);
-        credit_rounded = round_shift_nearest(credit_scaled);
+        // Weight credit uses the pre-dual lambda, matching the reference
+        // implementation timing. rho=1, so credit = residual + lambda.
+        credit_wide = residual_ext + dual_ext;
 
         dual_saturated_next = 1'b0;
         if (dual_update_rounded > $signed(DATA_MAX)) begin
@@ -85,14 +89,14 @@ module pcalm_dual_update #(
         end
 
         credit_saturated = 1'b0;
-        if (credit_rounded > $signed(DATA_MAX)) begin
+        if (credit_wide > $signed(DATA_MAX)) begin
             credit_q = DATA_MAX;
             credit_saturated = 1'b1;
-        end else if (credit_rounded < $signed(DATA_MIN)) begin
+        end else if (credit_wide < $signed(DATA_MIN)) begin
             credit_q = DATA_MIN;
             credit_saturated = 1'b1;
         end else begin
-            credit_q = credit_rounded[DATA_W-1:0];
+            credit_q = credit_wide[DATA_W-1:0];
         end
     end
 
