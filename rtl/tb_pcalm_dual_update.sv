@@ -77,7 +77,7 @@ module tb_pcalm_dual_update;
         #1;
         check_value("reset dual", $signed(dual_q), 0);
 
-        // sPC mode: dual is bypassed and credit = rho*r = r for rho=1.
+        // sPC mode: dual is bypassed and credit = r for rho=1.
         mode_pcalm = 1'b0;
         residual_q = 12'sd256; // +1.0 in Q3.8
         #1;
@@ -86,18 +86,19 @@ module tb_pcalm_dual_update;
         check_value("spc dual stays zero", $signed(dual_q), 0);
 
         // PC-ALM mode. The credit visible before a tick uses the pre-dual lambda.
+        // alpha=237/256 and retain=253/256 are the holdout-validated dyadic values.
         mode_pcalm = 1'b1;
         residual_q = 12'sd256;
         #1;
         check_value("pcalm initial pre-dual credit", $signed(credit_q), 256);
         tick();
-        // round(0.925 * 256) = 237 raw Q3.8 units.
+        // (237/256) * 256 = 237 exactly.
         check_value("first dual update", $signed(dual_q), 237);
         check_value("credit after first update", $signed(credit_q), 493);
         check_bit("first dual not saturated", dual_saturated, 1'b0);
 
         tick();
-        // round(0.99 * 237 + 0.925 * 256) = 471.
+        // round((253/256)*237 + (237/256)*256) = 471.
         check_value("second dual update", $signed(dual_q), 471);
         check_value("credit after second update", $signed(credit_q), 727);
 
@@ -117,7 +118,8 @@ module tb_pcalm_dual_update;
         // Positive saturation: first step remains representable, second clips.
         residual_q = 12'sd2000;
         tick();
-        check_value("positive large first dual", $signed(dual_q), 1850);
+        // round((237/256) * 2000) = 1852.
+        check_value("positive large first dual", $signed(dual_q), 1852);
         check_bit("positive first dual not saturated", dual_saturated, 1'b0);
         check_bit("positive credit saturated", credit_saturated, 1'b1);
         tick();
@@ -137,7 +139,7 @@ module tb_pcalm_dual_update;
         mode_pcalm = 1'b1;
         residual_q = -12'sd2000;
         tick();
-        check_value("negative large first dual", $signed(dual_q), -1850);
+        check_value("negative large first dual", $signed(dual_q), -1852);
         tick();
         check_value("negative dual saturation", $signed(dual_q), -2048);
         check_bit("negative dual saturation flag", dual_saturated, 1'b1);
