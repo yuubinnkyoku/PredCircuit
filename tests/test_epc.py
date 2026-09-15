@@ -31,10 +31,7 @@ def test_error_and_local_energy_have_same_value() -> None:
     x = torch.randn(3, 2, generator=gen)
     y = torch.randn(3, 1, generator=gen)
     errors = zero_errors(model, x)
-    errors = [
-        0.1 * torch.randn(error.shape, generator=gen, dtype=error.dtype)
-        for error in errors
-    ]
+    errors = [0.1 * torch.randn(error.shape, generator=gen, dtype=error.dtype) for error in errors]
 
     by_errors = error_energy(model, x, y, errors) / x.shape[0]
     local = local_weight_energy(model, x, y, errors)
