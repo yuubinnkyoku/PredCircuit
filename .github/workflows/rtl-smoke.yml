@@ -29,6 +29,20 @@ jobs:
             -o build/rtl/tb_pcalm_dual_update \
             rtl/pcalm_dual_update.sv rtl/tb_pcalm_dual_update.sv
           vvp build/rtl/tb_pcalm_dual_update
-      - name: Check synthesizability
+      - name: Generic synthesis comparison
         run: |
-          yosys -p 'read_verilog -sv rtl/pcalm_dual_update.sv; hierarchy -top pcalm_dual_update; proc; opt; check; stat'
+          yosys -p 'read_verilog -sv rtl/spc_credit.sv; hierarchy -top spc_credit; proc; opt; check; stat' \
+            | tee build/rtl/spc_generic.log
+          yosys -p 'read_verilog -sv rtl/pcalm_dual_update.sv; hierarchy -top pcalm_dual_update; proc; opt; check; stat' \
+            | tee build/rtl/pcalm_generic.log
+      - name: XC7 mapped comparison
+        run: |
+          yosys -p 'read_verilog -sv rtl/spc_credit.sv; synth_xilinx -family xc7 -top spc_credit; stat' \
+            | tee build/rtl/spc_xc7.log
+          yosys -p 'read_verilog -sv rtl/pcalm_dual_update.sv; synth_xilinx -family xc7 -top pcalm_dual_update; stat' \
+            | tee build/rtl/pcalm_xc7.log
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rtl-synthesis-smoke
+          path: build/rtl/*.log
+          if-no-files-found: error
