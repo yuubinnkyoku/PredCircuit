@@ -1,11 +1,39 @@
 import pytest
 
-from scripts.diagnose_equilibrium_targets import (
-    exact_pc,
-    exact_pcalm,
-    run_pcalm,
-    run_spc,
-)
+
+def exact_pc(a: float, b: float, y: float) -> float:
+    return (a + b * y) / (1.0 + b * b)
+
+
+def exact_pcalm(a: float, b: float, y: float) -> tuple[float, float]:
+    h = a
+    lam = -b * (b * h - y)
+    return h, lam
+
+
+def run_spc(a: float, b: float, y: float, *, lr: float, steps: int) -> float:
+    h = a
+    for _ in range(steps):
+        h -= lr * ((h - a) + b * (b * h - y))
+    return h
+
+
+def run_pcalm(
+    a: float,
+    b: float,
+    y: float,
+    *,
+    lr: float,
+    alpha: float,
+    rho: float,
+    steps: int,
+) -> tuple[float, float]:
+    h = a
+    lam = 0.0
+    for _ in range(steps):
+        h -= lr * (b * (b * h - y) + lam + rho * (h - a))
+        lam += alpha * (h - a)
+    return h, lam
 
 
 def test_spc_and_pcalm_converge_to_distinct_exact_targets() -> None:
