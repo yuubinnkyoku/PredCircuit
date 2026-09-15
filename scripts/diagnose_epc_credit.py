@@ -8,11 +8,19 @@ import pandas as pd
 import torch
 
 from predcircuit.epc import epc_grad
-from predcircuit.pcalm import ResidualMLP, Schedule, gradient_cosine, gradient_relative_error, method_grad
+from predcircuit.pcalm import (
+    ResidualMLP,
+    Schedule,
+    gradient_cosine,
+    gradient_relative_error,
+    method_grad,
+)
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Measure deep ePC credit against BP on the shared ResidualMLP.")
+    parser = argparse.ArgumentParser(
+        description="Measure deep ePC credit against BP on the shared ResidualMLP."
+    )
     parser.add_argument("--seed", type=int, required=True)
     parser.add_argument("--depth", type=int, default=32)
     parser.add_argument("--width", type=int, default=8)
@@ -27,7 +35,14 @@ def main() -> None:
 
     budgets = [int(x) for x in args.budgets.split(",")]
     error_lrs = [float(x) for x in args.error_lrs.split(",")]
-    model = ResidualMLP(depth=args.depth, width=args.width, input_dim=args.input_dim, output_dim=args.output_dim, activation=args.activation, seed=args.seed + args.depth)
+    model = ResidualMLP(
+        depth=args.depth,
+        width=args.width,
+        input_dim=args.input_dim,
+        output_dim=args.output_dim,
+        activation=args.activation,
+        seed=args.seed + args.depth,
+    )
     gen = torch.Generator().manual_seed(args.seed + 10_000 + args.depth)
     x = torch.randn(args.batch_size, args.input_dim, generator=gen)
     y = torch.randn(args.batch_size, args.output_dim, generator=gen)
@@ -45,7 +60,18 @@ def main() -> None:
             cosine = gradient_cosine([first], [bp_first])
             rel = gradient_relative_error([first], [bp_first])
             useful = finite and cosine >= 0.9 and 0.5 <= ratio <= 2.0 and rel <= 0.6
-            rows.append({"seed": args.seed, "budget": budget, "error_lr": error_lr, "finite": finite, "useful_first_layer_credit": useful, "first_layer_cosine_to_bp": cosine, "first_layer_grad_norm_ratio_to_bp": ratio, "first_layer_relative_error_to_bp": rel})
+            rows.append(
+                {
+                    "seed": args.seed,
+                    "budget": budget,
+                    "error_lr": error_lr,
+                    "finite": finite,
+                    "useful_first_layer_credit": useful,
+                    "first_layer_cosine_to_bp": cosine,
+                    "first_layer_grad_norm_ratio_to_bp": ratio,
+                    "first_layer_relative_error_to_bp": rel,
+                }
+            )
 
     frame = pd.DataFrame(rows)
     args.out.parent.mkdir(parents=True, exist_ok=True)
