@@ -29,6 +29,13 @@ jobs:
             -o build/rtl/tb_pcalm_dual_update \
             rtl/pcalm_dual_update.sv rtl/tb_pcalm_dual_update.sv
           vvp build/rtl/tb_pcalm_dual_update
+      - name: Exhaustively verify 12-bit dual arithmetic
+        run: |
+          iverilog -g2012 -Wall \
+            -s tb_pcalm_dual_update_exhaustive \
+            -o build/rtl/tb_pcalm_dual_update_exhaustive \
+            rtl/pcalm_dual_update.sv rtl/tb_pcalm_dual_update_exhaustive.sv
+          timeout 180s vvp build/rtl/tb_pcalm_dual_update_exhaustive
       - name: Generic synthesis comparison
         run: |
           yosys -p 'read_verilog -sv rtl/spc_credit.sv; hierarchy -top spc_credit; proc; opt; check; stat' \
