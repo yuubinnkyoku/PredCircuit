@@ -1,0 +1,24 @@
+name: PC-ALM numeric range
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "scripts/run_pcalm_numeric_range_probe.py"
+      - "src/predcircuit/pcalm.py"
+      - ".github/workflows/pcalm-numeric-range.yml"
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: Probe depth-32 reference configuration
+        run: uv run python scripts/run_pcalm_numeric_range_probe.py --depth 32 --width 8 --budget 128 --seed 940 --out results/generated/pcalm_numeric_range_d32_s940.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pcalm-numeric-range-d32-s940
+          path: results/generated/pcalm_numeric_range_d32_s940.json
