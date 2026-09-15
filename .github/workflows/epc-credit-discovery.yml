@@ -1,0 +1,24 @@
+name: ePC deep credit discovery
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/epc-credit-discovery.yml
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        seed: [940, 941, 942, 943, 944]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync
+      - run: uv run python scripts/diagnose_epc_credit.py --seed ${{ matrix.seed }} --out results/generated/epc_${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: epc-credit-${{ matrix.seed }}
+          path: results/generated/epc_${{ matrix.seed }}.csv
