@@ -25,6 +25,8 @@ class InferenceTrace:
     dual_norms: list[list[float]]
     max_abs_dual: list[float]
     finite: bool
+    max_abs_residuals: list[list[float]] | None = None
+    max_abs_dual_updates: list[list[float]] | None = None
 
 
 class ResidualMLP(torch.nn.Module):
@@ -186,15 +188,43 @@ def _trace_snapshot(
     x: torch.Tensor,
     free: list[torch.Tensor],
     duals: list[torch.Tensor],
-) -> tuple[list[float], list[float], float, bool]:
+) -> tuple[list[float], list[float], float, bool, list[float]]:
     with torch.no_grad():
         residuals = constraint_residuals(model, x, free)
         residual_norms = [float(r.norm()) for r in residuals]
         dual_norms = [float(d.norm()) for d in duals]
         max_abs_dual = max((float(d.abs().max()) for d in duals), default=0.0)
+        max_abs_residuals = [float(r.abs().max()) for r in residuals]
         tensors = [*free, *duals, *residuals]
         finite = all(bool(torch.isfinite(t).all()) for t in tensors)
-    return residual_norms, dual_norms, max_abs_dual, finite
+    return residual_norms, dual_norms, max_abs_dual, finite, max_abs_residuals
+
+
+def _new_trace() -> InferenceTrace:
+    return InferenceTrace([], [], [], True, [], [])
+
+
+def _append_trace_snapshot(
+    trace: InferenceTrace,
+    model: ResidualMLP,
+    x: torch.Tensor,
+    free: list[torch.Tensor],
+    duals: list[torch.Tensor],
+    *,
+    alpha: float | None = None,
+) -> None:
+    residual_norms, dual_norms, max_abs_dual, finite, max_abs_residuals = _trace_snapshot(
+        model, x, free, duals
+    )
+    trace.residual_norms.append(residual_norms)
+    trace.dual_norms.append(dual_norms)
+    trace.max_abs_dual.append(max_abs_dual)
+    assert trace.max_abs_residuals is not None
+    trace.max_abs_residuals.append(max_abs_residuals)
+    if alpha is not None:
+        assert trace.max_abs_dual_updates is not None
+        trace.max_abs_dual_updates.append([abs(alpha) * value for value in max_abs_residuals])
+    trace.finite = trace.finite and finite
 
 
 def run_pc(
@@ -209,15 +239,11 @@ def run_pc(
 ) -> tuple[list[torch.Tensor], list[torch.Tensor], InferenceTrace | None]:
     free = free_init(model, x)
     duals = zero_duals_like(constraint_residuals(model, x, free))
-    trace = InferenceTrace([], [], [], True) if record_trace else None
+    trace = _new_trace() if record_trace else None
 
     if record_trace:
         assert trace is not None
-        residual_norms, dual_norms, max_abs_dual, finite = _trace_snapshot(model, x, free, duals)
-        trace.residual_norms.append(residual_norms)
-        trace.dual_norms.append(dual_norms)
-        trace.max_abs_dual.append(max_abs_dual)
-        trace.finite = trace.finite and finite
+        _append_trace_snapshot(trace, model, x, free, duals)
 
     for _ in range(steps):
         free = _solve_inner(
@@ -232,13 +258,7 @@ def run_pc(
         )
         if record_trace:
             assert trace is not None
-            residual_norms, dual_norms, max_abs_dual, finite = _trace_snapshot(
-                model, x, free, duals
-            )
-            trace.residual_norms.append(residual_norms)
-            trace.dual_norms.append(dual_norms)
-            trace.max_abs_dual.append(max_abs_dual)
-            trace.finite = trace.finite and finite
+            _append_trace_snapshot(trace, model, x, free, duals)
     return free, duals, trace
 
 
@@ -264,15 +284,11 @@ def run_pcalm(
 
     free = free_init(model, x)
     duals = zero_duals_like(constraint_residuals(model, x, free))
-    trace = InferenceTrace([], [], [], True) if record_trace else None
+    trace = _new_trace() if record_trace else None
 
     if record_trace:
         assert trace is not None
-        residual_norms, dual_norms, max_abs_dual, finite = _trace_snapshot(model, x, free, duals)
-        trace.residual_norms.append(residual_norms)
-        trace.dual_norms.append(dual_norms)
-        trace.max_abs_dual.append(max_abs_dual)
-        trace.finite = trace.finite and finite
+        _append_trace_snapshot(trace, model, x, free, duals)
 
     duals_before = duals
     for outer_ix in range(budget):
@@ -294,13 +310,7 @@ def run_pcalm(
 
         if record_trace:
             assert trace is not None
-            residual_norms, dual_norms, max_abs_dual, finite = _trace_snapshot(
-                model, x, free, duals_after
-            )
-            trace.residual_norms.append(residual_norms)
-            trace.dual_norms.append(dual_norms)
-            trace.max_abs_dual.append(max_abs_dual)
-            trace.finite = trace.finite and finite
+            _append_trace_snapshot(trace, model, x, free, duals_after, alpha=alpha)
 
         if outer_ix == budget - 1:
             duals_weight = (
