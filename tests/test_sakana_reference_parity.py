@@ -135,19 +135,33 @@ def test_one_step_pcalm_matches_sakana_update_order() -> None:
     gen = torch.Generator().manual_seed(20)
     x = torch.randn(7, 3, generator=gen, dtype=torch.float64)
     y = torch.randn(7, 2, generator=gen, dtype=torch.float64)
-    kwargs = dict(state_lr=0.1, rho=1.0, alpha=0.7, budget=1)
+    state_lr = 0.1
+    rho = 1.0
+    alpha = 0.7
+    budget = 1
 
     ours_free, _, _ = run_pcalm(
         model,
         x,
         y,
+        state_lr=state_lr,
+        rho=rho,
+        alpha=alpha,
+        budget=budget,
         inner_steps=1,
         weight_credit_timing="post_dual_energy",
-        **kwargs,
     )
     ours_residuals = constraint_residuals(model, x, ours_free)
-    ours_duals = [0.7 * residual for residual in ours_residuals]
-    ref_free, ref_duals = reference_pcalm(model, x, y, **kwargs)
+    ours_duals = [alpha * residual for residual in ours_residuals]
+    ref_free, ref_duals = reference_pcalm(
+        model,
+        x,
+        y,
+        state_lr=state_lr,
+        rho=rho,
+        alpha=alpha,
+        budget=budget,
+    )
 
     for a, b in zip(ours_free, ref_free, strict=True):
         assert torch.allclose(a, b, atol=1e-12, rtol=1e-12)
