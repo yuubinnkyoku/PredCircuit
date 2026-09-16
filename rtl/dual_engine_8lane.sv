@@ -6,9 +6,9 @@
 //
 // The eight lanes are packed into one 96-bit memory word. Reads are synchronous
 // and the read/compute/write path is pipelined with initiation interval 1, so a
-// 124-address sweep needs 124 issue cycles plus one drain cycle. This structure
-// avoids an asynchronous 8-bank read mux and is intentionally RAM-friendly.
-// clear_all performs a 124-cycle sequential zero fill; the memory has no reset.
+// 124-address sweep needs 124 issue cycles plus one drain cycle. clear_all uses
+// the same single write port for a 124-cycle zero fill. The RAM process itself
+// contains no reset or control-register assignments, keeping RAM inference clean.
 module dual_engine_8lane #(
     parameter int DATA_W = 12,
     parameter int DEPTH = 124,
@@ -34,10 +34,13 @@ module dual_engine_8lane #(
     localparam logic signed [DATA_W-1:0] DATA_MAX = {1'b0, {(DATA_W-1){1'b1}}};
     localparam logic signed [DATA_W-1:0] DATA_MIN = {1'b1, {(DATA_W-1){1'b0}}};
 
-    // One packed word contains all lanes for an address. No reset on this array.
     logic [WORD_W-1:0] dual_mem [0:DEPTH-1];
     logic [WORD_W-1:0] read_word;
     logic [WORD_W-1:0] write_word;
+    logic [WORD_W-1:0] ram_write_data;
+    logic [ADDR_W-1:0] ram_write_addr;
+    logic ram_write_en;
+    logic ram_read_en;
     logic signed [DATA_W-1:0] residual_d [0:LANES-1];
     logic signed [DATA_W-1:0] dual_next [0:LANES-1];
     logic signed [WIDE_W-1:0] dual_ext [0:LANES-1];
@@ -76,8 +79,6 @@ module dual_engine_8lane #(
             dual_q[i] = $signed(read_word[i*DATA_W +: DATA_W]);
             dual_ext[i] = {{(WIDE_W-DATA_W){dual_q[i][DATA_W-1]}}, dual_q[i]};
             residual_ext[i] = {{(WIDE_W-DATA_W){residual_d[i][DATA_W-1]}}, residual_d[i]};
-
-            // lambda' = (253*lambda + 237*r)/256, shifts/adds only.
             dual_scaled[i] =
                 (dual_ext[i] <<< 8) - (dual_ext[i] <<< 1) - dual_ext[i]
                 + (residual_ext[i] <<< 8) - (residual_ext[i] <<< 4)
@@ -106,10 +107,23 @@ module dual_engine_8lane #(
             end
             write_word[i*DATA_W +: DATA_W] = dual_next[i];
         end
+
+        // One physical write port is shared between zero-fill and normal update.
+        ram_write_en = clear_busy || valid_d;
+        ram_write_addr = clear_busy ? clear_addr : addr_d;
+        ram_write_data = clear_busy ? '0 : write_word;
+        ram_read_en = enable && !clear_busy && (addr < DEPTH);
     end
 
-    // Keep reset synchronous so the RAM write/read process has only one clock
-    // edge. The dual memory itself is never reset; clear_all zero-fills it.
+    // RAM-only process: no reset and no unrelated control logic.
+    always_ff @(posedge clk) begin
+        if (ram_write_en)
+            dual_mem[ram_write_addr] <= ram_write_data;
+        if (ram_read_en)
+            read_word <= dual_mem[addr];
+    end
+
+    // Resettable pipeline/control state is deliberately separate from RAM.
     always_ff @(posedge clk) begin
         if (!rst_n) begin
             clear_busy <= 1'b0;
@@ -126,7 +140,6 @@ module dual_engine_8lane #(
             dual_saturated <= '0;
             credit_saturated <= '0;
         end else if (clear_busy) begin
-            dual_mem[clear_addr] <= '0;
             valid_d <= 1'b0;
             result_valid <= 1'b0;
             dual_saturated <= '0;
@@ -138,18 +151,14 @@ module dual_engine_8lane #(
                 clear_addr <= clear_addr + 1'b1;
             end
         end else begin
-            // Retire the previous synchronous read/update.
             result_valid <= valid_d;
             if (valid_d) begin
-                dual_mem[addr_d] <= write_word;
                 dual_saturated <= dual_sat_next;
                 credit_saturated <= credit_sat_next;
             end
 
-            // Issue the next read. The residual and address travel with it.
             valid_d <= enable && (addr < DEPTH);
             if (enable && (addr < DEPTH)) begin
-                read_word <= dual_mem[addr];
                 addr_d <= addr;
                 for (i = 0; i < LANES; i = i + 1)
                     residual_d[i] <= residual_q[i];
