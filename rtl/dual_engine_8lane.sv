@@ -9,6 +9,10 @@
 // 124-address sweep needs 124 issue cycles plus one drain cycle. clear_all uses
 // the same single write port for a 124-cycle zero fill. The RAM process itself
 // contains no reset or control-register assignments, keeping RAM inference clean.
+//
+// External lane ports are packed vectors rather than unpacked-array ports because
+// the Yosys 0.33 Verilog frontend used by CI does not accept unpacked arrays in
+// module ports. Lane i occupies [i*DATA_W +: DATA_W].
 module dual_engine_8lane #(
     parameter int DATA_W = 12,
     parameter int DEPTH = 124,
@@ -20,9 +24,9 @@ module dual_engine_8lane #(
     input  logic enable,
     input  logic clear_all,
     input  logic [ADDR_W-1:0] addr,
-    input  logic signed [DATA_W-1:0] residual_q [0:LANES-1],
-    output logic signed [DATA_W-1:0] dual_q [0:LANES-1],
-    output logic signed [DATA_W-1:0] credit_q [0:LANES-1],
+    input  logic signed [LANES*DATA_W-1:0] residual_q,
+    output logic signed [LANES*DATA_W-1:0] dual_q,
+    output logic signed [LANES*DATA_W-1:0] credit_q,
     output logic [LANES-1:0] dual_saturated,
     output logic [LANES-1:0] credit_saturated,
     output logic clear_busy,
@@ -42,6 +46,8 @@ module dual_engine_8lane #(
     logic ram_write_en;
     logic ram_read_en;
     logic signed [DATA_W-1:0] residual_d [0:LANES-1];
+    logic signed [DATA_W-1:0] dual_lane [0:LANES-1];
+    logic signed [DATA_W-1:0] credit_lane [0:LANES-1];
     logic signed [DATA_W-1:0] dual_next [0:LANES-1];
     logic signed [WIDE_W-1:0] dual_ext [0:LANES-1];
     logic signed [WIDE_W-1:0] residual_ext [0:LANES-1];
@@ -73,11 +79,13 @@ module dual_engine_8lane #(
 
     always_comb begin
         write_word = '0;
+        dual_q = '0;
+        credit_q = '0;
         dual_sat_next = '0;
         credit_sat_next = '0;
         for (i = 0; i < LANES; i = i + 1) begin
-            dual_q[i] = $signed(read_word[i*DATA_W +: DATA_W]);
-            dual_ext[i] = {{(WIDE_W-DATA_W){dual_q[i][DATA_W-1]}}, dual_q[i]};
+            dual_lane[i] = $signed(read_word[i*DATA_W +: DATA_W]);
+            dual_ext[i] = {{(WIDE_W-DATA_W){dual_lane[i][DATA_W-1]}}, dual_lane[i]};
             residual_ext[i] = {{(WIDE_W-DATA_W){residual_d[i][DATA_W-1]}}, residual_d[i]};
             dual_scaled[i] =
                 (dual_ext[i] <<< 8) - (dual_ext[i] <<< 1) - dual_ext[i]
@@ -97,25 +105,25 @@ module dual_engine_8lane #(
             end
 
             if (credit_wide[i] > $signed(DATA_MAX)) begin
-                credit_q[i] = DATA_MAX;
+                credit_lane[i] = DATA_MAX;
                 credit_sat_next[i] = 1'b1;
             end else if (credit_wide[i] < $signed(DATA_MIN)) begin
-                credit_q[i] = DATA_MIN;
+                credit_lane[i] = DATA_MIN;
                 credit_sat_next[i] = 1'b1;
             end else begin
-                credit_q[i] = credit_wide[i][DATA_W-1:0];
+                credit_lane[i] = credit_wide[i][DATA_W-1:0];
             end
+            dual_q[i*DATA_W +: DATA_W] = dual_lane[i];
+            credit_q[i*DATA_W +: DATA_W] = credit_lane[i];
             write_word[i*DATA_W +: DATA_W] = dual_next[i];
         end
 
-        // One physical write port is shared between zero-fill and normal update.
         ram_write_en = clear_busy || valid_d;
         ram_write_addr = clear_busy ? clear_addr : addr_d;
         ram_write_data = clear_busy ? '0 : write_word;
         ram_read_en = enable && !clear_busy && (addr < DEPTH);
     end
 
-    // RAM-only process: no reset and no unrelated control logic.
     always_ff @(posedge clk) begin
         if (ram_write_en)
             dual_mem[ram_write_addr] <= ram_write_data;
@@ -123,7 +131,6 @@ module dual_engine_8lane #(
             read_word <= dual_mem[addr];
     end
 
-    // Resettable pipeline/control state is deliberately separate from RAM.
     always_ff @(posedge clk) begin
         if (!rst_n) begin
             clear_busy <= 1'b0;
@@ -161,7 +168,7 @@ module dual_engine_8lane #(
             if (enable && (addr < DEPTH)) begin
                 addr_d <= addr;
                 for (i = 0; i < LANES; i = i + 1)
-                    residual_d[i] <= residual_q[i];
+                    residual_d[i] <= $signed(residual_q[i*DATA_W +: DATA_W]);
             end
         end
     end
