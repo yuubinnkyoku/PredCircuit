@@ -25,7 +25,9 @@ def parse_floats(text: str) -> list[float]:
 
 
 def main() -> None:
-    p = argparse.ArgumentParser(description="Trace how dual leak changes PC-ALM stability and credit windows.")
+    p = argparse.ArgumentParser(
+        description="Trace how dual leak changes PC-ALM stability and credit windows."
+    )
     p.add_argument("--seed", type=int, required=True)
     p.add_argument("--depth", type=int, default=32)
     p.add_argument("--width", type=int, default=8)
