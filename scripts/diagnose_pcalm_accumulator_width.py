@@ -28,7 +28,7 @@ def main() -> None:
     parser.add_argument("--budget", type=int, default=128)
     parser.add_argument(
         "--precisions",
-        default="fp32,fixed16_i6,fixed12_i5",
+        default="fp32,fixed16_i6,fixed16_i7,fixed16_i8,fixed12_i5,fixed12_i6,fixed12_i7",
     )
     parser.add_argument("--out", type=Path, required=True)
     args = parser.parse_args()
