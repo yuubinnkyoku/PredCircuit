@@ -1,0 +1,31 @@
+name: PC-ALM observable stopping
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/pcalm-observable-stopping.yml
+      - scripts/diagnose_pcalm_observable_stopping.py
+      - scripts/diagnose_pcalm_matched_credit_budget.py
+      - src/predcircuit/pcalm.py
+  workflow_dispatch:
+
+jobs:
+  trace:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [920,921,922,923,924,925,926,927,928,929,930,931,932,933,934,935,936,937,938,939]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -e .
+      - name: Trace pure PC-ALM observables
+        run: python scripts/diagnose_pcalm_observable_stopping.py --seed ${{ matrix.seed }} --out results/generated/pcalm_observable_stopping_seed${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pcalm-observable-stopping-${{ matrix.seed }}
+          path: results/generated/pcalm_observable_stopping_seed${{ matrix.seed }}.csv
