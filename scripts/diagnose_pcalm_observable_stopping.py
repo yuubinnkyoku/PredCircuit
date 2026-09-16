@@ -9,8 +9,14 @@ import torch
 
 from diagnose_pcalm_matched_credit_budget import credit_metrics
 from predcircuit.pcalm import (
-    ResidualMLP, Schedule, _solve_inner, al_energy_shifted, constraint_residuals,
-    free_init, method_grad, zero_duals_like,
+    ResidualMLP,
+    Schedule,
+    _solve_inner,
+    al_energy_shifted,
+    constraint_residuals,
+    free_init,
+    method_grad,
+    zero_duals_like,
 )
 
 
@@ -28,8 +34,14 @@ def main() -> None:
     p.add_argument("--out", type=Path, required=True)
     a = p.parse_args()
 
-    model = ResidualMLP(depth=a.depth, width=a.width, input_dim=8, output_dim=4,
-                        activation="relu", seed=a.seed + a.depth)
+    model = ResidualMLP(
+        depth=a.depth,
+        width=a.width,
+        input_dim=8,
+        output_dim=4,
+        activation="relu",
+        seed=a.seed + a.depth,
+    )
     gen = torch.Generator().manual_seed(a.seed + 10_000 + a.depth)
     x = torch.randn(a.batch_size, 8, generator=gen)
     y = torch.randn(a.batch_size, 4, generator=gen)
@@ -41,31 +53,56 @@ def main() -> None:
     rows = []
     for t in range(1, a.max_budget + 1):
         duals_before = duals
-        free = _solve_inner(model, x, y, free, duals_before,
-                            state_lr=a.state_lr, rho=a.rho, steps=1)
+        free = _solve_inner(
+            model, x, y, free, duals_before, state_lr=a.state_lr, rho=a.rho, steps=1
+        )
         residuals = constraint_residuals(model, x, free)
-        duals_after = [(lam + a.alpha * r).detach()
-                       for lam, r in zip(duals_before, residuals, strict=True)]
+        duals_after = [
+            (lam + a.alpha * r).detach() for lam, r in zip(duals_before, residuals, strict=True)
+        ]
         if t >= a.min_budget:
             # All stopping observables below are available from PC-ALM state alone.
             residual_norm = math.sqrt(sum(float(r.square().sum()) for r in residuals))
             dual_norm = math.sqrt(sum(float(d.square().sum()) for d in duals_after))
-            dual_step_norm = math.sqrt(sum(float((da-db).square().sum())
-                                           for da, db in zip(duals_after, duals_before, strict=True)))
-            state_step_norm = math.sqrt(sum(float((z-pz).square().sum())
-                                            for z, pz in zip(free, prev_free, strict=True)))
+            dual_step_norm = math.sqrt(
+                sum(
+                    float((da - db).square().sum())
+                    for da, db in zip(duals_after, duals_before, strict=True)
+                )
+            )
+            state_step_norm = math.sqrt(
+                sum(float((z - pz).square().sum()) for z, pz in zip(free, prev_free, strict=True))
+            )
             energy = float(al_energy_shifted(model, x, y, free, duals_before, rho=a.rho).detach())
-            loss = al_energy_shifted(model, x, y, [z.detach() for z in free],
-                                     [d.detach() for d in duals_before], rho=a.rho)
+            loss = al_energy_shifted(
+                model,
+                x,
+                y,
+                [z.detach() for z in free],
+                [d.detach() for d in duals_before],
+                rho=a.rho,
+            )
             grads = [g.detach() for g in torch.autograd.grad(loss, tuple(model.weights))]
-            finite = all(bool(torch.isfinite(q).all()) for q in [*free, *duals_after, *residuals, *grads])
+            finite = all(
+                bool(torch.isfinite(q).all()) for q in [*free, *duals_after, *residuals, *grads]
+            )
             cosine, ratio, relerr, useful = credit_metrics(grads, bp, finite=finite)
-            rows.append({"seed": a.seed, "budget": t, "residual_norm": residual_norm,
-                         "dual_norm": dual_norm, "dual_step_norm": dual_step_norm,
-                         "state_step_norm": state_step_norm, "al_energy": energy,
-                         "finite": finite, "cosine_to_bp": cosine,
-                         "grad_norm_ratio_to_bp": ratio, "relative_error_to_bp": relerr,
-                         "useful_first_layer_credit": useful})
+            rows.append(
+                {
+                    "seed": a.seed,
+                    "budget": t,
+                    "residual_norm": residual_norm,
+                    "dual_norm": dual_norm,
+                    "dual_step_norm": dual_step_norm,
+                    "state_step_norm": state_step_norm,
+                    "al_energy": energy,
+                    "finite": finite,
+                    "cosine_to_bp": cosine,
+                    "grad_norm_ratio_to_bp": ratio,
+                    "relative_error_to_bp": relerr,
+                    "useful_first_layer_credit": useful,
+                }
+            )
         prev_free = [z.clone() for z in free]
         duals = duals_after
 
