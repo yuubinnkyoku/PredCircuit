@@ -26,7 +26,7 @@ jobs:
           python-version: '3.11'
       - run: pip install -e .
       - name: Measure PC-ALM dual fixed-point sensitivity
-        run: python scripts/diagnose_pcalm_dual_fixed_point.py --seed ${{ matrix.seed }} --out results/generated/pcalm_dual_fixed_point_seed${{ matrix.seed }}.csv
+        run: python scripts/diagnose_pcalm_dual_fixed_point.py --seed ${{ matrix.seed }} --dual-leaks 0.005,0.01,0.02 --bits 12 --integer-bits 3 --out results/generated/pcalm_dual_fixed_point_seed${{ matrix.seed }}.csv
       - uses: actions/upload-artifact@v4
         with:
           name: pcalm-dual-fixed-point-${{ matrix.seed }}
