@@ -1,8 +1,8 @@
 # Measured dual-cost crossover update (2026-09-16)
 
-This note combines the fair XC7 common-credit-core synthesis result with the existing depth-32 / width-8 relaxation/cycle model. It is a resource-model update, not a placed-and-routed FPGA performance claim.
+This note combines the fair scalar XC7 common-credit-core result with the later, more trustworthy vector dual-engine synthesis and behavioral validation. The scalar result remains useful for understanding the recurrence cost, but it is no longer used as the network-level area estimate.
 
-## Measured incremental dual cost
+## Scalar recurrence measurement
 
 The fair common-core XC7 synthesis gives, per scalar 12-bit PC-ALM dual element:
 
@@ -11,56 +11,79 @@ The fair common-core XC7 synthesis gives, per scalar 12-bit PC-ALM dual element:
 - 13 FF-class cells,
 - 0 DSP48.
 
-The sPC specialization optimizes to a wire for rho=1, so a standalone area ratio is undefined. The useful quantity is this incremental PC-ALM cost.
+For H=L-1 hidden layers of width N, fully spatial replication would scale approximately as 221 H N LUT primitives, 31 H N CARRY4s and 13 H N FF-class cells. For H=31, N=8 this gives 54,808 LUT primitives, 7,688 CARRY4s and 3,224 FF-class cells before storage/interconnect. This remains an upper-bound-style argument against one updater per lambda state, not a physical network area estimate.
 
-For H=L-1 hidden layers of width N, a fully spatial dual implementation therefore scales as approximately:
+## Verified shared vector engine supersedes scalar extrapolation
 
-- LUT increment = 221 H N,
-- CARRY4 increment = 31 H N,
-- FF increment = 13 H N.
+The later 8-lane RTL keeps all 992 persistent 12-bit lambda values in a 124 x 96-bit synchronous memory and streams eight lambda/residual pairs per issued word. XC7 synthesis maps it to:
 
-For the current H=31, N=8 experiment (248 scalar dual elements), naive full replication would imply about 54,808 LUT primitives, 7,688 CARRY4s and 3,224 FF-class cells. This is deliberately an upper-bound style extrapolation: synthesis across a vector/layer implementation may share or restructure logic, and FPGA slice packing means primitive counts are not physical LUT-site counts.
+- 1,408 estimated LCs,
+- 266 CARRY4,
+- 129 FDRE,
+- 3 RAMB18E1,
+- 0 DSP48.
 
-The key consequence is nevertheless clear: fully replicating the current one-element dual recurrence is unlikely to be the attractive architecture. The measured cost favors sharing/pipelining the dual updater.
+The shared state path has also passed a behavioral RAM read/update/writeback test across all eight lanes, including the trajectory `0 -> 237 -> 234`. Therefore these vector figures, rather than `8 * scalar cost`, are the current hardware-cost reference.
 
-## Dual-lane sharing changes the area conclusion
+## Corrected overlap model
 
-The existing cycle model has 992 scalar dual updates per relaxation step because batch=4 and H*N=248. At P_mac=128, the major MAC path costs 126 cycles/step.
+There are 992 scalar dual updates per relaxation step for batch=4 and H*N=248. With P_dual lanes, the current synchronous-read pipeline needs
 
-To hide the dual update under that MAC path, only
+    C_dual(P_dual) = ceil(992 / P_dual) + 1
 
-    ceil(992 / P_dual) <= 126
+cycles for a full sweep, where the extra cycle is the pipeline drain. The major MAC-side analytical budget is 126 cycles/step at P_mac=128.
 
-is required, hence
+Thus the cycle-only hiding condition is
 
-    P_dual >= ceil(992 / 126) = 8.
+    ceil(992 / P_dual) + 1 <= 126.
 
-This is much smaller than the previously illustrative P_dual=32 point. With eight shared dual lanes, the measured one-element synthesis extrapolates to roughly:
+Equivalently,
 
-- 1,768 LUT primitives,
-- 248 CARRY4s,
-- 104 FF-class cells,
-- 0 DSP48,
+    ceil(992 / P_dual) <= 125,
 
-for the arithmetic lanes, plus storage/control/interconnect not captured by this scalar multiplication. The 992 persistent lambda values still require storage, but they do not require 992 copies of the recurrence combinational logic.
+so the minimum integer lane count remains
 
-At P_dual=8, dual work takes exactly 124 cycles/step, so it can fit under the 126-cycle MAC path in the analytical overlap schedule. Thus the previous >2x relaxation-cycle lower bound for the 19/20 useful seeds is preserved in the model while reducing replicated dual arithmetic by 4x relative to P_dual=32 and 124x relative to one updater per scalar state.
+    P_dual,min = 8.
 
-## Width dependence
+But the old statement that eight lanes take exactly 124 cycles was incomplete: the verified engine needs an estimated 125-cycle sweep including drain. This matters because the apparent two-cycle margin against the 126-cycle MAC path is actually only one cycle.
 
-For equal-width layers, both the number of scalar dual updates and the major MAC count scale with H and batch, but dual work is O(H N) while dense matvec work is O(H N^2). Holding P_mac fixed, the minimum dual lanes needed to hide the recurrence therefore decreases relative to MAC work as N grows. In the idealized no-overhead model,
+The real-time condition is stricter:
 
-    P_dual_min ~= ceil((B H N) / ceil(MACs_step / P_mac)).
+    C_dual / f_dual <= C_MAC / f_MAC.
 
-For the current measured MAC count, P_dual_min=8 at N=8. This reverses one earlier concern: although a fully spatial dual block has a large per-element LUT cost, dense wider networks amortize a shared dual engine better, not worse. Very narrow networks remain the hardest hardware case because the MAC path becomes short enough that more dual lanes are needed to keep the recurrence hidden.
+At eight lanes,
 
-## Updated architectural conclusion
+    f_dual / f_MAC >= 125/126 = 0.99206.
 
-The measured 221-LUT scalar recurrence should not be replicated once per lambda state. A more credible minimal layer/network engine is:
+So eight lanes are the minimum cycle-count design, but they only remain throughput-neutral if the routed dual engine reaches at least 99.21% of the MAC-side clock.
 
-1. keep lambda values in registers/BRAM/distributed RAM;
-2. instantiate a small bank of shared, pipelined 12-bit dual-update lanes;
-3. stream lambda/residual pairs through those lanes while the MAC datapath computes the next state-gradient/prediction work;
-4. choose P_dual just large enough that dual latency does not exceed the MAC path.
+## 16-lane comparison
 
-At the current depth-32,width-8,batch-4 point, the analytical minimum is eight lanes. This is now the highest-value RTL target: synthesize an 8-lane vector dual engine with realistic lambda storage and compare its LUT/FF/BRAM/Fmax against the 128-lane MAC-side resource budget. Only that vector synthesis can replace the scalar primitive extrapolation with a trustworthy network-level area number.
+Keeping the same 11,904 state bits while doubling to 16 lanes gives a 62 x 192-bit logical memory and an estimated 63-cycle sweep. XC7 synthesis gives:
+
+- 2,826 estimated LCs,
+- 530 CARRY4,
+- 432 FDRE,
+- 64 RAM64M,
+- 0 RAMB18E1,
+- 0 DSP48.
+
+Its real-time hiding condition relaxes to
+
+    f_dual / f_MAC >= 63/126 = 0.5.
+
+However, logic almost exactly doubles: 2,826 / 1,408 = 2.007. The LC-cycle products are 176,000 for 8 lanes and 178,038 for 16 lanes, only +1.16% apart. Parallelism is therefore acting mainly as an area-for-latency exchange, while the memory mapping becomes qualitatively worse at 16 lanes under the current XC7/Yosys flow (BRAM -> distributed RAM).
+
+## Width dependence and architectural consequence
+
+The qualitative width argument still holds: dual work is O(B H N), while dense layer MAC work is O(B H N^2), so a shared dual engine becomes easier to amortize as width grows. Very narrow networks are the hardest overlap case because the MAC path shrinks relative to the O(H N) dual sweep.
+
+The current architectural rule is therefore:
+
+1. store lambda in compact memory rather than replicating recurrence logic per state;
+2. share a small bank of fixed-point dual-update lanes;
+3. choose the minimum lane count satisfying the *real-time* overlap constraint, not merely the cycle-count constraint;
+4. include the discrete RAM mapping regime in the resource model;
+5. do not increase beyond eight lanes unless post-route timing shows `f_dual/f_MAC < 0.99206`.
+
+This supersedes the earlier scalar-times-lanes area estimate and the earlier 124-cycle statement. The next decisive measurement is post-place-and-route timing for the verified 8-lane dual engine versus the comparable MAC datapath.
