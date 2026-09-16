@@ -1,0 +1,33 @@
+name: PC-ALM dual fixed point
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/pcalm-dual-fixed-point.yml
+      - scripts/diagnose_pcalm_dual_fixed_point.py
+      - scripts/diagnose_pcalm_matched_credit_budget.py
+      - src/predcircuit/pcalm.py
+  workflow_dispatch:
+
+jobs:
+  quantize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      max-parallel: 20
+      matrix:
+        seed: [920,921,922,923,924,925,926,927,928,929,930,931,932,933,934,935,936,937,938,939]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -e .
+      - name: Measure PC-ALM dual fixed-point sensitivity
+        run: python scripts/diagnose_pcalm_dual_fixed_point.py --seed ${{ matrix.seed }} --out results/generated/pcalm_dual_fixed_point_seed${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pcalm-dual-fixed-point-${{ matrix.seed }}
+          path: results/generated/pcalm_dual_fixed_point_seed${{ matrix.seed }}.csv
