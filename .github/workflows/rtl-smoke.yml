@@ -36,6 +36,13 @@ jobs:
             -o build/rtl/tb_pcalm_dual_update_exhaustive \
             rtl/pcalm_dual_update.sv rtl/tb_pcalm_dual_update_exhaustive.sv
           timeout 180s vvp build/rtl/tb_pcalm_dual_update_exhaustive
+      - name: Exercise shared dual-engine state path
+        run: |
+          iverilog -g2012 -Wall \
+            -s tb_dual_engine_8lane \
+            -o build/rtl/tb_dual_engine_8lane \
+            rtl/dual_engine_8lane.sv rtl/tb_dual_engine_8lane.sv
+          vvp build/rtl/tb_dual_engine_8lane
       - name: Generic synthesis comparison
         shell: bash
         run: |
