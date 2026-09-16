@@ -68,15 +68,21 @@ jobs:
             | tee build/rtl/common_spc_xc7.log
           yosys -p 'read_verilog -sv rtl/credit_core_common.sv; synth_xilinx -family xc7 -top credit_core_pcalm; stat' \
             | tee build/rtl/common_pcalm_xc7.log
+      - name: Compile 8-lane dual-engine SystemVerilog
+        run: |
+          iverilog -g2012 -Wall -s dual_engine_8lane \
+            -o build/rtl/dual_engine_8lane_compile \
+            rtl/dual_engine_8lane.sv 2>&1 | tee build/rtl/dual_engine_8lane_iverilog.log
       - name: Banked 8-lane dual-engine synthesis
         shell: bash
         run: |
           set -o pipefail
           yosys -p 'read_verilog -sv rtl/dual_engine_8lane.sv; hierarchy -top dual_engine_8lane; proc; memory; opt; check; stat' \
-            | tee build/rtl/dual_engine_8lane_generic.log
+            2>&1 | tee build/rtl/dual_engine_8lane_generic.log
           yosys -p 'read_verilog -sv rtl/dual_engine_8lane.sv; synth_xilinx -family xc7 -top dual_engine_8lane; stat' \
-            | tee build/rtl/dual_engine_8lane_xc7.log
+            2>&1 | tee build/rtl/dual_engine_8lane_xc7.log
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: rtl-synthesis-smoke
           path: build/rtl/*.log
