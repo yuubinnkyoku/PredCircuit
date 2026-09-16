@@ -42,7 +42,9 @@ def quantize_signed(x: torch.Tensor, *, bits: int, integer_bits: int) -> tuple[t
 
 
 def main() -> None:
-    p = argparse.ArgumentParser(description="Measure isolated fixed-point quantization of PC-ALM dual state.")
+    p = argparse.ArgumentParser(
+        description="Measure isolated fixed-point quantization of PC-ALM dual state."
+    )
     p.add_argument("--seed", type=int, required=True)
     p.add_argument("--depth", type=int, default=32)
     p.add_argument("--width", type=int, default=8)
@@ -52,7 +54,9 @@ def main() -> None:
     p.add_argument("--alpha", type=float, default=0.925)
     p.add_argument("--dual-leaks", default="0,0.005,0.01,0.02")
     p.add_argument("--bits", default="16,12,8")
-    p.add_argument("--integer-bits", type=int, default=2, help="Includes sign bit; 2 gives range [-2, 2).")
+    p.add_argument(
+        "--integer-bits", type=int, default=2, help="Includes sign bit; 2 gives range [-2, 2)."
+    )
     p.add_argument("--budget", type=int, default=128)
     p.add_argument("--out", type=Path, required=True)
     a = p.parse_args()
