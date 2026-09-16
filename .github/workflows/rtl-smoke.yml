@@ -81,6 +81,14 @@ jobs:
             2>&1 | tee build/rtl/dual_engine_8lane_generic.log
           yosys -p 'read_verilog -sv rtl/dual_engine_8lane.sv; synth_xilinx -family xc7 -top dual_engine_8lane; stat' \
             2>&1 | tee build/rtl/dual_engine_8lane_xc7.log
+      - name: 16-lane dual-engine XC7 design point
+        shell: bash
+        run: |
+          set -o pipefail
+          # Keep the same 992 persistent lambda values: 62 words x 16 lanes.
+          # This buys sweep-cycle margin without changing DATA_W or total state bits.
+          yosys -p 'read_verilog -sv rtl/dual_engine_8lane.sv; hierarchy -top dual_engine_8lane; chparam -set LANES 16 -set DEPTH 62 dual_engine_8lane; synth_xilinx -family xc7 -top dual_engine_8lane; stat' \
+            2>&1 | tee build/rtl/dual_engine_16lane_xc7.log
       - uses: actions/upload-artifact@v4
         if: always()
         with:
