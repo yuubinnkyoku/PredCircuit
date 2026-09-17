@@ -1,0 +1,32 @@
+name: PC-ALM width-64 update-state lattice alignment
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/pcalm-width64-update-lattice-alignment.yml
+      - scripts/diagnose_pcalm_width64_update_lattice_alignment.py
+      - scripts/diagnose_pcalm_width64_leaky_mixed_precision.py
+      - scripts/diagnose_pcalm_dual_precision.py
+      - src/predcircuit/pcalm.py
+
+jobs:
+  seed:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [845, 846, 847, 848, 849, 850, 851, 852, 853, 854, 855, 856, 857, 858, 859]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: >-
+          uv run python scripts/diagnose_pcalm_width64_update_lattice_alignment.py
+          --seed ${{ matrix.seed }}
+          --out results/generated/pcalm_width64_update_lattice_alignment_seed${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pcalm-width64-update-lattice-alignment-seed-${{ matrix.seed }}
+          path: results/generated/pcalm_width64_update_lattice_alignment_seed${{ matrix.seed }}.csv
+          if-no-files-found: error
