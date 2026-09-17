@@ -8,11 +8,19 @@ import pandas as pd
 import torch
 
 from diagnose_pcalm_width64_leaky_mixed_precision import run
-from predcircuit.pcalm import ResidualMLP, Schedule, gradient_cosine, gradient_relative_error, method_grad
+from predcircuit.pcalm import (
+    ResidualMLP,
+    Schedule,
+    gradient_cosine,
+    gradient_relative_error,
+    method_grad,
+)
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Add state fractional bits without reducing the proven fixed14_i3 state range.")
+    parser = argparse.ArgumentParser(
+        description="Add state fractional bits without reducing the proven fixed14_i3 state range."
+    )
     parser.add_argument("--seed", type=int, required=True)
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--budget", type=int, default=256)
@@ -27,7 +35,9 @@ def main() -> None:
     x = torch.randn(4, 8, generator=generator)
     y = torch.randn(4, 4, generator=generator)
 
-    bp_model = ResidualMLP(depth=depth, width=width, input_dim=8, output_dim=4, activation="relu", seed=model_seed)
+    bp_model = ResidualMLP(
+        depth=depth, width=width, input_dim=8, output_dim=4, activation="relu", seed=model_seed
+    )
     bp = method_grad(bp_model, x, y, Schedule("bp", budget=0), state_lr=args.state_lr, rho=1.0)
     bp_first = bp[0]
     bp_norm = float(bp_first.norm())
@@ -44,10 +54,20 @@ def main() -> None:
     rows: list[dict[str, object]] = []
     fp32_grads: list[torch.Tensor] | None = None
     for name, (update_precision, state_precision, dual_precision) in configs.items():
-        model = ResidualMLP(depth=depth, width=width, input_dim=8, output_dim=4, activation="relu", seed=model_seed)
-        grads, stats = run(model, x, y, update_precision=update_precision, state_precision=state_precision,
-                           dual_precision=dual_precision, budget=args.budget, state_lr=args.state_lr,
-                           dual_leak=args.dual_leak)
+        model = ResidualMLP(
+            depth=depth, width=width, input_dim=8, output_dim=4, activation="relu", seed=model_seed
+        )
+        grads, stats = run(
+            model,
+            x,
+            y,
+            update_precision=update_precision,
+            state_precision=state_precision,
+            dual_precision=dual_precision,
+            budget=args.budget,
+            state_lr=args.state_lr,
+            dual_leak=args.dual_leak,
+        )
         if fp32_grads is None:
             fp32_grads = grads
         first = grads[0]
@@ -55,13 +75,27 @@ def main() -> None:
         cosine = gradient_cosine([first], [bp_first])
         relative_error = gradient_relative_error([first], [bp_first])
         finite = bool(stats["finite"])
-        rows.append({"seed": args.seed, "config": name, "budget": args.budget, "state_lr": args.state_lr,
-                     "dual_leak": args.dual_leak, "update_precision": update_precision,
-                     "state_precision": state_precision, "dual_precision": dual_precision, **stats,
-                     "useful_first_layer_credit": finite and cosine >= 0.9 and 0.5 <= ratio <= 2.0 and relative_error <= 0.6,
-                     "first_layer_cosine_to_bp": cosine, "first_layer_grad_norm_ratio_to_bp": ratio,
-                     "first_layer_relative_error_to_bp": relative_error,
-                     "all_gradient_relative_error_to_fp32": gradient_relative_error(grads, fp32_grads)})
+        rows.append(
+            {
+                "seed": args.seed,
+                "config": name,
+                "budget": args.budget,
+                "state_lr": args.state_lr,
+                "dual_leak": args.dual_leak,
+                "update_precision": update_precision,
+                "state_precision": state_precision,
+                "dual_precision": dual_precision,
+                **stats,
+                "useful_first_layer_credit": finite
+                and cosine >= 0.9
+                and 0.5 <= ratio <= 2.0
+                and relative_error <= 0.6,
+                "first_layer_cosine_to_bp": cosine,
+                "first_layer_grad_norm_ratio_to_bp": ratio,
+                "first_layer_relative_error_to_bp": relative_error,
+                "all_gradient_relative_error_to_fp32": gradient_relative_error(grads, fp32_grads),
+            }
+        )
 
     frame = pd.DataFrame(rows)
     args.out.parent.mkdir(parents=True, exist_ok=True)
