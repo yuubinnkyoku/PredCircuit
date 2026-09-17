@@ -1,14 +1,27 @@
 ---
 feature: magnitude-window-crossline
-status: designed
+status: delivered
 updated: 2026-09-18
 branch: main
-commits: # filled at delivery
+commits: 305cda2..9d2aaef
 ---
 
 # Magnitude-window cross-line conclusion
 
 ## Report
+
+**What was built** — Magnitude-window diagnostics that separate local-credit direction quality from magnitude control on the shared ResidualMLP: `predcircuit.magnitude_control`, sPC raw/oracle-norm/residual-gain vs dual-leak PC-ALM, ePC equilibrium+compute accounting, holdout workflows, aggregator, and the cross-line synthesis note.
+
+**Verification** — `uv run pytest` PASS; ruff/ty clean; CI green on feature commits; Actions holdouts 35244069612 / 35244061762 produced 18–19 seed artifacts recorded in `results/magnitude_window_holdout_2026-09-18.md`.
+
+**Journey log**
+1. `git worktree add` blocked by shared-.git policy → continued on main.
+2. FlyVis workflows watch `src/predcircuit/**` and re-fired; cancelled to protect Actions capacity.
+3. Local seed 960 suggested oracle scale restore was enough; holdout showed only 50% (T=128) / 22% (T=256) — magnitude necessary, not sufficient.
+4. ePC collinearity at T=1 does not transfer to deep useful credit under BP geometry or stationarity.
+5. Dual-leak PC-ALM is the only tested local method with 18/18 useful fixed-budget credit at T=128 and 256.
+
+## Tasks (delivery)
 
 ## [S1] Problem
 
@@ -79,11 +92,11 @@ Structure: shared mechanism table → line-specific evidence → hardware implic
 
 ## Tasks
 
-- [ ] T1: Add `scripts/diagnose_spc_magnitude_control.py` — acceptance: runs one seed locally, writes CSV with E1 columns (covers: S2 E1)
-- [ ] T2: Add `scripts/diagnose_epc_equilibrium_compute.py` — acceptance: runs one seed locally, writes energy/stationarity/compute CSV (covers: S2 E2)
-- [ ] T3: Unit tests for new diagnostics' pure helpers — acceptance: `uv run pytest` passes (covers: S2 E1,E2)
-- [ ] T4: GitHub Actions workflows for E1/E2 holdouts — acceptance: workflow files trigger on path push (covers: S2 E1,E2)
-- [ ] T5: Local smoke + ruff/ty — acceptance: lint/typecheck clean on new scripts (covers: S2 E1,E2)
-- [ ] T6: Commit and push to trigger CI — acceptance: Actions runs queued (covers: S2 E1,E2)
-- [ ] T7: Synthesize `docs/magnitude-window-crossline.md` from existing + CI evidence — acceptance: falsifiable claim stated with evidence table (covers: S2 E3)
-- [ ] T8: Overnight loop: collect CI artifacts, update research log, refine conclusion — acceptance: results recorded or blocked reasons listed (covers: S2 E3)
+- [x] T1: Add `scripts/diagnose_spc_magnitude_control.py` — acceptance: runs one seed locally, writes CSV with E1 columns (covers: S2 E1)
+- [x] T2: Add `scripts/diagnose_epc_equilibrium_compute.py` — acceptance: runs one seed locally, writes energy/stationarity/compute CSV (covers: S2 E2)
+- [x] T3: Unit tests for new diagnostics' pure helpers — acceptance: `uv run pytest` passes (covers: S2 E1,E2)
+- [x] T4: GitHub Actions workflows for E1/E2 holdouts — acceptance: workflow files trigger on path push (covers: S2 E1,E2)
+- [x] T5: Local smoke + ruff/ty — acceptance: lint/typecheck clean on new scripts (covers: S2 E1,E2)
+- [x] T6: Commit and push to trigger CI — acceptance: Actions runs queued (covers: S2 E1,E2)
+- [x] T7: Synthesize `docs/magnitude-window-crossline.md` from existing + CI evidence — acceptance: falsifiable claim stated with evidence table (covers: S2 E3)
+- [x] T8: Overnight loop: collect CI artifacts, update research log, refine conclusion — acceptance: results recorded or blocked reasons listed (covers: S2 E3)

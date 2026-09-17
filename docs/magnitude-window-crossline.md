@@ -1,6 +1,6 @@
 # Magnitude-window cross-line conclusion
 
-Status: designed / in-progress. This note is the cross-line synthesis target for the overnight compose-next feature `magnitude-window-crossline`. It may update as E1/E2 holdouts land.
+Status: holdout-supported (18–19 seeds). Full tables: `results/magnitude_window_holdout_2026-09-18.md`.
 
 ## Claim under test
 
