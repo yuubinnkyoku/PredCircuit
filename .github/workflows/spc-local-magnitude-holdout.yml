@@ -1,0 +1,31 @@
+name: spc local magnitude holdout
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/spc-local-magnitude-holdout.yml
+      - scripts/diagnose_spc_local_magnitude.py
+      - src/predcircuit/magnitude_control.py
+      - src/predcircuit/pcalm.py
+
+jobs:
+  seed:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [960, 961, 962, 963, 964, 965, 966, 967, 968, 969, 970, 971, 972, 973, 974, 975, 976, 977, 978, 979]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: >-
+          uv run python scripts/diagnose_spc_local_magnitude.py
+          --seed ${{ matrix.seed }}
+          --out results/generated/spc_local_magnitude_seed${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: spc-local-magnitude-seed-${{ matrix.seed }}
+          path: results/generated/spc_local_magnitude_seed${{ matrix.seed }}.csv
+          if-no-files-found: error
