@@ -45,9 +45,17 @@ T=128, depth32/width8, seeds 960–967:
 - FlyVis workflows watch `src/predcircuit/**` and re-fired on the new module; cancelled to save capacity.
 - Holdouts dispatched: run 35244069612 (sPC mag), 35244061762 (ePC equilibrium).
 
-## Pending overnight
+## Overnight follow-up (local magnitude)
 
-1. Collect 20-seed holdout artifacts when Actions finish
-2. Freeze cross-line verdict in `docs/magnitude-window-crossline.md`
-3. Optional follow-up: official Sakana state_lr ablation; FlyVis residual vs exact-gradient interaction already in credit_geometry
-4. Finalize compose-next Report + review when holdouts land
+- Implemented `scripts/diagnose_spc_local_magnitude.py` + CI workflow.
+- Local pilot n=6: residual-match t2 useful only when cosine already high (same seeds as oracle); dual-leak 6/6.
+- Conclusion: post-hoc local rescale cannot replace dual dynamics for credit *content*.
+- Results: `results/spc_local_magnitude_pilot_2026-09-18.md`
+- Reviewer subagent general-1 failed (UnknownError); general-2 re-spawned.
+
+## Pending overnight (updated)
+
+1. Collect local-magnitude 20-seed holdout artifacts
+2. Ingest general-2 review findings; fix any criticals
+3. Keep dual-leak/Sakana state_lr follow-up as next scientific experiment after review
+4. Cron heartbeat `ce47e887` remains armed
