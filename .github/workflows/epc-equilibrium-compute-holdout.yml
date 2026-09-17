@@ -1,0 +1,32 @@
+name: ePC equilibrium compute holdout
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/epc-equilibrium-compute-holdout.yml
+      - scripts/diagnose_epc_equilibrium_compute.py
+      - src/predcircuit/epc.py
+      - src/predcircuit/pcalm.py
+      - src/predcircuit/hardware.py
+
+jobs:
+  seed:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [960, 961, 962, 963, 964, 965, 966, 967, 968, 969, 970, 971, 972, 973, 974, 975, 976, 977, 978, 979]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: >-
+          uv run python scripts/diagnose_epc_equilibrium_compute.py
+          --seed ${{ matrix.seed }}
+          --out results/generated/epc_equilibrium_compute_seed${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: epc-equilibrium-compute-seed-${{ matrix.seed }}
+          path: results/generated/epc_equilibrium_compute_seed${{ matrix.seed }}.csv
+          if-no-files-found: error

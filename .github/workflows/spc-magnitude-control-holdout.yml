@@ -1,0 +1,30 @@
+name: spc magnitude control holdout
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/spc-magnitude-control-holdout.yml
+      - scripts/diagnose_spc_magnitude_control.py
+      - src/predcircuit/pcalm.py
+
+jobs:
+  seed:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [960, 961, 962, 963, 964, 965, 966, 967, 968, 969, 970, 971, 972, 973, 974, 975, 976, 977, 978, 979]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: >-
+          uv run python scripts/diagnose_spc_magnitude_control.py
+          --seed ${{ matrix.seed }}
+          --out results/generated/spc_magnitude_control_seed${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: spc-magnitude-control-seed-${{ matrix.seed }}
+          path: results/generated/spc_magnitude_control_seed${{ matrix.seed }}.csv
+          if-no-files-found: error
