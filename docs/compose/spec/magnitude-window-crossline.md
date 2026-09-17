@@ -17,9 +17,11 @@ commits: 305cda2..9d2aaef
 **Journey log**
 1. `git worktree add` blocked by shared-.git policy → continued on main.
 2. FlyVis workflows watch `src/predcircuit/**` and re-fired; cancelled to protect Actions capacity.
-3. Local seed 960 suggested oracle scale restore was enough; holdout showed only 50% (T=128) / 22% (T=256) — magnitude necessary, not sufficient.
+3. Local seed 960 suggested oracle scale restore was enough; holdout showed only 45%/20% — magnitude necessary, not sufficient.
 4. ePC collinearity at T=1 does not transfer to deep useful credit under BP geometry or stationarity.
 5. Dual-leak PC-ALM is the only tested local method with 20/20 useful fixed-budget credit at T=128 and 256 (oracle sPC scale restore only 45%/20%).
+6. Reviewer general-2 flagged incomplete residual-gain control + stale synthesis → fixed stage-2 control, rewrote synthesis with caveats/next experiment, re-holdout.
+7. Stage-2 unit-first useful 0/20 (wrong target vs BP-scale criterion); official Sakana state_lr still supports dual-leak 90–100% while pure PC-ALM collapses at long T.
 
 ## [S1] Problem
 

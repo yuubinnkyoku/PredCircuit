@@ -75,17 +75,21 @@ At width-64/depth-32, PC-ALM+dual-leak 14/14/12 clears a state-traffic break-eve
 1. ~~E1 oracle restore fixes sPC~~ — **refuted on holdout** (only 45%/20% useful).
 2. E2 ePC competitive at matched quality/compute — **not supported** in this protocol.
 3. FlyVis residual attenuation benefits exact gradients equally — still open.
-4. Dual-leak benefits vanish on official Sakana `state_lr` or held-out widths — **still open (highest-value next)**.
-5. Stage-2 local residual gain matches dual-leak useful rates on holdout — open; local pilot suggests it only fires when cosine is already high.
+4. Dual-leak benefits vanish on official Sakana `state_lr` or held-out widths — **refuted for state_lr** (`results/magnitude_window_v2_and_sakana_lr_2026-09-18.md`: leak 90–100% useful at T=128/256 under official 0.234285; pure PC-ALM collapses to 5% at T=256).
+5. Stage-2 local residual gain matches dual-leak useful rates — **refuted** (0/20 useful; unit first-layer norm is the wrong target vs BP-scale criterion).
 
 ## Next experiment
 
-Run E1 holdout **again after the two-stage residual control** (`spc_residual_gain_unit_first`) and, in parallel, an **official Sakana depth-specific `state_lr` ablation** for pure PC-ALM vs dual-leak at T=128 on seeds 980–999. That tests falsifier 4 without touching RTL.
+1. **Width-64 mixed precision × official state_lr × dual-leak** — confirm 14/14/12 still holds when `state_lr=0.234285`.
+2. **Bridge lines:** apply dual-leak-style magnitude control on the FlyVis type-pair local rule (test whether the same “window” mechanism explains late-gate/Goldilocks).
+3. **End-to-end training** of leaky PC-ALM vs sPC on the shared ResidualMLP supervised task (credit geometry alone is not enough for a systems claim).
 
 ## Evidence pointers
 
 - `results/magnitude_window_holdout_2026-09-18.md`
+- `results/magnitude_window_v2_and_sakana_lr_2026-09-18.md`
 - `results/spc_local_magnitude_pilot_2026-09-18.md`
+- `results/pcalm_sakana_state_lr_pilot_2026-09-18.md`
 - `results/pcalm_width64_holdout_and_spc_budget_2026-09-18.md`
 - `results/pcalm_dual_leak_dynamics_20seed_2026-09-17.md`
 - `results/pcalm_dual_q39_20seed_2026-09-17.md`
