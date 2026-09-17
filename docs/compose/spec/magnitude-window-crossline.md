@@ -21,8 +21,6 @@ commits: 305cda2..9d2aaef
 4. ePC collinearity at T=1 does not transfer to deep useful credit under BP geometry or stationarity.
 5. Dual-leak PC-ALM is the only tested local method with 18/18 useful fixed-budget credit at T=128 and 256.
 
-## Tasks (delivery)
-
 ## [S1] Problem
 
 PredCircuit has two mature but separate research lines:
