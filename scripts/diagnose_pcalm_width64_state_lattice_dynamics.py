@@ -161,7 +161,9 @@ def run_config(
                 for grad in torch.autograd.grad(credit_loss, tuple(model.weights))
             ]
             first = grads[0]
-            checkpoint_norm_ratio = float(first.norm()) / bp_norm if bp_norm else math.nan
+            checkpoint_norm_ratio = (
+                float(first.norm()) / bp_norm if bp_norm else math.nan
+            )
             checkpoint_cosine = gradient_cosine([first], [bp_first])
             checkpoint_relative_error = gradient_relative_error([first], [bp_first])
             checkpoint_useful = (
@@ -196,12 +198,18 @@ def run_config(
                 "state_zero_step_fraction": zero_fraction(quantized_deltas),
                 "state_step_cosine_previous": previous_delta_cosine,
                 "max_abs_state": max(float(z.abs().max()) for z in free),
-                "max_abs_dual": max(float(dual.abs().max()) for dual in duals_after),
-                "state_saturation_rate": state_saturated / state_total if state_total else 0.0,
+                "max_abs_dual": max(
+                    float(dual.abs().max()) for dual in duals_after
+                ),
+                "state_saturation_rate": (
+                    state_saturated / state_total if state_total else 0.0
+                ),
                 "update_saturation_rate": (
                     update_saturated / update_total if update_total else 0.0
                 ),
-                "dual_saturation_rate": dual_saturated / dual_total if dual_total else 0.0,
+                "dual_saturation_rate": (
+                    dual_saturated / dual_total if dual_total else 0.0
+                ),
                 "checkpoint_cosine_to_bp": checkpoint_cosine,
                 "checkpoint_norm_ratio_to_bp": checkpoint_norm_ratio,
                 "checkpoint_relative_error_to_bp": checkpoint_relative_error,
@@ -215,7 +223,9 @@ def run_config(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Trace the non-monotone 14/15/16-bit state lattice dynamics at width 64."
+        description=(
+            "Trace the non-monotone 14/15/16-bit state lattice dynamics at width 64."
+        )
     )
     parser.add_argument("--seed", type=int, required=True)
     parser.add_argument("--out", type=Path, required=True)
