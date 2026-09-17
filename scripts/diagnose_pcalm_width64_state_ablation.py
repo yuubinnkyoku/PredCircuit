@@ -58,9 +58,7 @@ def run_config(
 
     for outer_ix in range(budget):
         variables = [z.detach().requires_grad_(True) for z in free]
-        energy = al_energy_shifted(
-            model, x, y, variables, [d.detach() for d in duals], rho=rho
-        )
+        energy = al_energy_shifted(model, x, y, variables, [d.detach() for d in duals], rho=rho)
         raw_grads = torch.autograd.grad(energy, variables)
         free = [
             q(z.detach() - effective_lr * q(g, update_precision), state_precision)
@@ -172,9 +170,7 @@ def main() -> None:
                 "first_layer_cosine_to_bp": cosine,
                 "first_layer_grad_norm_ratio_to_bp": ratio,
                 "first_layer_relative_error_to_bp": relative_error,
-                "all_gradient_relative_error_to_fp32": gradient_relative_error(
-                    grads, fp32_grads
-                ),
+                "all_gradient_relative_error_to_fp32": gradient_relative_error(grads, fp32_grads),
                 "residual_total": residual,
             }
         )
