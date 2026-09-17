@@ -2,7 +2,7 @@
 
 Status: **holdout-supported (E1 n=20; E2 n=19)**.
 Primary tables: `results/magnitude_window_holdout_2026-09-18.md`.
-Follow-up local controllers: `results/spc_local_magnitude_pilot_2026-09-18.md`.
+Follow-up local controllers: `results/spc_local_magnitude_pilot_2026-09-18.md` (20-seed holdout: local t2 ≤ oracle, dual-leak 20/20).
 Spec: `docs/compose/spec/magnitude-window-crossline.md`.
 
 ## Claim under test (post-holdout)
