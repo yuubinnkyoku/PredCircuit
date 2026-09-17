@@ -114,7 +114,9 @@ def run(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Hold out leaky PC-ALM at width 64 in 14/14/12 fixed point.")
+    parser = argparse.ArgumentParser(
+        description="Hold out leaky PC-ALM at width 64 in 14/14/12 fixed point."
+    )
     parser.add_argument("--seed", type=int, required=True)
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--budget", type=int, default=256)
@@ -130,7 +132,9 @@ def main() -> None:
     x = torch.randn(4, 8, generator=generator)
     y = torch.randn(4, 4, generator=generator)
 
-    bp_model = ResidualMLP(depth=depth, width=width, input_dim=8, output_dim=4, activation="relu", seed=model_seed)
+    bp_model = ResidualMLP(
+        depth=depth, width=width, input_dim=8, output_dim=4, activation="relu", seed=model_seed
+    )
     bp = method_grad(bp_model, x, y, Schedule("bp", budget=0), state_lr=args.state_lr, rho=1.0)
     bp_first = bp[0]
     bp_norm = float(bp_first.norm())
@@ -142,7 +146,9 @@ def main() -> None:
         "fixed14_14_12_leaky": ("fixed14_i2", "fixed14_i3", "fixed12_i1"),
     }
     for name, (update_precision, state_precision, dual_precision) in configs.items():
-        model = ResidualMLP(depth=depth, width=width, input_dim=8, output_dim=4, activation="relu", seed=model_seed)
+        model = ResidualMLP(
+            depth=depth, width=width, input_dim=8, output_dim=4, activation="relu", seed=model_seed
+        )
         grads, stats = run(
             model,
             x,
