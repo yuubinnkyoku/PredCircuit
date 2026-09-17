@@ -109,11 +109,32 @@ def residual_norm_gain(
     grads: list[torch.Tensor],
     residual_norms: list[float],
 ) -> list[torch.Tensor]:
+    """Stage 1 only: scale whole credit by 1 / mean residual norm."""
     if not residual_norms:
         return [g.detach().clone() for g in grads]
     mean_res = sum(residual_norms) / len(residual_norms)
     gain = 1.0 / (mean_res + EPS)
     return [g.detach().clone() * gain for g in grads]
+
+
+def unit_first_layer_norm(grads: list[torch.Tensor]) -> list[torch.Tensor]:
+    """Cosine-preserving scale of layer-0 credit to unit L2 norm."""
+    if not grads:
+        raise ValueError("grads must be non-empty")
+    first_norm = float(grads[0].norm())
+    if first_norm <= 0.0:
+        return [g.detach().clone() for g in grads]
+    out = [g.detach().clone() for g in grads]
+    out[0] = out[0] / first_norm
+    return out
+
+
+def residual_norm_gain_then_unit_first(
+    grads: list[torch.Tensor],
+    residual_norms: list[float],
+) -> list[torch.Tensor]:
+    """Stage 2 control: residual-norm gain, then unit first-layer norm."""
+    return unit_first_layer_norm(residual_norm_gain(grads, residual_norms))
 
 
 def credit_metrics(
@@ -175,6 +196,13 @@ def mac_accounting(
     batch_size: int,
     budget: int,
 ) -> dict[str, float]:
+    """First-order MAC/state estimates.
+
+    ePC and single-shot BP use a 2x multiplier on the sPC matrix-MAC lower
+    bound as a conservative reverse-mode accounting, not a measured profiler
+    result. ePC persistent bits count error coordinates directly (same shape
+    as free hidden state) rather than going through HardwareCost.
+    """
     if family == "epc":
         cost = estimate_local_learning_cost(
             family="spc",

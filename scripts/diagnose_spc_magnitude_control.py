@@ -11,6 +11,7 @@ from predcircuit.magnitude_control import (
     oracle_norm_match,
     pcalm_leak_grad,
     residual_norm_gain,
+    residual_norm_gain_then_unit_first,
     spc_grad,
 )
 from predcircuit.pcalm import ResidualMLP, Schedule, method_grad
@@ -81,6 +82,12 @@ def main() -> None:
             (
                 "spc_residual_norm_gain",
                 residual_norm_gain(spc_grads, residual_norms),
+                0.0,
+                spc_finite,
+            ),
+            (
+                "spc_residual_gain_unit_first",
+                residual_norm_gain_then_unit_first(spc_grads, residual_norms),
                 0.0,
                 spc_finite,
             ),

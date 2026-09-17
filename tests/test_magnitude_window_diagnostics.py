@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 
+import pytest
 import torch
 
 from predcircuit.magnitude_control import (
@@ -10,8 +11,10 @@ from predcircuit.magnitude_control import (
     mac_accounting,
     oracle_norm_match,
     residual_norm_gain,
+    residual_norm_gain_then_unit_first,
     spc_credit,
     spc_grad,
+    unit_first_layer_norm,
 )
 from predcircuit.pcalm import ResidualMLP, Schedule, method_grad
 from predcircuit.epc import run_epc
@@ -40,6 +43,31 @@ def test_residual_norm_gain_scales_inversely() -> None:
     grads = [torch.ones(2, 2), torch.ones(2, 2)]
     out = residual_norm_gain(grads, [2.0, 2.0])
     assert torch.allclose(out[0], grads[0] * 0.5)
+
+
+def test_residual_gain_then_unit_first_matches_spec() -> None:
+    grads = [torch.ones(2, 2) * 0.01, torch.ones(3, 2) * 0.2]
+    residual_norms = [4.0, 4.0]
+    stage1 = residual_norm_gain(grads, residual_norms)
+    stage2 = residual_norm_gain_then_unit_first(grads, residual_norms)
+    assert torch.allclose(stage1[0], grads[0] * 0.25)
+    assert torch.isclose(stage2[0].norm(), torch.tensor(1.0))
+    # Stage 2 only rescales layer 0; deeper layers keep stage-1 gain.
+    assert torch.allclose(stage2[1], stage1[1])
+    unit = unit_first_layer_norm(grads)
+    assert torch.isclose(unit[0].norm(), torch.tensor(1.0))
+    assert torch.allclose(unit[1], grads[1])
+
+
+def test_credit_metrics_unit_first_layer_geometry() -> None:
+    bp = [torch.ones(2, 2) * 2.0, torch.ones(2, 2)]
+    raw = [torch.ones(2, 2) * 0.01, torch.ones(2, 2) * 0.5]
+    unit = unit_first_layer_norm(raw)
+    m = credit_metrics(unit, bp)
+    assert m["first_layer_cosine_to_bp"] > 0.99
+    assert m["first_layer_grad_norm"] == pytest.approx(1.0, rel=1e-5)
+    # Unit first-layer is not automatically useful vs BP-norm criterion.
+    assert not m["useful_first_layer_credit"] or m["first_layer_grad_norm_ratio_to_bp"] <= 2.0
 
 
 def test_credit_metrics_detects_pure_scale() -> None:
