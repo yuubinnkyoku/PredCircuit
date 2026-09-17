@@ -19,7 +19,7 @@ commits: 305cda2..9d2aaef
 2. FlyVis workflows watch `src/predcircuit/**` and re-fired; cancelled to protect Actions capacity.
 3. Local seed 960 suggested oracle scale restore was enough; holdout showed only 50% (T=128) / 22% (T=256) — magnitude necessary, not sufficient.
 4. ePC collinearity at T=1 does not transfer to deep useful credit under BP geometry or stationarity.
-5. Dual-leak PC-ALM is the only tested local method with 18/18 useful fixed-budget credit at T=128 and 256.
+5. Dual-leak PC-ALM is the only tested local method with 20/20 useful fixed-budget credit at T=128 and 256 (oracle sPC scale restore only 45%/20%).
 
 ## [S1] Problem
 

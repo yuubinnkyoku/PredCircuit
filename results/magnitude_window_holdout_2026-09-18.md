@@ -57,7 +57,8 @@ Hardware implication (strengthened): the FPGA path should bank on **magnitude-st
 
 ## Remaining CI
 
-- Seeds 962, 977 on sPC holdout still running at download time; expected to shift rates by at most a few percent. Re-download and update if they complete.
+- sPC holdout completed success with all 20 seeds.
+- ePC holdout 19/20 at first download; rates unchanged by missing seed on inspected aggregates.
 - Unrelated FlyVis workflows triggered by `src/predcircuit/**` were cancelled.
 
 ## Artifacts
