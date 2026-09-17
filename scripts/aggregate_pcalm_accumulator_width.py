@@ -9,7 +9,7 @@ import pandas as pd
 def main() -> None:
     parser = argparse.ArgumentParser(description="Aggregate accumulator width-scaling holdout.")
     parser.add_argument("--input", type=Path, required=True)
-    parser.add_argument("--expected-files", type=int, default=15)
+    parser.add_argument("--expected-files", type=int, default=20)
     parser.add_argument("--out", type=Path, required=True)
     args = parser.parse_args()
 
