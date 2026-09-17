@@ -53,9 +53,20 @@ T=128, depth32/width8, seeds 960–967:
 - Results: `results/spc_local_magnitude_pilot_2026-09-18.md`
 - Reviewer subagent general-1 failed (UnknownError); general-2 re-spawned.
 
-## Pending overnight (updated)
+## Frozen conclusions (holdout-backed)
 
-1. Collect local-magnitude 20-seed holdout artifacts
-2. Ingest general-2 review findings; fix any criticals
-3. Keep dual-leak/Sakana state_lr follow-up as next scientific experiment after review
-4. Cron heartbeat `ce47e887` remains armed
+1. Deep sPC failure is **magnitude collapse with residual direction error** (raw 0/20 useful; cosine ~0.88; oracle only 45%/20%).
+2. BP-free local residual rescale **cannot replace dual dynamics** (t2 ≤ oracle; unit-first 0/20).
+3. ePC is **not competitive** under this geometry/stationarity gate (0/19 useful).
+4. **Dual-leak PC-ALM** opens fixed-budget BP-scale credit at 20/20 (T=128/256) and remains robust under **official Sakana state_lr** (90–100%); pure PC-ALM collapses to 5% at T=256.
+
+Primary notes:
+- `results/magnitude_window_holdout_2026-09-18.md`
+- `results/magnitude_window_v2_and_sakana_lr_2026-09-18.md`
+- `docs/magnitude-window-crossline.md`
+
+## Pending overnight
+
+1. Collect width-64 × official state_lr × dual-leak holdout (run 35249816337)
+2. Optional next: FlyVis dual-leak bridge; end-to-end training
+3. Cron `ce47e887` hourly heartbeat remains armed
