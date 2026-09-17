@@ -195,9 +195,7 @@ def run_alignment(
         "late_update_zero_fraction": late_update_zero / late_count,
         "late_state_zero_step_fraction": late_state_zero / late_count,
         "state_saturation_rate": state_saturated / state_total if state_total else 0.0,
-        "update_saturation_rate": (
-            update_saturated / update_total if update_total else 0.0
-        ),
+        "update_saturation_rate": (update_saturated / update_total if update_total else 0.0),
         "dual_saturation_rate": dual_saturated / dual_total if dual_total else 0.0,
     }
 
