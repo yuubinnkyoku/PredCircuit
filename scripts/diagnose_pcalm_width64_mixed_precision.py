@@ -8,7 +8,13 @@ import pandas as pd
 import torch
 
 from diagnose_pcalm_width64_state_ablation import run_config
-from predcircuit.pcalm import ResidualMLP, Schedule, gradient_cosine, gradient_relative_error, method_grad
+from predcircuit.pcalm import (
+    ResidualMLP,
+    Schedule,
+    gradient_cosine,
+    gradient_relative_error,
+    method_grad,
+)
 
 CONFIGS = {
     "state12_update14": ("fixed14_i2", "fixed12_i3"),
