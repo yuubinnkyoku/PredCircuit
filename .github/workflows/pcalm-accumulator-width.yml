@@ -20,7 +20,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        width: [8, 16, 32]
+        width: [8, 16, 32, 64]
         seed: [840, 841, 842, 843, 844]
     steps:
       - uses: actions/checkout@v4
