@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
+from typing import TypeAlias
 
 import pandas as pd
 import torch
 
 from predcircuit.magnitude_control import credit_metrics, pcalm_leak_grad
 from predcircuit.pcalm import ResidualMLP, Schedule, method_grad
+
+RowValue: TypeAlias = float | int | bool | str
 
 
 def parse_ints(text: str) -> list[int]:
@@ -57,7 +60,7 @@ def main() -> None:
     # BP is independent of state_lr for the supervised loss path.
     bp = method_grad(model, x, y, Schedule("bp", budget=0), state_lr=0.25, rho=a.rho)
 
-    rows: list[dict[str, float | int | bool]] = []
+    rows: list[dict[str, RowValue]] = []
     for state_lr in state_lrs:
         for dual_leak in leaks:
             for budget in budgets:
