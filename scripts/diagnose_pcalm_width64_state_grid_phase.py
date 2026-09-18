@@ -64,9 +64,9 @@ def main() -> None:
                 shifted, saturated, total = base_quantize(value - offset, precision)
                 return shifted + offset, saturated, total
 
-            # The diagnostic deliberately replaces the module-level quantizer with
-            # a signature-compatible closure; ty does not model this monkeypatch.
-            alignment.quantize = phase_quantize  # type: ignore[invalid-assignment]
+            # Diagnostic-only monkeypatch; setattr avoids ty treating the module
+            # attribute as an immutable statically-known function object.
+            setattr(alignment, "quantize", phase_quantize)
             model = ResidualMLP(
                 depth=depth,
                 width=width,
@@ -113,7 +113,7 @@ def main() -> None:
                 }
             )
     finally:
-        alignment.quantize = original_quantize
+        setattr(alignment, "quantize", original_quantize)
 
     frame = pd.DataFrame(rows)
     args.out.parent.mkdir(parents=True, exist_ok=True)
