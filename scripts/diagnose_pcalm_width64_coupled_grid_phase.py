@@ -10,7 +10,13 @@ import torch
 
 import diagnose_pcalm_width64_update_lattice_alignment as alignment
 from diagnose_pcalm_width64_leaky_mixed_precision import quantize as base_quantize
-from predcircuit.pcalm import ResidualMLP, Schedule, gradient_cosine, gradient_relative_error, method_grad
+from predcircuit.pcalm import (
+    ResidualMLP,
+    Schedule,
+    gradient_cosine,
+    gradient_relative_error,
+    method_grad,
+)
 
 STATE_PRECISION = "fixed15_i3"
 UPDATE_PRECISION = "fixed14_i1"
@@ -19,7 +25,9 @@ TARGETS = ("none", "update", "dual")
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Discriminate update-grid from dual-grid phase sensitivity.")
+    parser = argparse.ArgumentParser(
+        description="Discriminate update-grid from dual-grid phase sensitivity."
+    )
     parser.add_argument("--seed", type=int, required=True)
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--budget", type=int, default=256)
@@ -34,7 +42,9 @@ def main() -> None:
     x = torch.randn(4, 8, generator=generator)
     y = torch.randn(4, 4, generator=generator)
 
-    bp_model = ResidualMLP(depth=depth, width=width, input_dim=8, output_dim=4, activation="relu", seed=model_seed)
+    bp_model = ResidualMLP(
+        depth=depth, width=width, input_dim=8, output_dim=4, activation="relu", seed=model_seed
+    )
     bp = method_grad(bp_model, x, y, Schedule("bp", budget=0), state_lr=args.state_lr, rho=1.0)
     bp_first = bp[0]
     bp_norm = float(bp_first.norm())
@@ -48,19 +58,36 @@ def main() -> None:
     original_quantize = alignment.quantize
     try:
         for target in TARGETS:
-            precision_target = UPDATE_PRECISION if target == "update" else DUAL_PRECISION if target == "dual" else ""
+            precision_target = (
+                UPDATE_PRECISION
+                if target == "update"
+                else DUAL_PRECISION
+                if target == "dual"
+                else ""
+            )
             offset = 0.0 if target == "none" else 0.5 * lsbs[cast(str, target)]
 
-            def phase_quantize(value: torch.Tensor, precision: str) -> tuple[torch.Tensor, int, int]:
+            def phase_quantize(
+                value: torch.Tensor, precision: str
+            ) -> tuple[torch.Tensor, int, int]:
                 if precision != precision_target or offset == 0.0:
                     return base_quantize(value, precision)
                 shifted, saturated, total = base_quantize(value - offset, precision)
                 return shifted + offset, saturated, total
 
             setattr(alignment, "quantize", phase_quantize)
-            model = ResidualMLP(depth=depth, width=width, input_dim=8, output_dim=4, activation="relu", seed=model_seed)
+            model = ResidualMLP(
+                depth=depth,
+                width=width,
+                input_dim=8,
+                output_dim=4,
+                activation="relu",
+                seed=model_seed,
+            )
             grads, stats = alignment.run_alignment(
-                model, x, y,
+                model,
+                x,
+                y,
                 update_precision=UPDATE_PRECISION,
                 state_precision=STATE_PRECISION,
                 dual_precision=DUAL_PRECISION,
@@ -73,22 +100,27 @@ def main() -> None:
             cosine = gradient_cosine([first], [bp_first])
             rel = gradient_relative_error([first], [bp_first])
             finite = bool(stats["finite"])
-            rows.append({
-                "seed": args.seed,
-                "phase_target": target,
-                "phase_lsb": 0.0 if target == "none" else 0.5,
-                "phase_offset": offset,
-                "state_lr": args.state_lr,
-                "lattice_ratio_r": args.state_lr * x.shape[0],
-                "state_precision": STATE_PRECISION,
-                "update_precision": UPDATE_PRECISION,
-                "dual_precision": DUAL_PRECISION,
-                **stats,
-                "first_layer_cosine_to_bp": cosine,
-                "first_layer_grad_norm_ratio_to_bp": ratio,
-                "first_layer_relative_error_to_bp": rel,
-                "useful_first_layer_credit": finite and cosine >= 0.9 and 0.5 <= ratio <= 2.0 and rel <= 0.6,
-            })
+            rows.append(
+                {
+                    "seed": args.seed,
+                    "phase_target": target,
+                    "phase_lsb": 0.0 if target == "none" else 0.5,
+                    "phase_offset": offset,
+                    "state_lr": args.state_lr,
+                    "lattice_ratio_r": args.state_lr * x.shape[0],
+                    "state_precision": STATE_PRECISION,
+                    "update_precision": UPDATE_PRECISION,
+                    "dual_precision": DUAL_PRECISION,
+                    **stats,
+                    "first_layer_cosine_to_bp": cosine,
+                    "first_layer_grad_norm_ratio_to_bp": ratio,
+                    "first_layer_relative_error_to_bp": rel,
+                    "useful_first_layer_credit": finite
+                    and cosine >= 0.9
+                    and 0.5 <= ratio <= 2.0
+                    and rel <= 0.6,
+                }
+            )
     finally:
         setattr(alignment, "quantize", original_quantize)
 
