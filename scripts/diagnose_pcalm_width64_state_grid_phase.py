@@ -64,7 +64,9 @@ def main() -> None:
                 shifted, saturated, total = base_quantize(value - offset, precision)
                 return shifted + offset, saturated, total
 
-            alignment.quantize = phase_quantize
+            # The diagnostic deliberately replaces the module-level quantizer with
+            # a signature-compatible closure; ty does not model this monkeypatch.
+            alignment.quantize = phase_quantize  # type: ignore[invalid-assignment]
             model = ResidualMLP(
                 depth=depth,
                 width=width,
