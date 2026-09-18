@@ -64,6 +64,17 @@ def main() -> None:
     parser.add_argument("--budget", type=int, default=256)
     parser.add_argument("--state-lr", type=float, default=0.234285)
     parser.add_argument("--dual-leak", type=float, default=0.02)
+    parser.add_argument(
+        "--rounding-seed",
+        type=int,
+        default=None,
+        help="Explicit stochastic-rounding RNG seed; defaults to seed + 90000.",
+    )
+    parser.add_argument(
+        "--stochastic-only",
+        action="store_true",
+        help="Skip the deterministic nearest baseline when only RNG sensitivity is needed.",
+    )
     args = parser.parse_args()
 
     depth, width = 32, 64
@@ -92,11 +103,13 @@ def main() -> None:
     bp_first = bp[0]
     bp_norm = float(bp_first.norm())
 
+    rounding_seed = args.rounding_seed if args.rounding_seed is not None else args.seed + 90_000
+    modes = ("stochastic",) if args.stochastic_only else MODES
     rows: list[dict[str, object]] = []
     original_quantize = alignment.quantize
     try:
-        for mode in MODES:
-            rounding_generator = torch.Generator().manual_seed(args.seed + 90_000)
+        for mode in modes:
+            rounding_generator = torch.Generator().manual_seed(rounding_seed)
 
             def experiment_quantize(
                 value: torch.Tensor, precision: str
@@ -138,7 +151,7 @@ def main() -> None:
                 {
                     "seed": args.seed,
                     "rounding": mode,
-                    "rounding_seed": args.seed + 90_000 if mode == "stochastic" else -1,
+                    "rounding_seed": rounding_seed if mode == "stochastic" else -1,
                     "state_lr": args.state_lr,
                     "lattice_ratio_r": args.state_lr * x.shape[0],
                     "state_precision": STATE_PRECISION,
