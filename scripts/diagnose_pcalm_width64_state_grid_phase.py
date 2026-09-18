@@ -57,12 +57,12 @@ def main() -> None:
             offset = phase_lsb * state_lsb
 
             def phase_quantize(
-                value: torch.Tensor, precision: str, *, _offset: float = offset
+                value: torch.Tensor, precision: str
             ) -> tuple[torch.Tensor, int, int]:
-                if precision != STATE_PRECISION or _offset == 0.0:
+                if precision != STATE_PRECISION or offset == 0.0:
                     return base_quantize(value, precision)
-                shifted, saturated, total = base_quantize(value - _offset, precision)
-                return shifted + _offset, saturated, total
+                shifted, saturated, total = base_quantize(value - offset, precision)
+                return shifted + offset, saturated, total
 
             alignment.quantize = phase_quantize
             model = ResidualMLP(
