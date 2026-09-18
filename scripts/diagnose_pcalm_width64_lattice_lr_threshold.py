@@ -98,9 +98,7 @@ def main() -> None:
             state_precision=state_precision,
             effective_lr=effective_lr,
         )
-        one_quantum_to_half_state_lsb = (
-            effective_lr * update_lsb / (0.5 * state_lsb)
-        )
+        one_quantum_to_half_state_lsb = effective_lr * update_lsb / (0.5 * state_lsb)
         rows.append(
             {
                 "seed": args.seed,
