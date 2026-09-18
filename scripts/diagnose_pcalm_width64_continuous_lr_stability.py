@@ -15,15 +15,16 @@ from predcircuit.pcalm import (
     method_grad,
 )
 
-# Quantization-free third refinement of the useful-credit stability ceiling.
-# Independent seeds 845--847 all retain useful credit at 0.316 and all lose it
-# at 0.317. Do not repeat those endpoints: resolve only the interior.
-STATE_LRS = [0.3162, 0.3164, 0.3166, 0.3168]
+# Quantization-free worst-seed refinement of the useful-credit stability ceiling.
+# The full 15-seed third refinement showed that seeds 856 and 857 already lose
+# useful credit at 0.3162; the preceding 0.005-spaced sweep shows both are useful
+# at 0.310 and fail at 0.315. Do not repeat those endpoints: resolve the interior.
+STATE_LRS = [0.311, 0.312, 0.313, 0.314, 0.3145]
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Resolve the continuous PC-ALM useful-credit stability cliff between 0.316 and 0.317."
+        description="Resolve the worst-seed continuous PC-ALM useful-credit ceiling between 0.310 and 0.315."
     )
     parser.add_argument("--seed", type=int, required=True)
     parser.add_argument("--out", type=Path, required=True)
