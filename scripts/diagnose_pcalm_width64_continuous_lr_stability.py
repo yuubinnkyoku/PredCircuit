@@ -15,15 +15,16 @@ from predcircuit.pcalm import (
     method_grad,
 )
 
-# Quantization-free control for the lattice feasibility condition.  The grid
-# brackets the region where fixed15_i1 could not reach its predicted R=1
-# boundary (state_lr=0.5) without becoming unstable.
-STATE_LRS = [0.25, 0.30, 0.34, 0.36, 0.38, 0.40, 0.42, 0.44, 0.46, 0.48, 0.50]
+# Quantization-free refinement of the useful-credit stability ceiling.  The
+# preceding holdout bracketed the transition between state_lr=0.30 (stable)
+# and 0.34 (finite but with exploded residuals/gradient geometry).  Do not
+# repeat those endpoints: resolve the interior at 0.005 spacing instead.
+STATE_LRS = [0.305, 0.310, 0.315, 0.320, 0.325, 0.330, 0.335]
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Probe the continuous PC-ALM state-lr stability ceiling."
+        description="Refine the continuous PC-ALM useful-credit stability ceiling."
     )
     parser.add_argument("--seed", type=int, required=True)
     parser.add_argument("--out", type=Path, required=True)
