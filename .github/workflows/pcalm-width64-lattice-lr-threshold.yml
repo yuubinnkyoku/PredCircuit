@@ -7,6 +7,7 @@ on:
     paths:
       - .github/workflows/pcalm-width64-lattice-lr-threshold.yml
       - scripts/diagnose_pcalm_width64_lattice_lr_threshold.py
+      - scripts/diagnose_pcalm_width64_lattice_ratio_shift.py
       - scripts/diagnose_pcalm_width64_update_lattice_alignment.py
       - scripts/diagnose_pcalm_width64_leaky_mixed_precision.py
       - scripts/diagnose_pcalm_dual_precision.py
@@ -30,4 +31,23 @@ jobs:
         with:
           name: pcalm-width64-lattice-lr-threshold-seed-${{ matrix.seed }}
           path: results/generated/pcalm_width64_lattice_lr_threshold_seed${{ matrix.seed }}.csv
+          if-no-files-found: error
+
+  ratio-shift:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [845, 846, 847, 848, 849, 850, 851, 852, 853, 854, 855, 856, 857, 858, 859]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: >-
+          uv run python scripts/diagnose_pcalm_width64_lattice_ratio_shift.py
+          --seed ${{ matrix.seed }}
+          --out results/generated/pcalm_width64_lattice_ratio_shift_seed${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pcalm-width64-lattice-ratio-shift-seed-${{ matrix.seed }}
+          path: results/generated/pcalm_width64_lattice_ratio_shift_seed${{ matrix.seed }}.csv
           if-no-files-found: error
