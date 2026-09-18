@@ -1,0 +1,32 @@
+name: PC-ALM width-64 stochastic update rounding holdout
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/pcalm-width64-stochastic-update-rounding.yml
+      - scripts/diagnose_pcalm_width64_stochastic_update_rounding.py
+      - scripts/diagnose_pcalm_width64_update_lattice_alignment.py
+      - scripts/diagnose_pcalm_width64_leaky_mixed_precision.py
+      - src/predcircuit/pcalm.py
+
+jobs:
+  seed:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [845, 846, 847, 848, 849, 850, 851, 852, 853, 854, 855, 856, 857, 858, 859]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: >-
+          uv run python scripts/diagnose_pcalm_width64_stochastic_update_rounding.py
+          --seed ${{ matrix.seed }}
+          --out results/generated/pcalm_width64_stochastic_update_rounding_seed${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pcalm-width64-stochastic-update-rounding-seed-${{ matrix.seed }}
+          path: results/generated/pcalm_width64_stochastic_update_rounding_seed${{ matrix.seed }}.csv
+          if-no-files-found: error
