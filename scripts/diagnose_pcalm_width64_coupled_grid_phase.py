@@ -57,7 +57,7 @@ def main() -> None:
                 shifted, saturated, total = base_quantize(value - offset, precision)
                 return shifted + offset, saturated, total
 
-            alignment.quantize = phase_quantize  # type: ignore[invalid-assignment]
+            setattr(alignment, "quantize", phase_quantize)
             model = ResidualMLP(depth=depth, width=width, input_dim=8, output_dim=4, activation="relu", seed=model_seed)
             grads, stats = alignment.run_alignment(
                 model, x, y,
@@ -90,7 +90,7 @@ def main() -> None:
                 "useful_first_layer_credit": finite and cosine >= 0.9 and 0.5 <= ratio <= 2.0 and rel <= 0.6,
             })
     finally:
-        alignment.quantize = original_quantize
+        setattr(alignment, "quantize", original_quantize)
 
     frame = pd.DataFrame(rows)
     args.out.parent.mkdir(parents=True, exist_ok=True)
