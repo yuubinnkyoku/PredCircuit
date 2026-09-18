@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import math
 from pathlib import Path
+from typing import cast
 
 import pandas as pd
 import torch
@@ -38,18 +39,17 @@ def main() -> None:
     bp_first = bp[0]
     bp_norm = float(bp_first.norm())
 
-    lsbs = {
-        "update": alignment.fixed_lsb(UPDATE_PRECISION),
-        "dual": alignment.fixed_lsb(DUAL_PRECISION),
-    }
-    assert all(v is not None for v in lsbs.values())
+    update_lsb = alignment.fixed_lsb(UPDATE_PRECISION)
+    dual_lsb = alignment.fixed_lsb(DUAL_PRECISION)
+    assert update_lsb is not None and dual_lsb is not None
+    lsbs: dict[str, float] = {"update": float(update_lsb), "dual": float(dual_lsb)}
 
     rows: list[dict[str, object]] = []
     original_quantize = alignment.quantize
     try:
         for target in TARGETS:
             precision_target = UPDATE_PRECISION if target == "update" else DUAL_PRECISION if target == "dual" else ""
-            offset = 0.0 if target == "none" else 0.5 * float(lsbs[target])
+            offset = 0.0 if target == "none" else 0.5 * lsbs[cast(str, target)]
 
             def phase_quantize(value: torch.Tensor, precision: str) -> tuple[torch.Tensor, int, int]:
                 if precision != precision_target or offset == 0.0:
