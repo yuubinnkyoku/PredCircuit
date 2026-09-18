@@ -8,7 +8,13 @@ import pandas as pd
 import torch
 
 from diagnose_pcalm_width64_update_lattice_alignment import fixed_lsb, run_alignment
-from predcircuit.pcalm import ResidualMLP, Schedule, gradient_cosine, gradient_relative_error, method_grad
+from predcircuit.pcalm import (
+    ResidualMLP,
+    Schedule,
+    gradient_cosine,
+    gradient_relative_error,
+    method_grad,
+)
 
 # Same state/update LSB ratio at three absolute grid scales.  The middle pair is
 # the already-tested fixed15_i3/fixed14_i1 regime; this experiment adds the
@@ -39,7 +45,9 @@ def main() -> None:
     x = torch.randn(4, 8, generator=generator)
     y = torch.randn(4, 4, generator=generator)
 
-    bp_model = ResidualMLP(depth=depth, width=width, input_dim=8, output_dim=4, activation="relu", seed=model_seed)
+    bp_model = ResidualMLP(
+        depth=depth, width=width, input_dim=8, output_dim=4, activation="relu", seed=model_seed
+    )
     bp = method_grad(bp_model, x, y, Schedule("bp", budget=0), state_lr=0.25, rho=1.0)
     bp_first = bp[0]
     bp_norm = float(bp_first.norm())
@@ -53,7 +61,14 @@ def main() -> None:
             assert state_lsb is not None and update_lsb is not None
             lattice_ratio = effective_lr * update_lsb / (0.5 * state_lsb)
 
-            model = ResidualMLP(depth=depth, width=width, input_dim=8, output_dim=4, activation="relu", seed=model_seed)
+            model = ResidualMLP(
+                depth=depth,
+                width=width,
+                input_dim=8,
+                output_dim=4,
+                activation="relu",
+                seed=model_seed,
+            )
             grads, stats = run_alignment(
                 model,
                 x,
