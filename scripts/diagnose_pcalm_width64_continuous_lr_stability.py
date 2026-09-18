@@ -15,16 +15,16 @@ from predcircuit.pcalm import (
     method_grad,
 )
 
-# Quantization-free refinement of the useful-credit stability ceiling.  The
-# preceding holdout bracketed the transition between state_lr=0.30 (stable)
-# and 0.34 (finite but with exploded residuals/gradient geometry).  Do not
-# repeat those endpoints: resolve the interior at 0.005 spacing instead.
-STATE_LRS = [0.305, 0.310, 0.315, 0.320, 0.325, 0.330, 0.335]
+# Quantization-free second refinement of the useful-credit stability ceiling.
+# The preceding 0.005-spaced holdout put the transition between 0.315 and
+# 0.320 (already clear in independent seeds 845--847).  Do not repeat those
+# endpoints: resolve only the interior, including a half-step near 0.320.
+STATE_LRS = [0.316, 0.317, 0.318, 0.319, 0.3195]
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Refine the continuous PC-ALM useful-credit stability ceiling."
+        description="Resolve the continuous PC-ALM useful-credit stability cliff below 0.320."
     )
     parser.add_argument("--seed", type=int, required=True)
     parser.add_argument("--out", type=Path, required=True)
