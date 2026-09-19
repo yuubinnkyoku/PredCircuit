@@ -1,0 +1,35 @@
+name: PC-ALM stochastic rounding role ablation
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/pcalm-width64-stochastic-rounding-role.yml
+
+jobs:
+  role:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [845, 848, 849, 851, 852, 856, 858]
+        role: [gradient, residual]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+      - name: Run role-separated stochastic-rounding trajectory
+        shell: bash
+        run: |
+          rounding_seed=$((3000000 + ${{ matrix.seed }} * 100))
+          uv run python scripts/diagnose_pcalm_width64_stochastic_rounding_role.py \
+            --seed ${{ matrix.seed }} \
+            --role ${{ matrix.role }} \
+            --rounding-seed "$rounding_seed" \
+            --rng-sharing tensor \
+            --out results/generated/pcalm_width64_stochastic_rounding_role_${{ matrix.role }}_seed${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pcalm-stochastic-rounding-role-${{ matrix.role }}-seed-${{ matrix.seed }}
+          path: results/generated/pcalm_width64_stochastic_rounding_role_${{ matrix.role }}_seed${{ matrix.seed }}.csv
+          if-no-files-found: error
