@@ -23,7 +23,10 @@ ROLES = ("nearest", "gradient", "residual", "both")
 
 
 def list_norm(values: list[torch.Tensor]) -> float:
-    return float(torch.sqrt(sum(torch.sum(value.float() ** 2) for value in values)))
+    if not values:
+        return 0.0
+    squared = torch.stack([torch.sum(value.float() ** 2) for value in values]).sum()
+    return float(torch.sqrt(squared))
 
 
 def zero_fraction(values: list[torch.Tensor]) -> float:
