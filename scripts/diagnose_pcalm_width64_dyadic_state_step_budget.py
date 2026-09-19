@@ -8,7 +8,13 @@ import pandas as pd
 import torch
 
 from diagnose_pcalm_width64_update_lattice_alignment import run_alignment
-from predcircuit.pcalm import ResidualMLP, Schedule, gradient_cosine, gradient_relative_error, method_grad
+from predcircuit.pcalm import (
+    ResidualMLP,
+    Schedule,
+    gradient_cosine,
+    gradient_relative_error,
+    method_grad,
+)
 
 
 def main() -> None:
