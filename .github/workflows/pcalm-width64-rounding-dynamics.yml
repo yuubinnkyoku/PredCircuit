@@ -6,6 +6,7 @@ on:
     branches: [main]
     paths:
       - .github/workflows/pcalm-width64-rounding-dynamics.yml
+      - scripts/diagnose_pcalm_width64_rounding_dynamics.py
 
 jobs:
   trace:
