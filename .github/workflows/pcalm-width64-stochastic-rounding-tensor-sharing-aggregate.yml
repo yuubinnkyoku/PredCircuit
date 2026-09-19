@@ -1,0 +1,61 @@
+name: Aggregate PC-ALM tensor-shared stochastic rounding
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/pcalm-width64-stochastic-rounding-tensor-sharing-aggregate.yml
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  aggregate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+      - name: Download and aggregate existing 28 artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: '35420432142'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/tensor-artifacts /tmp/tensor-csv
+          gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}/artifacts?per_page=100" --jq '.artifacts[] | [.id,.name] | @tsv' > /tmp/artifacts.tsv
+          test "$(wc -l < /tmp/artifacts.tsv)" -eq 28
+          while IFS=$'\t' read -r id name; do
+            gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts/${id}/zip" > "/tmp/tensor-artifacts/${name}.zip"
+            unzip -q "/tmp/tensor-artifacts/${name}.zip" -d /tmp/tensor-csv
+          done < /tmp/artifacts.tsv
+          test "$(find /tmp/tensor-csv -name '*.csv' | wc -l)" -eq 28
+          uv run python - <<'PY'
+          import glob
+          import pandas as pd
+          files=glob.glob('/tmp/tensor-csv/*.csv')
+          df=pd.concat([pd.read_csv(f) for f in files], ignore_index=True)
+          assert len(df)==28
+          assert df['rounding_seed'].nunique()==28
+          cols=['seed','rounding_seed','rng_sharing','finite','first_layer_cosine_to_bp','first_layer_grad_norm_ratio_to_bp','first_layer_relative_error_to_bp','late_realized_to_requested_ratio','late_update_zero_fraction','late_state_zero_step_fraction','useful_first_layer_credit']
+          df[cols].sort_values(['seed','rounding_seed']).to_csv('tensor_shared_all.csv',index=False)
+          rows=[]
+          for seed,g in df.groupby('seed'):
+            rows.append(dict(seed=int(seed), n=len(g), useful=int(g['useful_first_layer_credit'].sum()), cosine_mean=g['first_layer_cosine_to_bp'].mean(), cosine_std=g['first_layer_cosine_to_bp'].std(ddof=0), cosine_min=g['first_layer_cosine_to_bp'].min(), cosine_max=g['first_layer_cosine_to_bp'].max()))
+          summary=pd.DataFrame(rows)
+          summary.to_csv('tensor_shared_by_seed.csv',index=False)
+          overall=pd.DataFrame([dict(n=len(df), useful=int(df['useful_first_layer_credit'].sum()), finite=int(df['finite'].sum()), cosine_mean=df['first_layer_cosine_to_bp'].mean(), cosine_std=df['first_layer_cosine_to_bp'].std(ddof=0), cosine_min=df['first_layer_cosine_to_bp'].min(), cosine_max=df['first_layer_cosine_to_bp'].max(), grad_norm_ratio_mean=df['first_layer_grad_norm_ratio_to_bp'].mean(), relative_error_mean=df['first_layer_relative_error_to_bp'].mean(), realized_requested_mean=df['late_realized_to_requested_ratio'].mean(), update_zero_mean=df['late_update_zero_fraction'].mean(), state_zero_mean=df['late_state_zero_step_fraction'].mean())])
+          overall.to_csv('tensor_shared_overall.csv',index=False)
+          print(summary.to_string(index=False))
+          print(overall.to_string(index=False))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pcalm-tensor-shared-stochastic-rounding-aggregate
+          path: |
+            tensor_shared_all.csv
+            tensor_shared_by_seed.csv
+            tensor_shared_overall.csv
+          if-no-files-found: error
