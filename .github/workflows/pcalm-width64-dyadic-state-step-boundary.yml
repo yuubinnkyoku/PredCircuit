@@ -1,0 +1,32 @@
+name: PC-ALM multiplier-free state-step boundary
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/pcalm-width64-dyadic-state-step-boundary.yml
+      - scripts/diagnose_pcalm_width64_dyadic_state_step_budget.py
+
+jobs:
+  boundary:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [847, 849, 856, 857, 858]
+        budget: [104, 112, 120]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+      - name: Run dyadic state-step boundary point
+        run: |
+          uv run python scripts/diagnose_pcalm_width64_dyadic_state_step_budget.py \
+            --seed ${{ matrix.seed }} \
+            --budget ${{ matrix.budget }} \
+            --out results/generated/pcalm_width64_dyadic_step_T${{ matrix.budget }}_seed${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pcalm-dyadic-boundary-T${{ matrix.budget }}-seed-${{ matrix.seed }}
+          path: results/generated/pcalm_width64_dyadic_step_T${{ matrix.budget }}_seed${{ matrix.seed }}.csv
+          if-no-files-found: error
