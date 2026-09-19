@@ -21,6 +21,7 @@ STATE_PRECISION = "fixed15_i3"
 UPDATE_PRECISION = "fixed14_i1"
 DUAL_PRECISION = "fixed12_i1"
 MODES = ("nearest", "stochastic")
+RNG_SHARING_MODES = ("element", "tensor")
 
 
 def stochastic_quantize_fixed(
@@ -28,9 +29,12 @@ def stochastic_quantize_fixed(
     precision: str,
     *,
     generator: torch.Generator,
+    rng_sharing: str = "element",
 ) -> tuple[torch.Tensor, int, int]:
     if precision != UPDATE_PRECISION:
         return base_quantize(value, precision)
+    if rng_sharing not in RNG_SHARING_MODES:
+        raise ValueError(f"unsupported rng_sharing={rng_sharing!r}")
 
     bits_text, integer_text = precision.removeprefix("fixed").split("_i", 1)
     bits = int(bits_text)
@@ -44,8 +48,9 @@ def stochastic_quantize_fixed(
     clipped = scaled.clamp(qmin, qmax)
     lower = torch.floor(clipped)
     probability_up = clipped - lower
+    random_shape = probability_up.shape if rng_sharing == "element" else ()
     random = torch.rand(
-        probability_up.shape,
+        random_shape,
         dtype=probability_up.dtype,
         device=probability_up.device,
         generator=generator,
@@ -69,6 +74,16 @@ def main() -> None:
         type=int,
         default=None,
         help="Explicit stochastic-rounding RNG seed; defaults to seed + 90000.",
+    )
+    parser.add_argument(
+        "--rng-sharing",
+        choices=RNG_SHARING_MODES,
+        default="element",
+        help=(
+            "Randomness sharing inside each update-quantizer invocation: "
+            "element draws one variate per tensor element; tensor broadcasts one variate "
+            "over the whole tensor."
+        ),
     )
     parser.add_argument(
         "--stochastic-only",
@@ -120,6 +135,7 @@ def main() -> None:
                     value,
                     precision,
                     generator=rounding_generator,
+                    rng_sharing=args.rng_sharing,
                 )
 
             setattr(alignment, "quantize", experiment_quantize)
@@ -152,6 +168,7 @@ def main() -> None:
                     "seed": args.seed,
                     "rounding": mode,
                     "rounding_seed": rounding_seed if mode == "stochastic" else -1,
+                    "rng_sharing": args.rng_sharing if mode == "stochastic" else "none",
                     "state_lr": args.state_lr,
                     "lattice_ratio_r": args.state_lr * x.shape[0],
                     "state_precision": STATE_PRECISION,
