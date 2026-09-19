@@ -1,0 +1,35 @@
+name: PC-ALM tensor-shared stochastic rounding
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/pcalm-width64-stochastic-rounding-tensor-sharing.yml
+
+jobs:
+  seed:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [845, 848, 849, 851, 852, 856, 858]
+        rep: [0, 1, 2, 3]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+      - name: Run tensor-shared stochastic-rounding trajectory
+        shell: bash
+        run: |
+          rounding_seed=$((2000000 + ${{ matrix.seed }} * 100 + ${{ matrix.rep }}))
+          uv run python scripts/diagnose_pcalm_width64_stochastic_update_rounding.py \
+            --seed ${{ matrix.seed }} \
+            --rounding-seed "$rounding_seed" \
+            --rng-sharing tensor \
+            --stochastic-only \
+            --out results/generated/pcalm_width64_stochastic_rounding_tensor_shared_seed${{ matrix.seed }}_rep${{ matrix.rep }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pcalm-stochastic-rounding-tensor-shared-seed-${{ matrix.seed }}-rep-${{ matrix.rep }}
+          path: results/generated/pcalm_width64_stochastic_rounding_tensor_shared_seed${{ matrix.seed }}_rep${{ matrix.rep }}.csv
+          if-no-files-found: error
