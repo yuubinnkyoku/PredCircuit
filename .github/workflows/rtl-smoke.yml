@@ -36,6 +36,13 @@ jobs:
             -o build/rtl/tb_pcalm_dual_update_exhaustive \
             rtl/pcalm_dual_update.sv rtl/tb_pcalm_dual_update_exhaustive.sv
           timeout 180s vvp build/rtl/tb_pcalm_dual_update_exhaustive
+      - name: Verify multiplier-free state-update arithmetic
+        run: |
+          iverilog -g2012 -Wall \
+            -s tb_state_update_unit \
+            -o build/rtl/tb_state_update_unit \
+            rtl/state_update_unit.sv rtl/tb_state_update_unit.sv
+          vvp build/rtl/tb_state_update_unit
       - name: Exercise shared dual-engine state path
         run: |
           iverilog -g2012 -Wall \
@@ -59,6 +66,14 @@ jobs:
             | tee build/rtl/spc_xc7.log
           yosys -p 'read_verilog -sv rtl/pcalm_dual_update.sv; synth_xilinx -family xc7 -top pcalm_dual_update; stat' \
             | tee build/rtl/pcalm_xc7.log
+      - name: Multiplier-free state-update synthesis
+        shell: bash
+        run: |
+          set -o pipefail
+          yosys -p 'read_verilog -sv rtl/state_update_unit.sv; hierarchy -top state_update_unit; proc; opt; check; stat' \
+            2>&1 | tee build/rtl/state_update_generic.log
+          yosys -p 'read_verilog -sv rtl/state_update_unit.sv; synth_xilinx -family xc7 -top state_update_unit; stat' \
+            2>&1 | tee build/rtl/state_update_xc7.log
       - name: Fair common-core generic comparison
         shell: bash
         run: |
