@@ -11,8 +11,10 @@ from diagnose_pcalm_width64_stochastic_update_rounding import stochastic_quantiz
 from predcircuit.pcalm import (
     ResidualMLP,
     al_energy_shifted,
+    bp_loss,
     constraint_residuals,
     free_init,
+    gradient_cosine,
     zero_duals_like,
 )
 
@@ -53,6 +55,11 @@ def run_trace(
     duals = zero_duals_like(constraint_residuals(model, x, free))
     rows: list[dict[str, float | int | str | bool]] = []
 
+    bp_grads = [
+        grad.detach().clone()
+        for grad in torch.autograd.grad(bp_loss(model, x, y), tuple(model.weights))
+    ]
+
     def q_update(value: torch.Tensor, stochastic: bool) -> torch.Tensor:
         if stochastic:
             quantized, _, _ = stochastic_quantize_fixed(
@@ -75,7 +82,11 @@ def run_trace(
             [dual.detach() for dual in duals],
             rho=rho,
         )
-        raw_grads = list(torch.autograd.grad(energy, variables))
+        raw_grads = list(torch.autograd.grad(energy, variables, retain_graph=True))
+        credit_grads = [
+            grad.detach().clone()
+            for grad in torch.autograd.grad(energy, tuple(model.weights), allow_unused=False)
+        ]
         q_grads = [q_update(g, role in ("gradient", "both")) for g in raw_grads]
 
         new_free: list[torch.Tensor] = []
@@ -104,6 +115,13 @@ def run_trace(
                 "step": step + 1,
                 "role": role,
                 "energy": float(energy.detach()),
+                "weight_credit_cosine_to_bp": gradient_cosine(credit_grads, bp_grads),
+                "first_weight_credit_cosine_to_bp": gradient_cosine(
+                    [credit_grads[0]], [bp_grads[0]]
+                ),
+                "last_weight_credit_cosine_to_bp": gradient_cosine(
+                    [credit_grads[-1]], [bp_grads[-1]]
+                ),
                 "raw_grad_norm": list_norm(raw_grads),
                 "q_grad_norm": list_norm(q_grads),
                 "q_grad_zero_fraction": zero_fraction(q_grads),
