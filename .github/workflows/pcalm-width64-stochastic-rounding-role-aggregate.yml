@@ -1,0 +1,60 @@
+name: Aggregate PC-ALM stochastic rounding role ablation
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/pcalm-width64-stochastic-rounding-role-aggregate.yml
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  aggregate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+      - name: Download and aggregate existing 14 artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: '35425699738'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/role-artifacts /tmp/role-csv
+          gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}/artifacts?per_page=100" --jq '.artifacts[] | [.id,.name] | @tsv' > /tmp/artifacts.tsv
+          test "$(wc -l < /tmp/artifacts.tsv)" -eq 14
+          while IFS=$'\t' read -r id name; do
+            gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts/${id}/zip" > "/tmp/role-artifacts/${name}.zip"
+            unzip -q "/tmp/role-artifacts/${name}.zip" -d /tmp/role-csv
+          done < /tmp/artifacts.tsv
+          test "$(find /tmp/role-csv -name '*.csv' | wc -l)" -eq 14
+          uv run python - <<'PY'
+          import glob
+          import pandas as pd
+          df=pd.concat([pd.read_csv(f) for f in glob.glob('/tmp/role-csv/*.csv')], ignore_index=True)
+          assert len(df)==14
+          assert set(df['role'])=={'gradient','residual'}
+          assert all(len(g)==7 for _,g in df.groupby('role'))
+          df.sort_values(['role','seed']).to_csv('role_ablation_all.csv',index=False)
+          rows=[]
+          for role,g in df.groupby('role'):
+            rows.append(dict(role=role,n=len(g),useful=int(g['useful_first_layer_credit'].sum()),finite=int(g['finite'].sum()),cosine_mean=g['first_layer_cosine_to_bp'].mean(),cosine_std=g['first_layer_cosine_to_bp'].std(ddof=0),cosine_min=g['first_layer_cosine_to_bp'].min(),cosine_max=g['first_layer_cosine_to_bp'].max(),grad_norm_ratio_mean=g['first_layer_grad_norm_ratio_to_bp'].mean(),relative_error_mean=g['first_layer_relative_error_to_bp'].mean(),realized_requested_mean=g['late_realized_to_requested_ratio'].mean(),update_zero_mean=g['late_update_zero_fraction'].mean(),state_zero_mean=g['late_state_zero_step_fraction'].mean()))
+          summary=pd.DataFrame(rows)
+          summary.to_csv('role_ablation_summary.csv',index=False)
+          paired=df.pivot(index='seed',columns='role',values=['first_layer_cosine_to_bp','first_layer_grad_norm_ratio_to_bp','first_layer_relative_error_to_bp','late_realized_to_requested_ratio','useful_first_layer_credit'])
+          paired.to_csv('role_ablation_paired.csv')
+          print(summary.to_string(index=False))
+          print(df[['seed','role','first_layer_cosine_to_bp','first_layer_grad_norm_ratio_to_bp','first_layer_relative_error_to_bp','late_realized_to_requested_ratio','useful_first_layer_credit']].sort_values(['seed','role']).to_string(index=False))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pcalm-stochastic-rounding-role-ablation-aggregate
+          path: |
+            role_ablation_all.csv
+            role_ablation_summary.csv
+            role_ablation_paired.csv
+          if-no-files-found: error
