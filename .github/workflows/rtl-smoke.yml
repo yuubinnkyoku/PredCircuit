@@ -95,22 +95,30 @@ jobs:
           iverilog -g2012 -Wall -s dual_engine_8lane \
             -o build/rtl/dual_engine_8lane_compile \
             rtl/dual_engine_8lane.sv 2>&1 | tee build/rtl/dual_engine_8lane_iverilog.log
-      - name: Banked 8-lane dual-engine synthesis
+      - name: Target width64 8-lane dual-engine synthesis
         shell: bash
         run: |
           set -o pipefail
-          yosys -p 'read_verilog -sv rtl/dual_engine_8lane.sv; hierarchy -top dual_engine_8lane; proc; memory; opt; check; stat' \
+          # depth=32,width=64,batch=4 => 7936 lambda values.
+          # 8 lanes therefore require 992 words and a 10-bit address.
+          yosys -p 'read_verilog -sv rtl/dual_engine_8lane.sv; hierarchy -top dual_engine_8lane; chparam -set LANES 8 -set DEPTH 992 -set ADDR_W 10 dual_engine_8lane; proc; memory; opt; check; stat' \
             2>&1 | tee build/rtl/dual_engine_8lane_generic.log
-          yosys -p 'read_verilog -sv rtl/dual_engine_8lane.sv; synth_xilinx -family xc7 -top dual_engine_8lane; stat' \
+          yosys -p 'read_verilog -sv rtl/dual_engine_8lane.sv; hierarchy -top dual_engine_8lane; chparam -set LANES 8 -set DEPTH 992 -set ADDR_W 10 dual_engine_8lane; synth_xilinx -family xc7 -top dual_engine_8lane; stat' \
             2>&1 | tee build/rtl/dual_engine_8lane_xc7.log
-      - name: 16-lane dual-engine XC7 design point
+      - name: Target width64 16-lane dual-engine XC7 design point
         shell: bash
         run: |
           set -o pipefail
-          # Keep the same 992 persistent lambda values: 62 words x 16 lanes.
-          # This buys sweep-cycle margin without changing DATA_W or total state bits.
-          yosys -p 'read_verilog -sv rtl/dual_engine_8lane.sv; hierarchy -top dual_engine_8lane; chparam -set LANES 16 -set DEPTH 62 dual_engine_8lane; synth_xilinx -family xc7 -top dual_engine_8lane; stat' \
+          # Same 7936 persistent lambda values: 496 words x 16 lanes.
+          yosys -p 'read_verilog -sv rtl/dual_engine_8lane.sv; hierarchy -top dual_engine_8lane; chparam -set LANES 16 -set DEPTH 496 -set ADDR_W 9 dual_engine_8lane; synth_xilinx -family xc7 -top dual_engine_8lane; stat' \
             2>&1 | tee build/rtl/dual_engine_16lane_xc7.log
+      - name: Target width64 32-lane dual-engine XC7 design point
+        shell: bash
+        run: |
+          set -o pipefail
+          # Same 7936 persistent lambda values: 248 words x 32 lanes.
+          yosys -p 'read_verilog -sv rtl/dual_engine_8lane.sv; hierarchy -top dual_engine_8lane; chparam -set LANES 32 -set DEPTH 248 -set ADDR_W 8 dual_engine_8lane; synth_xilinx -family xc7 -top dual_engine_8lane; stat' \
+            2>&1 | tee build/rtl/dual_engine_32lane_xc7.log
       - uses: actions/upload-artifact@v4
         if: always()
         with:
