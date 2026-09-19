@@ -1,0 +1,91 @@
+name: PC-ALM stochastic rounding seed sensitivity aggregate
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/pcalm-stochastic-rounding-seed-sensitivity-aggregate.yml
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  aggregate:
+    runs-on: ubuntu-latest
+    env:
+      SOURCE_RUN_ID: "35404473994"
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+      - name: Download all 56 source artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p results/generated/stochastic_seed_sensitivity
+          gh api --paginate \
+            -H 'Accept: application/vnd.github+json' \
+            "/repos/${GITHUB_REPOSITORY}/actions/runs/${SOURCE_RUN_ID}/artifacts?per_page=100" \
+            --jq '.artifacts[] | [.id, .name] | @tsv' > /tmp/artifacts.tsv
+          test "$(wc -l < /tmp/artifacts.tsv)" -eq 56
+          while IFS=$'\t' read -r id name; do
+            gh api "/repos/${GITHUB_REPOSITORY}/actions/artifacts/${id}/zip" > "/tmp/${id}.zip"
+            unzip -q "/tmp/${id}.zip" -d results/generated/stochastic_seed_sensitivity
+          done < /tmp/artifacts.tsv
+          test "$(find results/generated/stochastic_seed_sensitivity -name '*.csv' | wc -l)" -eq 56
+      - name: Aggregate RNG sensitivity
+        shell: bash
+        run: |
+          uv run python - <<'PY'
+          from pathlib import Path
+          import pandas as pd
+
+          root = Path('results/generated/stochastic_seed_sensitivity')
+          files = sorted(root.glob('*.csv'))
+          assert len(files) == 56, len(files)
+          frame = pd.concat([pd.read_csv(p) for p in files], ignore_index=True)
+          assert len(frame) == 56, len(frame)
+          assert set(frame['seed']) == {845, 848, 849, 851, 852, 856, 858}
+          assert frame['rounding_seed'].nunique() == 56
+
+          summary = frame.groupby('seed').agg(
+              trajectories=('seed', 'size'),
+              useful=('useful_first_layer_credit', 'sum'),
+              cosine_mean=('first_layer_cosine_to_bp', 'mean'),
+              cosine_std=('first_layer_cosine_to_bp', 'std'),
+              cosine_min=('first_layer_cosine_to_bp', 'min'),
+              cosine_max=('first_layer_cosine_to_bp', 'max'),
+              grad_norm_ratio_mean=('first_layer_grad_norm_ratio_to_bp', 'mean'),
+              relative_error_mean=('first_layer_relative_error_to_bp', 'mean'),
+              realized_requested_mean=('late_state_realized_requested_ratio', 'mean'),
+              update_zero_fraction_mean=('late_update_zero_fraction', 'mean'),
+              state_zero_fraction_mean=('late_state_zero_step_fraction', 'mean'),
+          ).reset_index()
+          overall = pd.DataFrame([{
+              'seed': 'overall',
+              'trajectories': len(frame),
+              'useful': int(frame['useful_first_layer_credit'].sum()),
+              'cosine_mean': frame['first_layer_cosine_to_bp'].mean(),
+              'cosine_std': frame['first_layer_cosine_to_bp'].std(),
+              'cosine_min': frame['first_layer_cosine_to_bp'].min(),
+              'cosine_max': frame['first_layer_cosine_to_bp'].max(),
+              'grad_norm_ratio_mean': frame['first_layer_grad_norm_ratio_to_bp'].mean(),
+              'relative_error_mean': frame['first_layer_relative_error_to_bp'].mean(),
+              'realized_requested_mean': frame['late_state_realized_requested_ratio'].mean(),
+              'update_zero_fraction_mean': frame['late_update_zero_fraction'].mean(),
+              'state_zero_fraction_mean': frame['late_state_zero_step_fraction'].mean(),
+          }])
+          out = pd.concat([summary, overall], ignore_index=True)
+          out.to_csv('results/generated/pcalm_stochastic_rounding_seed_sensitivity_summary.csv', index=False)
+          frame.to_csv('results/generated/pcalm_stochastic_rounding_seed_sensitivity_all.csv', index=False)
+          print(out.to_string(index=False))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pcalm-stochastic-rounding-seed-sensitivity-aggregate
+          path: |
+            results/generated/pcalm_stochastic_rounding_seed_sensitivity_summary.csv
+            results/generated/pcalm_stochastic_rounding_seed_sensitivity_all.csv
+          if-no-files-found: error
