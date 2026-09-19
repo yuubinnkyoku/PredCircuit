@@ -59,7 +59,7 @@ jobs:
               cosine_max=('first_layer_cosine_to_bp', 'max'),
               grad_norm_ratio_mean=('first_layer_grad_norm_ratio_to_bp', 'mean'),
               relative_error_mean=('first_layer_relative_error_to_bp', 'mean'),
-              realized_requested_mean=('late_state_realized_requested_ratio', 'mean'),
+              realized_requested_mean=('late_realized_to_requested_ratio', 'mean'),
               update_zero_fraction_mean=('late_update_zero_fraction', 'mean'),
               state_zero_fraction_mean=('late_state_zero_step_fraction', 'mean'),
           ).reset_index()
@@ -73,7 +73,7 @@ jobs:
               'cosine_max': frame['first_layer_cosine_to_bp'].max(),
               'grad_norm_ratio_mean': frame['first_layer_grad_norm_ratio_to_bp'].mean(),
               'relative_error_mean': frame['first_layer_relative_error_to_bp'].mean(),
-              'realized_requested_mean': frame['late_state_realized_requested_ratio'].mean(),
+              'realized_requested_mean': frame['late_realized_to_requested_ratio'].mean(),
               'update_zero_fraction_mean': frame['late_update_zero_fraction'].mean(),
               'state_zero_fraction_mean': frame['late_state_zero_step_fraction'].mean(),
           }])
