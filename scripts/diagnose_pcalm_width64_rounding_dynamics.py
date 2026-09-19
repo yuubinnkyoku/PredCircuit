@@ -88,9 +88,7 @@ def run_trace(
         free = new_free
 
         raw_residuals = constraint_residuals(model, x, free)
-        q_residuals = [
-            q_update(r, role in ("residual", "both")) for r in raw_residuals
-        ]
+        q_residuals = [q_update(r, role in ("residual", "both")) for r in raw_residuals]
         duals_after: list[torch.Tensor] = []
         dual_steps: list[torch.Tensor] = []
         for lam, residual in zip(duals, q_residuals, strict=True):
