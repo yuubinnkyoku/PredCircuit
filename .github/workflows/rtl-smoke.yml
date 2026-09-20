@@ -24,101 +24,73 @@ jobs:
       - name: Run fixed-point dual-update simulation
         run: |
           mkdir -p build/rtl
-          iverilog -g2012 -Wall \
-            -s tb_pcalm_dual_update \
-            -o build/rtl/tb_pcalm_dual_update \
-            rtl/pcalm_dual_update.sv rtl/tb_pcalm_dual_update.sv
+          iverilog -g2012 -Wall -s tb_pcalm_dual_update -o build/rtl/tb_pcalm_dual_update rtl/pcalm_dual_update.sv rtl/tb_pcalm_dual_update.sv
           vvp build/rtl/tb_pcalm_dual_update
       - name: Exhaustively verify 12-bit dual arithmetic
         run: |
-          iverilog -g2012 -Wall \
-            -s tb_pcalm_dual_update_exhaustive \
-            -o build/rtl/tb_pcalm_dual_update_exhaustive \
-            rtl/pcalm_dual_update.sv rtl/tb_pcalm_dual_update_exhaustive.sv
+          iverilog -g2012 -Wall -s tb_pcalm_dual_update_exhaustive -o build/rtl/tb_pcalm_dual_update_exhaustive rtl/pcalm_dual_update.sv rtl/tb_pcalm_dual_update_exhaustive.sv
           timeout 180s vvp build/rtl/tb_pcalm_dual_update_exhaustive
       - name: Verify multiplier-free state-update arithmetic
         run: |
-          iverilog -g2012 -Wall \
-            -s tb_state_update_unit \
-            -o build/rtl/tb_state_update_unit \
-            rtl/state_update_unit.sv rtl/tb_state_update_unit.sv
+          iverilog -g2012 -Wall -s tb_state_update_unit -o build/rtl/tb_state_update_unit rtl/state_update_unit.sv rtl/tb_state_update_unit.sv
           vvp build/rtl/tb_state_update_unit
       - name: Exercise shared dual-engine state path
         run: |
-          iverilog -g2012 -Wall \
-            -s tb_dual_engine_8lane \
-            -o build/rtl/tb_dual_engine_8lane \
-            rtl/dual_engine_8lane.sv rtl/tb_dual_engine_8lane.sv
+          iverilog -g2012 -Wall -s tb_dual_engine_8lane -o build/rtl/tb_dual_engine_8lane rtl/dual_engine_8lane.sv rtl/tb_dual_engine_8lane.sv
           vvp build/rtl/tb_dual_engine_8lane
+      - name: Verify streamed pre-dual credit ordering
+        run: |
+          iverilog -g2012 -Wall -s tb_dual_engine_stream_order -o build/rtl/tb_dual_engine_stream_order rtl/dual_engine_8lane.sv rtl/tb_dual_engine_stream_order.sv
+          vvp build/rtl/tb_dual_engine_stream_order
       - name: Generic synthesis comparison
         shell: bash
         run: |
           set -o pipefail
-          yosys -p 'read_verilog -sv rtl/spc_credit.sv; hierarchy -top spc_credit; proc; opt; check; stat' \
-            | tee build/rtl/spc_generic.log
-          yosys -p 'read_verilog -sv rtl/pcalm_dual_update.sv; hierarchy -top pcalm_dual_update; proc; opt; check; stat' \
-            | tee build/rtl/pcalm_generic.log
+          yosys -p 'read_verilog -sv rtl/spc_credit.sv; hierarchy -top spc_credit; proc; opt; check; stat' | tee build/rtl/spc_generic.log
+          yosys -p 'read_verilog -sv rtl/pcalm_dual_update.sv; hierarchy -top pcalm_dual_update; proc; opt; check; stat' | tee build/rtl/pcalm_generic.log
       - name: XC7 mapped comparison
         shell: bash
         run: |
           set -o pipefail
-          yosys -p 'read_verilog -sv rtl/spc_credit.sv; synth_xilinx -family xc7 -top spc_credit; stat' \
-            | tee build/rtl/spc_xc7.log
-          yosys -p 'read_verilog -sv rtl/pcalm_dual_update.sv; synth_xilinx -family xc7 -top pcalm_dual_update; stat' \
-            | tee build/rtl/pcalm_xc7.log
+          yosys -p 'read_verilog -sv rtl/spc_credit.sv; synth_xilinx -family xc7 -top spc_credit; stat' | tee build/rtl/spc_xc7.log
+          yosys -p 'read_verilog -sv rtl/pcalm_dual_update.sv; synth_xilinx -family xc7 -top pcalm_dual_update; stat' | tee build/rtl/pcalm_xc7.log
       - name: Multiplier-free state-update synthesis
         shell: bash
         run: |
           set -o pipefail
-          yosys -p 'read_verilog -sv rtl/state_update_unit.sv; hierarchy -top state_update_unit; proc; opt; check; stat' \
-            2>&1 | tee build/rtl/state_update_generic.log
-          yosys -p 'read_verilog -sv rtl/state_update_unit.sv; synth_xilinx -family xc7 -top state_update_unit; stat' \
-            2>&1 | tee build/rtl/state_update_xc7.log
+          yosys -p 'read_verilog -sv rtl/state_update_unit.sv; hierarchy -top state_update_unit; proc; opt; check; stat' 2>&1 | tee build/rtl/state_update_generic.log
+          yosys -p 'read_verilog -sv rtl/state_update_unit.sv; synth_xilinx -family xc7 -top state_update_unit; stat' 2>&1 | tee build/rtl/state_update_xc7.log
       - name: Fair common-core generic comparison
         shell: bash
         run: |
           set -o pipefail
-          yosys -p 'read_verilog -sv rtl/credit_core_common.sv; hierarchy -top credit_core_spc; proc; opt; check; stat' \
-            | tee build/rtl/common_spc_generic.log
-          yosys -p 'read_verilog -sv rtl/credit_core_common.sv; hierarchy -top credit_core_pcalm; proc; opt; check; stat' \
-            | tee build/rtl/common_pcalm_generic.log
+          yosys -p 'read_verilog -sv rtl/credit_core_common.sv; hierarchy -top credit_core_spc; proc; opt; check; stat' | tee build/rtl/common_spc_generic.log
+          yosys -p 'read_verilog -sv rtl/credit_core_common.sv; hierarchy -top credit_core_pcalm; proc; opt; check; stat' | tee build/rtl/common_pcalm_generic.log
       - name: Fair common-core XC7 comparison
         shell: bash
         run: |
           set -o pipefail
-          yosys -p 'read_verilog -sv rtl/credit_core_common.sv; synth_xilinx -family xc7 -top credit_core_spc; stat' \
-            | tee build/rtl/common_spc_xc7.log
-          yosys -p 'read_verilog -sv rtl/credit_core_common.sv; synth_xilinx -family xc7 -top credit_core_pcalm; stat' \
-            | tee build/rtl/common_pcalm_xc7.log
+          yosys -p 'read_verilog -sv rtl/credit_core_common.sv; synth_xilinx -family xc7 -top credit_core_spc; stat' | tee build/rtl/common_spc_xc7.log
+          yosys -p 'read_verilog -sv rtl/credit_core_common.sv; synth_xilinx -family xc7 -top credit_core_pcalm; stat' | tee build/rtl/common_pcalm_xc7.log
       - name: Compile 8-lane dual-engine SystemVerilog
         run: |
-          iverilog -g2012 -Wall -s dual_engine_8lane \
-            -o build/rtl/dual_engine_8lane_compile \
-            rtl/dual_engine_8lane.sv 2>&1 | tee build/rtl/dual_engine_8lane_iverilog.log
+          iverilog -g2012 -Wall -s dual_engine_8lane -o build/rtl/dual_engine_8lane_compile rtl/dual_engine_8lane.sv 2>&1 | tee build/rtl/dual_engine_8lane_iverilog.log
       - name: Target width64 8-lane dual-engine synthesis
         shell: bash
         run: |
           set -o pipefail
-          # depth=32,width=64,batch=4 => 7936 lambda values.
-          # 8 lanes therefore require 992 words and a 10-bit address.
-          yosys -p 'read_verilog -sv rtl/dual_engine_8lane.sv; hierarchy -top dual_engine_8lane; chparam -set LANES 8 -set DEPTH 992 -set ADDR_W 10 dual_engine_8lane; proc; memory; opt; check; stat' \
-            2>&1 | tee build/rtl/dual_engine_8lane_generic.log
-          yosys -p 'read_verilog -sv rtl/dual_engine_8lane.sv; hierarchy -top dual_engine_8lane; chparam -set LANES 8 -set DEPTH 992 -set ADDR_W 10 dual_engine_8lane; synth_xilinx -family xc7 -top dual_engine_8lane; stat' \
-            2>&1 | tee build/rtl/dual_engine_8lane_xc7.log
+          yosys -p 'read_verilog -sv rtl/dual_engine_8lane.sv; hierarchy -top dual_engine_8lane; chparam -set LANES 8 -set DEPTH 992 -set ADDR_W 10 dual_engine_8lane; proc; memory; opt; check; stat' 2>&1 | tee build/rtl/dual_engine_8lane_generic.log
+          yosys -p 'read_verilog -sv rtl/dual_engine_8lane.sv; hierarchy -top dual_engine_8lane; chparam -set LANES 8 -set DEPTH 992 -set ADDR_W 10 dual_engine_8lane; synth_xilinx -family xc7 -top dual_engine_8lane; stat' 2>&1 | tee build/rtl/dual_engine_8lane_xc7.log
       - name: Target width64 16-lane dual-engine XC7 design point
         shell: bash
         run: |
           set -o pipefail
-          # Same 7936 persistent lambda values: 496 words x 16 lanes.
-          yosys -p 'read_verilog -sv rtl/dual_engine_8lane.sv; hierarchy -top dual_engine_8lane; chparam -set LANES 16 -set DEPTH 496 -set ADDR_W 9 dual_engine_8lane; synth_xilinx -family xc7 -top dual_engine_8lane; stat' \
-            2>&1 | tee build/rtl/dual_engine_16lane_xc7.log
+          yosys -p 'read_verilog -sv rtl/dual_engine_8lane.sv; hierarchy -top dual_engine_8lane; chparam -set LANES 16 -set DEPTH 496 -set ADDR_W 9 dual_engine_8lane; synth_xilinx -family xc7 -top dual_engine_8lane; stat' 2>&1 | tee build/rtl/dual_engine_16lane_xc7.log
       - name: Target width64 32-lane dual-engine XC7 design point
         shell: bash
         run: |
           set -o pipefail
-          # Same 7936 persistent lambda values: 248 words x 32 lanes.
-          yosys -p 'read_verilog -sv rtl/dual_engine_8lane.sv; hierarchy -top dual_engine_8lane; chparam -set LANES 32 -set DEPTH 248 -set ADDR_W 8 dual_engine_8lane; synth_xilinx -family xc7 -top dual_engine_8lane; stat' \
-            2>&1 | tee build/rtl/dual_engine_32lane_xc7.log
+          yosys -p 'read_verilog -sv rtl/dual_engine_8lane.sv; hierarchy -top dual_engine_8lane; chparam -set LANES 32 -set DEPTH 248 -set ADDR_W 8 dual_engine_8lane; synth_xilinx -family xc7 -top dual_engine_8lane; stat' 2>&1 | tee build/rtl/dual_engine_32lane_xc7.log
       - uses: actions/upload-artifact@v4
         if: always()
         with:
