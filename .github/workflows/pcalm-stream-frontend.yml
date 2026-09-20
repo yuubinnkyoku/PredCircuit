@@ -1,0 +1,36 @@
+name: PC-ALM stream frontend RTL
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - rtl/pcalm_stream_frontend.sv
+      - rtl/tb_pcalm_stream_frontend.sv
+      - rtl/residual_packer_1to8.sv
+      - rtl/dual_engine_8lane.sv
+      - .github/workflows/pcalm-stream-frontend.yml
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install RTL tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y iverilog yosys
+      - name: Simulate packer plus dual engine
+        run: |
+          mkdir -p build/rtl
+          iverilog -g2012 -Wall -s tb_pcalm_stream_frontend -o build/rtl/tb_pcalm_stream_frontend rtl/residual_packer_1to8.sv rtl/dual_engine_8lane.sv rtl/pcalm_stream_frontend.sv rtl/tb_pcalm_stream_frontend.sv
+          vvp build/rtl/tb_pcalm_stream_frontend
+      - name: Synthesize width-64 frontend design point
+        run: |
+          yosys -p 'read_verilog -sv rtl/residual_packer_1to8.sv rtl/dual_engine_8lane.sv rtl/pcalm_stream_frontend.sv; chparam -set DEPTH 992 -set ADDR_W 10 pcalm_stream_frontend; synth_xilinx -family xc7 -top pcalm_stream_frontend; stat' 2>&1 | tee build/rtl/pcalm_stream_frontend_xc7.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pcalm-stream-frontend-synthesis
+          path: build/rtl/*.log
+          if-no-files-found: error
