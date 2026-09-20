@@ -63,7 +63,6 @@ module tb_residual_serializer_64to8;
         repeat (3) @(posedge clk);
         rst_n = 1'b1;
 
-        // First worst-case 64-wide burst: it must drain in exactly eight beats.
         @(negedge clk);
         if (!in_ready) $fatal(1, "serializer not ready after reset");
         load_vector(0);
@@ -74,9 +73,8 @@ module tb_residual_serializer_64to8;
         @(negedge clk);
         if (!in_ready) $fatal(1, "serializer did not drain after 8 beats");
 
-        // Model the earliest next vector from a shared 64-MAC 64x64 producer:
-        // at least 64 producer cycles separate vector completions.  The queue
-        // must therefore have been empty long before the second burst arrives.
+        // A shared 64-MAC engine needs >=64 cycles for the next 64x64 vector.
+        // After the eight service beats above, model the remaining gap.
         cycles_since_first = 0;
         while (cycles_since_first < 55) begin
             @(negedge clk);
@@ -84,15 +82,16 @@ module tb_residual_serializer_64to8;
             cycles_since_first = cycles_since_first + 1;
         end
 
+        if (!in_ready) $fatal(1, "second vector would stall producer");
         load_vector(512);
         in_valid = 1'b1;
         @(negedge clk);
-        if (!in_ready) $fatal(1, "second vector would stall producer");
         in_valid = 1'b0;
         check_vector(512);
 
         // Backpressure must hold both payload and chunk index bit-exactly.
         @(negedge clk);
+        if (!in_ready) $fatal(1, "serializer not ready for backpressure test");
         load_vector(1024);
         in_valid = 1'b1;
         @(negedge clk);
