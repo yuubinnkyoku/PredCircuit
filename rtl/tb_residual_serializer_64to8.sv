@@ -34,13 +34,15 @@ module tb_residual_serializer_64to8;
         end
     endtask
 
+    // Sample each beat on the falling edge, before the following rising edge
+    // advances index_q.  This avoids a testbench race that previously skipped
+    // chunk 0 even though the serializer itself had emitted it correctly.
     task automatic check_vector(input integer base);
         integer lane;
         integer expected;
         begin
             seen = 0;
             while (seen < 8) begin
-                @(negedge clk);
                 if (out_valid) begin
                     if (chunk_index !== seen[2:0])
                         $fatal(1, "chunk order mismatch: got %0d expected %0d", chunk_index, seen);
@@ -52,6 +54,7 @@ module tb_residual_serializer_64to8;
                     end
                     seen = seen + 1;
                 end
+                if (seen < 8) @(negedge clk);
             end
         end
     endtask
