@@ -26,6 +26,31 @@ def bank(row: int, col: int, parallelism: int) -> int:
     return (row + col) % parallelism
 
 
+def bank_address(
+    layer: int, row: int, col: int, width: int, parallelism: int
+) -> tuple[int, int]:
+    """Map one logical weight to a bank and depth-packed bank-local address.
+
+    For parallelism dividing width, every row contributes ``width / parallelism``
+    entries to every bank.  Layer-major, row-major packing therefore needs no
+    lookup table: the bank is cyclic and the local address is an affine function
+    plus ``col // parallelism``.
+    """
+    if width <= 0 or parallelism <= 0 or width % parallelism != 0:
+        raise ValueError("width must be positive and divisible by parallelism")
+    if layer < 0 or not (0 <= row < width) or not (0 <= col < width):
+        raise ValueError("layer, row, and col are outside the logical matrix")
+
+    entries_per_row_bank = width // parallelism
+    entries_per_layer_bank = width * entries_per_row_bank
+    address = (
+        layer * entries_per_layer_bank
+        + row * entries_per_row_bank
+        + col // parallelism
+    )
+    return bank(row, col, parallelism), address
+
+
 def _conflicts(indices: list[int]) -> int:
     return len(indices) - len(set(indices))
 
