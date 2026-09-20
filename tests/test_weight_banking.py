@@ -16,11 +16,23 @@ def test_single_layer_fragmentation_matches_exact_bank_model() -> None:
         assert result.total_ramb36 == expected
 
 
+def test_fourteen_bit_weights_use_legal_18_by_2048_ramb36_mode() -> None:
+    for parallelism in (8, 16, 32, 64):
+        result = analyze(width=64, parallelism=parallelism, weight_bits=14, layers=30)
+        assert result.ramb36_word_width == 18
+        assert result.ramb36_word_depth == 2048
+
+
 def test_thirty_layers_are_depth_packed_into_shared_banks() -> None:
-    expected_ramb36 = {8: 48, 16: 48, 32: 64, 64: 64}
+    # A bit-capacity-only model incorrectly predicts 48/48/64/64. RAMB36E1
+    # stores a 14-bit writable word in its legal 18-bit x 2048 TDP shape, so
+    # the exact primitive count is 64 at every planned P.
+    expected_ramb36 = {8: 64, 16: 64, 32: 64, 64: 64}
+    expected_per_bank = {8: 8, 16: 4, 32: 2, 64: 1}
     for parallelism, expected in expected_ramb36.items():
         result = analyze(width=64, parallelism=parallelism, weight_bits=14, layers=30)
         assert result.total_ramb36 == expected
+        assert result.ramb36_per_bank == expected_per_bank[parallelism]
         assert result.max_bank_occupancy == 30 * 4096 // parallelism
         assert result.forward_conflicts == 0
         assert result.transpose_conflicts == 0
