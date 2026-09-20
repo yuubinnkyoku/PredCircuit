@@ -1,4 +1,4 @@
-from scripts.analyze_weight_banking import analyze, bank
+from predcircuit.weight_banking import analyze, bank
 
 
 def test_cyclic_mapping_is_conflict_free_for_planned_parallelism() -> None:
