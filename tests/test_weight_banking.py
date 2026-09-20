@@ -21,7 +21,11 @@ def test_each_aligned_group_is_a_permutation_of_banks() -> None:
         expected = list(range(parallelism))
         for fixed in range(64):
             for start in range(0, 64, parallelism):
-                forward = sorted(bank(fixed, start + lane, parallelism) for lane in range(parallelism))
-                transpose = sorted(bank(start + lane, fixed, parallelism) for lane in range(parallelism))
+                forward = sorted(
+                    bank(fixed, start + lane, parallelism) for lane in range(parallelism)
+                )
+                transpose = sorted(
+                    bank(start + lane, fixed, parallelism) for lane in range(parallelism)
+                )
                 assert forward == expected
                 assert transpose == expected
