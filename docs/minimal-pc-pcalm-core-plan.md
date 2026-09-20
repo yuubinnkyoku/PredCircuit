@@ -86,7 +86,7 @@ The first-order step time is
 
 where `C_mem` is measured from the actual banking schedule rather than assumed zero. Since `C_matrix` dominates for modest P, dual arithmetic should initially be overlapped with matrix streaming where dependencies permit. At high P the design can cross into a state-bandwidth-limited regime; that crossover is exactly what synthesis should locate.
 
-Sweep `P in {8,16,32,64}` and `V in {8,16,32,64}`. Report cycles/step, BRAM36, DSP, LUT, FF, Fmax, and estimated on-chip state traffic. Do not convert analytical MAC counts into claimed speedups.
+The first synthesis sweep freezes `V=8` and varies only `P in {8,16,32,64}`. For this design point `C_elem(8)=992` cycles, while `C_matrix(P)` is 123,392 / 61,696 / 30,848 / 15,424 cycles respectively. Even at P=64, the non-overlapped element pass is only 6.432% of matrix time, and the arithmetic crossover is near P=995. Widening V before measuring memory stalls would therefore confound the experiment while buying at most 868 cycles per step. Report cycles/step, BRAM36, DSP, LUT, FF, Fmax, and estimated on-chip state traffic. Re-open V>8 only if measured banking/writeback stalls exceed the V=8 budget, the update path materially limits Fmax, or later matrix parallelism approaches the crossover. Do not convert analytical MAC counts into claimed speedups.
 
 ## Coefficient implementation choices
 
@@ -121,7 +121,7 @@ The pre-RTL gate is now considered met for a **minimal experimental core only**:
 3. the analytical dual arithmetic overhead is sub-1% of matrix MAC work and the observed T separation exceeds the state-traffic break-even;
 4. recent stochastic-rounding diagnostics provide a hardware-plausible shared-RNG path rather than requiring independent random generators per neuron lane.
 
-This does **not** authorize a full accelerator claim. End-to-end training, fair ePC/BP runtime comparison, coefficient quantization, and actual synthesis/resource data remain open.
+This does **not** authorize a full accelerator claim. End-to-end training, fair ePC/BP runtime comparison, coefficient quantization, and actual shared-MAC synthesis/resource data remain open.
 
 ## First falsifiable RTL milestone
 
@@ -131,7 +131,7 @@ Proceed to multi-layer composition only if the tile satisfies all of:
 
 - bit-exact state and dual updates on deterministic test vectors;
 - no unexplained saturation relative to software;
-- synthesis produces a resource report for at least P={8,32,64};
+- synthesis produces a resource report for at least P={8,32,64}, initially with V=8 fixed;
 - measured cycle/state-traffic model preserves the analytical PC-ALM-vs-sPC break-even margin.
 
 If shared-RNG timing or comparator fanout dominates LUT/Fmax, the next comparison is grouped RNG (one random word per lane group), not immediately one RNG per lane.
