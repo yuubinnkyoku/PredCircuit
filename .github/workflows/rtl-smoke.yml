@@ -42,6 +42,10 @@ jobs:
         run: |
           iverilog -g2012 -Wall -s tb_dual_engine_stream_order -o build/rtl/tb_dual_engine_stream_order rtl/dual_engine_8lane.sv rtl/tb_dual_engine_stream_order.sv
           vvp build/rtl/tb_dual_engine_stream_order
+      - name: Verify width64 residual serialization
+        run: |
+          iverilog -g2012 -Wall -s tb_residual_serializer_64to8 -o build/rtl/tb_residual_serializer_64to8 rtl/residual_serializer_64to8.sv rtl/tb_residual_serializer_64to8.sv
+          vvp build/rtl/tb_residual_serializer_64to8
       - name: Generic synthesis comparison
         shell: bash
         run: |
@@ -60,6 +64,12 @@ jobs:
           set -o pipefail
           yosys -p 'read_verilog -sv rtl/state_update_unit.sv; hierarchy -top state_update_unit; proc; opt; check; stat' 2>&1 | tee build/rtl/state_update_generic.log
           yosys -p 'read_verilog -sv rtl/state_update_unit.sv; synth_xilinx -family xc7 -top state_update_unit; stat' 2>&1 | tee build/rtl/state_update_xc7.log
+      - name: Width64 residual serializer synthesis
+        shell: bash
+        run: |
+          set -o pipefail
+          yosys -p 'read_verilog -sv rtl/residual_serializer_64to8.sv; hierarchy -top residual_serializer_64to8; proc; opt; check; stat' 2>&1 | tee build/rtl/residual_serializer_generic.log
+          yosys -p 'read_verilog -sv rtl/residual_serializer_64to8.sv; synth_xilinx -family xc7 -top residual_serializer_64to8; stat' 2>&1 | tee build/rtl/residual_serializer_xc7.log
       - name: Fair common-core generic comparison
         shell: bash
         run: |
