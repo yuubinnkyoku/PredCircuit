@@ -1,0 +1,41 @@
+name: Shared MAC P sweep
+
+on:
+  push:
+    paths:
+      - 'rtl/shared_mac_array.sv'
+      - 'rtl/tb_shared_mac_array.sv'
+      - '.github/workflows/shared-mac-sweep.yml'
+  workflow_dispatch:
+
+jobs:
+  simulate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Icarus Verilog
+        run: sudo apt-get update && sudo apt-get install -y iverilog
+      - name: Verify signed accumulation and counters
+        run: |
+          mkdir -p build/rtl
+          iverilog -g2012 -Wall -s tb_shared_mac_array -o build/rtl/tb_shared_mac_array rtl/shared_mac_array.sv rtl/tb_shared_mac_array.sv
+          vvp build/rtl/tb_shared_mac_array
+
+  synthesize:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        p: [8, 16, 32, 64]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Yosys
+        run: sudo apt-get update && sudo apt-get install -y yosys
+      - name: Synthesize XC7 P=${{ matrix.p }}
+        run: |
+          mkdir -p build/rtl
+          yosys -p 'read_verilog -sv rtl/shared_mac_array.sv; chparam -set P ${{ matrix.p }} shared_mac_array; synth_xilinx -family xc7 -top shared_mac_array; stat' 2>&1 | tee build/rtl/shared_mac_p${{ matrix.p }}_xc7.log
+      - uses: actions/upload-artifact@v4
+        with:
+          name: shared-mac-p${{ matrix.p }}-synthesis
+          path: build/rtl/shared_mac_p${{ matrix.p }}_xc7.log
