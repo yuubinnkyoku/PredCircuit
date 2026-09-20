@@ -51,12 +51,19 @@ def _ramb36_tdp_shape(word_bits: int) -> tuple[int, int]:
     """Return the smallest legal RAMB36E1 TDP word width and its depth.
 
     7-series RAMB36E1 true-dual-port configurations are 32768x1, 16384x2,
-    8192x4, 4096x9, 2048x18, or 1024x36.  PredCircuit needs writable weights,
+    8192x4, 4096x9, 2048x18, or 1024x36. PredCircuit needs writable weights,
     so the 512x72 simple-dual-port-only mode is deliberately excluded.
     """
     if word_bits <= 0:
         raise ValueError("word_bits must be positive")
-    for physical_width, depth in ((1, 32768), (2, 16384), (4, 8192), (9, 4096), (18, 2048), (36, 1024)):
+    for physical_width, depth in (
+        (1, 32768),
+        (2, 16384),
+        (4, 8192),
+        (9, 4096),
+        (18, 2048),
+        (36, 1024),
+    ):
         if word_bits <= physical_width:
             return physical_width, depth
     raise ValueError("one RAMB36E1 TDP word cannot exceed 36 bits")

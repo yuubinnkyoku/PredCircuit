@@ -1,0 +1,45 @@
+name: PC-ALM weight-only precision holdout
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/pcalm-weight-precision.yml
+      - scripts/diagnose_pcalm_weight_precision.py
+      - scripts/aggregate_pcalm_weight_precision.py
+      - src/predcircuit/pcalm.py
+
+jobs:
+  seed:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [800,801,802,803,804,805,806,807,808,809,810,811,812,813,814,815,816,817,818,819]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv run python scripts/diagnose_pcalm_weight_precision.py --seed ${{ matrix.seed }} --out results/generated/pcalm_weight_precision_seed${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pcalm-weight-precision-seed-${{ matrix.seed }}
+          path: results/generated/pcalm_weight_precision_seed${{ matrix.seed }}.csv
+          if-no-files-found: error
+  aggregate:
+    needs: seed
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: pcalm-weight-precision-seed-*
+          path: artifacts
+          merge-multiple: true
+      - run: uv run python scripts/aggregate_pcalm_weight_precision.py --input artifacts --out results/generated/pcalm_weight_precision_summary.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pcalm-weight-precision-aggregate
+          path: results/generated/pcalm_weight_precision_summary.csv
+          if-no-files-found: error
