@@ -14,7 +14,10 @@ def main() -> None:
     parser.add_argument("--parallelism", type=int, nargs="+", default=[8, 16, 32, 64])
     args = parser.parse_args()
 
-    print("P,forward_conflicts,transpose_conflicts,max_bank_weights,RAMB36,capacity_efficiency")
+    print(
+        "P,forward_conflicts,transpose_conflicts,max_bank_weights,"
+        "RAMB36,capacity_efficiency"
+    )
     for p in args.parallelism:
         result = analyze(args.width, p, args.weight_bits)
         print(
