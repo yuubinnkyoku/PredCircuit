@@ -16,6 +16,18 @@ def test_single_layer_fragmentation_matches_exact_bank_model() -> None:
         assert result.total_ramb36 == expected
 
 
+def test_thirty_layers_are_depth_packed_into_shared_banks() -> None:
+    expected_ramb36 = {8: 48, 16: 48, 32: 64, 64: 64}
+    for parallelism, expected in expected_ramb36.items():
+        result = analyze(
+            width=64, parallelism=parallelism, weight_bits=14, layers=30
+        )
+        assert result.total_ramb36 == expected
+        assert result.max_bank_occupancy == 30 * 4096 // parallelism
+        assert result.forward_conflicts == 0
+        assert result.transpose_conflicts == 0
+
+
 def test_each_aligned_group_is_a_permutation_of_banks() -> None:
     for parallelism in (8, 16, 32, 64):
         expected = list(range(parallelism))
