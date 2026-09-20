@@ -26,9 +26,7 @@ def bank(row: int, col: int, parallelism: int) -> int:
     return (row + col) % parallelism
 
 
-def bank_address(
-    layer: int, row: int, col: int, width: int, parallelism: int
-) -> tuple[int, int]:
+def bank_address(layer: int, row: int, col: int, width: int, parallelism: int) -> tuple[int, int]:
     """Map one logical weight to a bank and depth-packed bank-local address.
 
     For parallelism dividing width, every row contributes ``width / parallelism``
@@ -43,11 +41,7 @@ def bank_address(
 
     entries_per_row_bank = width // parallelism
     entries_per_layer_bank = width * entries_per_row_bank
-    address = (
-        layer * entries_per_layer_bank
-        + row * entries_per_row_bank
-        + col // parallelism
-    )
+    address = layer * entries_per_layer_bank + row * entries_per_row_bank + col // parallelism
     return bank(row, col, parallelism), address
 
 
@@ -55,9 +49,7 @@ def _conflicts(indices: list[int]) -> int:
     return len(indices) - len(set(indices))
 
 
-def analyze(
-    width: int, parallelism: int, weight_bits: int = 14, layers: int = 1
-) -> BankingResult:
+def analyze(width: int, parallelism: int, weight_bits: int = 14, layers: int = 1) -> BankingResult:
     if width <= 0 or parallelism <= 0 or weight_bits <= 0 or layers <= 0:
         raise ValueError("width, parallelism, weight_bits, and layers must be positive")
     if width % parallelism != 0:
