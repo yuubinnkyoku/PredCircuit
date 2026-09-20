@@ -17,6 +17,8 @@ class BankingResult:
     forward_conflicts: int
     transpose_conflicts: int
     max_bank_occupancy: int
+    ramb36_word_width: int
+    ramb36_word_depth: int
     ramb36_per_bank: int
     total_ramb36: int
     capacity_efficiency: float
@@ -30,7 +32,7 @@ def bank_address(layer: int, row: int, col: int, width: int, parallelism: int) -
     """Map one logical weight to a bank and depth-packed bank-local address.
 
     For parallelism dividing width, every row contributes ``width / parallelism``
-    entries to every bank.  Layer-major, row-major packing therefore needs no
+    entries to every bank. Layer-major, row-major packing therefore needs no
     lookup table: the bank is cyclic and the local address is an affine function
     plus ``col // parallelism``.
     """
@@ -43,6 +45,21 @@ def bank_address(layer: int, row: int, col: int, width: int, parallelism: int) -
     entries_per_layer_bank = width * entries_per_row_bank
     address = layer * entries_per_layer_bank + row * entries_per_row_bank + col // parallelism
     return bank(row, col, parallelism), address
+
+
+def _ramb36_tdp_shape(word_bits: int) -> tuple[int, int]:
+    """Return the smallest legal RAMB36E1 TDP word width and its depth.
+
+    7-series RAMB36E1 true-dual-port configurations are 32768x1, 16384x2,
+    8192x4, 4096x9, 2048x18, or 1024x36.  PredCircuit needs writable weights,
+    so the 512x72 simple-dual-port-only mode is deliberately excluded.
+    """
+    if word_bits <= 0:
+        raise ValueError("word_bits must be positive")
+    for physical_width, depth in ((1, 32768), (2, 16384), (4, 8192), (9, 4096), (18, 2048), (36, 1024)):
+        if word_bits <= physical_width:
+            return physical_width, depth
+    raise ValueError("one RAMB36E1 TDP word cannot exceed 36 bits")
 
 
 def _conflicts(indices: list[int]) -> int:
@@ -73,8 +90,8 @@ def analyze(width: int, parallelism: int, weight_bits: int = 14, layers: int = 1
             transpose_conflicts += _conflicts(banks)
 
     max_bank_occupancy = max(occupancy)
-    bits_per_bank = max_bank_occupancy * weight_bits
-    ramb36_per_bank = math.ceil(bits_per_bank / RAMB36_BITS)
+    ramb36_word_width, ramb36_word_depth = _ramb36_tdp_shape(weight_bits)
+    ramb36_per_bank = math.ceil(max_bank_occupancy / ramb36_word_depth)
     total_ramb36 = parallelism * ramb36_per_bank
     useful_bits = layers * width * width * weight_bits
     capacity_efficiency = useful_bits / (total_ramb36 * RAMB36_BITS)
@@ -87,6 +104,8 @@ def analyze(width: int, parallelism: int, weight_bits: int = 14, layers: int = 1
         forward_conflicts=forward_conflicts,
         transpose_conflicts=transpose_conflicts,
         max_bank_occupancy=max_bank_occupancy,
+        ramb36_word_width=ramb36_word_width,
+        ramb36_word_depth=ramb36_word_depth,
         ramb36_per_bank=ramb36_per_bank,
         total_ramb36=total_ramb36,
         capacity_efficiency=capacity_efficiency,
