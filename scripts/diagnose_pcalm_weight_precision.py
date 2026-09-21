@@ -22,11 +22,27 @@ from predcircuit.pcalm import (
 class WeightQuantizedResidualMLP(ResidualMLP):
     """Quantize only stored weights; keep activations and MAC arithmetic in FP32."""
 
-    def __init__(self, *, depth: int, width: int, input_dim: int, output_dim: int,
-                 activation: Literal["linear", "tanh", "relu"] = "tanh", seed: int = 0,
-                 dtype: torch.dtype = torch.float32, weight_precision: str = "fp32") -> None:
-        super().__init__(depth=depth, width=width, input_dim=input_dim, output_dim=output_dim,
-                         activation=activation, seed=seed, dtype=dtype)
+    def __init__(
+        self,
+        *,
+        depth: int,
+        width: int,
+        input_dim: int,
+        output_dim: int,
+        activation: Literal["linear", "tanh", "relu"] = "tanh",
+        seed: int = 0,
+        dtype: torch.dtype = torch.float32,
+        weight_precision: str = "fp32",
+    ) -> None:
+        super().__init__(
+            depth=depth,
+            width=width,
+            input_dim=input_dim,
+            output_dim=output_dim,
+            activation=activation,
+            seed=seed,
+            dtype=dtype,
+        )
         self.weight_precision = weight_precision
         self.weight_saturated = 0
         self.weight_total = 0
@@ -48,7 +64,9 @@ class WeightQuantizedResidualMLP(ResidualMLP):
         return pred
 
 
-def dead_update_rate(model: WeightQuantizedResidualMLP, grads: list[torch.Tensor], lr: float) -> float:
+def dead_update_rate(
+    model: WeightQuantizedResidualMLP, grads: list[torch.Tensor], lr: float
+) -> float:
     """Fraction of stored weights unchanged by one quantized SGD update.
 
     This models hardware with no hidden FP32 master copy: read Q(W), subtract lr*g,
@@ -83,8 +101,14 @@ def main() -> None:
     x = torch.randn(4, 8, generator=generator)
     y = torch.randn(4, 4, generator=generator)
 
-    bp_model = ResidualMLP(depth=depth, width=width, input_dim=8, output_dim=4,
-                           activation="relu", seed=args.seed + depth)
+    bp_model = ResidualMLP(
+        depth=depth,
+        width=width,
+        input_dim=8,
+        output_dim=4,
+        activation="relu",
+        seed=args.seed + depth,
+    )
     bp = method_grad(bp_model, x, y, Schedule("bp", budget=0), state_lr=state_lr, rho=rho)
     bp_first = bp[0]
     bp_norm = float(bp_first.norm())
@@ -92,12 +116,26 @@ def main() -> None:
     rows: list[dict[str, object]] = []
     reference: list[torch.Tensor] | None = None
     for precision in args.precisions.split(","):
-        model = WeightQuantizedResidualMLP(depth=depth, width=width, input_dim=8, output_dim=4,
-                                           activation="relu", seed=args.seed + depth,
-                                           weight_precision=precision)
-        grads, metrics = run_precision(model, x, y, state_lr=state_lr, rho=rho, alpha=alpha,
-                                       dual_leak=dual_leak, budget=budget,
-                                       update_precision="fixed12_i2")
+        model = WeightQuantizedResidualMLP(
+            depth=depth,
+            width=width,
+            input_dim=8,
+            output_dim=4,
+            activation="relu",
+            seed=args.seed + depth,
+            weight_precision=precision,
+        )
+        grads, metrics = run_precision(
+            model,
+            x,
+            y,
+            state_lr=state_lr,
+            rho=rho,
+            alpha=alpha,
+            dual_leak=dual_leak,
+            budget=budget,
+            update_precision="fixed12_i2",
+        )
         first = grads[0]
         ratio = float(first.norm()) / bp_norm if bp_norm else math.nan
         cosine = gradient_cosine([first], [bp_first])
@@ -106,22 +144,28 @@ def main() -> None:
             reference = grads
         finite = bool(metrics["finite"])
         useful = finite and cosine >= 0.9 and 0.5 <= ratio <= 2.0 and relative_error <= 0.6
-        rows.append({
-            "seed": args.seed,
-            "weight_precision": precision,
-            "finite": finite,
-            "useful_first_layer_credit": useful,
-            "first_layer_cosine_to_bp": cosine,
-            "first_layer_grad_norm_ratio_to_bp": ratio,
-            "first_layer_relative_error_to_bp": relative_error,
-            "all_gradient_relative_error_to_fp32_weights": gradient_relative_error(grads, reference),
-            "weight_saturation_rate": model.weight_saturated / model.weight_total if model.weight_total else 0.0,
-            "max_abs_weight_pre_quant": model.max_abs_weight_pre_quant,
-            "dead_update_rate_lr_0p001": dead_update_rate(model, grads, 0.001),
-            "dead_update_rate_lr_0p01": dead_update_rate(model, grads, 0.01),
-            "dead_update_rate_lr_0p1": dead_update_rate(model, grads, 0.1),
-            **metrics,
-        })
+        rows.append(
+            {
+                "seed": args.seed,
+                "weight_precision": precision,
+                "finite": finite,
+                "useful_first_layer_credit": useful,
+                "first_layer_cosine_to_bp": cosine,
+                "first_layer_grad_norm_ratio_to_bp": ratio,
+                "first_layer_relative_error_to_bp": relative_error,
+                "all_gradient_relative_error_to_fp32_weights": gradient_relative_error(
+                    grads, reference
+                ),
+                "weight_saturation_rate": model.weight_saturated / model.weight_total
+                if model.weight_total
+                else 0.0,
+                "max_abs_weight_pre_quant": model.max_abs_weight_pre_quant,
+                "dead_update_rate_lr_0p001": dead_update_rate(model, grads, 0.001),
+                "dead_update_rate_lr_0p01": dead_update_rate(model, grads, 0.01),
+                "dead_update_rate_lr_0p1": dead_update_rate(model, grads, 0.1),
+                **metrics,
+            }
+        )
 
     frame = pd.DataFrame(rows)
     args.out.parent.mkdir(parents=True, exist_ok=True)
