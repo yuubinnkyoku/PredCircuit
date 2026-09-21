@@ -13,7 +13,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        seed: [800, 801, 802, 803, 804, 805, 806, 807]
+        # Four seeds are enough for the first long-horizon screening.  The
+        # previous 8-seed x 16-step run already established the short-horizon
+        # effect; avoid paying for a duplicate 8-seed run before we know
+        # whether the stochastic trajectory remains stable.
+        seed: [800, 801, 802, 803]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -21,8 +25,8 @@ jobs:
         with:
           python-version: '3.11'
       - run: pip install -e .
-      - run: python scripts/diagnose_pcalm_stochastic_training.py --seed ${{ matrix.seed }} --steps 16 --out results/stochastic-training-${{ matrix.seed }}.csv
+      - run: python scripts/diagnose_pcalm_stochastic_training.py --seed ${{ matrix.seed }} --steps 128 --out results/stochastic-training-128-${{ matrix.seed }}.csv
       - uses: actions/upload-artifact@v4
         with:
-          name: stochastic-training-${{ matrix.seed }}
-          path: results/stochastic-training-${{ matrix.seed }}.csv
+          name: stochastic-training-128-${{ matrix.seed }}
+          path: results/stochastic-training-128-${{ matrix.seed }}.csv
