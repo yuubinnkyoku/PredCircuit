@@ -57,6 +57,36 @@ def format_stats(
     }
 
 
+def transpose_accumulator_ranges(
+    model: ResidualMLP, residuals: list[torch.Tensor]
+) -> tuple[float, float, list[float], list[float]]:
+    """Measure raw W^T r final and serial partial-sum ranges.
+
+    For residual r_l with W_l shaped [out, in], the transpose propagation is
+    r_l @ W_l.  A P-lane implementation accumulates products over the output
+    dimension, so the serial cumulative sum is a conservative range probe for
+    the fixed-point accumulator.  The model scale is included because it is
+    part of the actual block Jacobian; the activation derivative is bounded by
+    one for the supported activations and can only reduce this raw range.
+    """
+    global_final = 0.0
+    global_partial = 0.0
+    per_layer_final: list[float] = []
+    per_layer_partial: list[float] = []
+    with torch.no_grad():
+        for layer, residual in enumerate(residuals):
+            weight = model.weights[layer]
+            scaled_terms = residual.unsqueeze(-1) * weight.unsqueeze(0) * model.scales[layer]
+            partial = scaled_terms.cumsum(dim=1)
+            final_max = float(partial[:, -1, :].abs().max())
+            partial_max = float(partial.abs().max())
+            per_layer_final.append(final_max)
+            per_layer_partial.append(partial_max)
+            global_final = max(global_final, final_max)
+            global_partial = max(global_partial, partial_max)
+    return global_final, global_partial, per_layer_final, per_layer_partial
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Measure real PC-ALM lambda/update ranges.")
     parser.add_argument("--depth", type=int, default=32)
@@ -99,9 +129,13 @@ def main() -> None:
     per_layer_max_dual = [0.0] * layer_count
     per_layer_max_residual = [0.0] * layer_count
     per_layer_max_update = [0.0] * layer_count
+    per_layer_max_wtr_final = [0.0] * layer_count
+    per_layer_max_wtr_partial = [0.0] * layer_count
     per_layer_nonzero_updates: list[list[float]] = [[] for _ in range(layer_count)]
     all_updates: list[float] = []
     all_nonzero_updates: list[float] = []
+    global_max_wtr_final = 0.0
+    global_max_wtr_partial = 0.0
     finite = True
 
     for _ in range(args.budget):
@@ -120,6 +154,11 @@ def main() -> None:
             (dual + args.alpha * residual).detach()
             for dual, residual in zip(duals, residuals, strict=True)
         ]
+        wtr_final, wtr_partial, layer_final, layer_partial = transpose_accumulator_ranges(
+            model, residuals
+        )
+        global_max_wtr_final = max(global_max_wtr_final, wtr_final)
+        global_max_wtr_partial = max(global_max_wtr_partial, wtr_partial)
         for layer, (residual, dual) in enumerate(zip(residuals, duals, strict=True)):
             update_tensor = (args.alpha * residual).abs().reshape(-1)
             update_values = [float(value) for value in update_tensor]
@@ -133,6 +172,10 @@ def main() -> None:
             )
             per_layer_max_update[layer] = max(
                 per_layer_max_update[layer], float(update_tensor.max())
+            )
+            per_layer_max_wtr_final[layer] = max(per_layer_max_wtr_final[layer], layer_final[layer])
+            per_layer_max_wtr_partial[layer] = max(
+                per_layer_max_wtr_partial[layer], layer_partial[layer]
             )
             finite = (
                 finite and bool(torch.isfinite(residual).all()) and bool(torch.isfinite(dual).all())
@@ -171,6 +214,10 @@ def main() -> None:
         "global_max_abs_dual": global_max_dual,
         "global_max_abs_residual": max(per_layer_max_residual),
         "global_max_abs_dual_update": max(per_layer_max_update),
+        "global_max_abs_wtr_final": global_max_wtr_final,
+        "global_max_abs_wtr_partial": global_max_wtr_partial,
+        "wtr_partial_over_final": global_max_wtr_partial / max(global_max_wtr_final, 1e-30),
+        "wtr_integer_bits_required": integer_bits_for_signed(global_max_wtr_partial),
         "dual_update_zero_fraction_fp32": 1.0 - len(all_nonzero_updates) / max(len(all_updates), 1),
         "nonzero_dual_update_p50": percentile(all_nonzero_updates, 0.50),
         "nonzero_dual_update_p10": percentile(all_nonzero_updates, 0.10),
@@ -178,6 +225,8 @@ def main() -> None:
         "per_layer_max_abs_dual": per_layer_max_dual,
         "per_layer_max_abs_residual": per_layer_max_residual,
         "per_layer_max_abs_dual_update": per_layer_max_update,
+        "per_layer_max_abs_wtr_final": per_layer_max_wtr_final,
+        "per_layer_max_abs_wtr_partial": per_layer_max_wtr_partial,
         "global_fixed_point_from_fp32_trajectory": fixed_point,
         "per_layer_fixed_point_from_fp32_trajectory": per_layer_fixed_point,
     }
