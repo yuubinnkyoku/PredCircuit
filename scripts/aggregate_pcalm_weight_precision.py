@@ -8,7 +8,7 @@ import pandas as pd
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--input", type=Path, required=True)
+    parser.add_argument("--input", type=Path)
     parser.add_argument("--out", type=Path, required=True)
     args = parser.parse_args()
 
@@ -23,6 +23,9 @@ def main() -> None:
         "all_gradient_relative_error_to_fp32_weights",
         "weight_saturation_rate",
         "max_abs_weight_pre_quant",
+        "dead_update_rate_lr_0p001",
+        "dead_update_rate_lr_0p01",
+        "dead_update_rate_lr_0p1",
     ]
     summary = (
         frame.groupby("weight_precision", sort=False)
