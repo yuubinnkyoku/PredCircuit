@@ -1,4 +1,4 @@
-name: PC-ALM multiplier-free state-step boundary
+name: PC-ALM T103 independent holdout
 
 on:
   workflow_dispatch:
@@ -9,17 +9,17 @@ on:
       - scripts/diagnose_pcalm_width64_dyadic_state_step_budget.py
 
 jobs:
-  boundary:
+  holdout:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        seed: [847, 849, 856, 857, 858]
+        seed: [860, 861, 862, 863, 864, 865, 866, 867, 868, 869, 870, 871, 872, 873, 874]
         budget: [103]
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v10.0.1
-      - name: Run dyadic state-step boundary point
+      - name: Run independent T103 holdout
         run: |
           uv run python scripts/diagnose_pcalm_width64_dyadic_state_step_budget.py \
             --seed ${{ matrix.seed }} \
@@ -27,6 +27,6 @@ jobs:
             --out results/generated/pcalm_width64_dyadic_step_T${{ matrix.budget }}_seed${{ matrix.seed }}.csv
       - uses: actions/upload-artifact@v4
         with:
-          name: pcalm-dyadic-boundary-T${{ matrix.budget }}-seed-${{ matrix.seed }}
+          name: pcalm-T103-independent-seed-${{ matrix.seed }}
           path: results/generated/pcalm_width64_dyadic_step_T${{ matrix.budget }}_seed${{ matrix.seed }}.csv
           if-no-files-found: error
