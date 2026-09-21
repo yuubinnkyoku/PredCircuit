@@ -64,7 +64,12 @@ def main() -> None:
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument(
         "--precisions",
-        default="fp32,fixed12_i1,fixed10_i1,fixed9_i1,fixed8_i1",
+        # Keep the representable range fixed at [-8, 8) across fixed-point
+        # formats so the 12/10/9/8-bit comparison measures quantization
+        # resolution rather than clipping.  The preceding 20-seed i1 run
+        # observed |W|max up to 4.319 and ~4.5% saturation, so i1 was
+        # confounded by range clipping.
+        default="fp32,fixed12_i3,fixed10_i3,fixed9_i3,fixed8_i3",
     )
     args = parser.parse_args()
 
