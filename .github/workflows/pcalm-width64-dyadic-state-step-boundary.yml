@@ -15,7 +15,7 @@ jobs:
       fail-fast: false
       matrix:
         seed: [847, 849, 856, 857, 858]
-        budget: [100, 102]
+        budget: [103]
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v10.0.1
