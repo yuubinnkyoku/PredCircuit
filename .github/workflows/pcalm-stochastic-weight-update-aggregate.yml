@@ -1,0 +1,53 @@
+name: PC-ALM stochastic weight update aggregate
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/pcalm-stochastic-weight-update-aggregate.yml"
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  aggregate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install pandas
+      - name: Reuse completed stochastic probe artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh run download 35563167763 --repo yuubinnkyoku/PredCircuit --dir stochastic-artifacts
+      - name: Aggregate
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import pandas as pd
+
+          files = sorted(Path("stochastic-artifacts").glob("**/stochastic-*.csv"))
+          if len(files) != 20:
+              raise SystemExit(f"expected 20 seed CSVs, found {len(files)}")
+          frame = pd.concat((pd.read_csv(p) for p in files), ignore_index=True)
+          group = frame.groupby(["learning_rate", "rng_bits"], as_index=False).agg(
+              seeds=("seed", "nunique"),
+              finite_rate=("finite", "mean"),
+              expected_move_rate_mean=("expected_move_rate", "mean"),
+              expected_move_rate_std=("expected_move_rate", "std"),
+              relative_l1_bias_mean=("expected_update_relative_l1_bias", "mean"),
+              relative_l1_bias_std=("expected_update_relative_l1_bias", "std"),
+              lost_fraction_mean=("nonzero_probability_lost_fraction", "mean"),
+              lost_fraction_std=("nonzero_probability_lost_fraction", "std"),
+          )
+          Path("results").mkdir(exist_ok=True)
+          group.to_csv("results/pcalm_stochastic_weight_update_aggregate.csv", index=False)
+          print(group.to_string(index=False))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: stochastic-aggregate
+          path: results/pcalm_stochastic_weight_update_aggregate.csv
