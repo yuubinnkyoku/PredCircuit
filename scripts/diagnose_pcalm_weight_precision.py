@@ -10,7 +10,13 @@ import torch
 
 from diagnose_pcalm_dual_precision import quantize_dual
 from diagnose_pcalm_update_precision import run_precision
-from predcircuit.pcalm import ResidualMLP, Schedule, gradient_cosine, gradient_relative_error, method_grad
+from predcircuit.pcalm import (
+    ResidualMLP,
+    Schedule,
+    gradient_cosine,
+    gradient_relative_error,
+    method_grad,
+)
 
 
 class WeightQuantizedResidualMLP(ResidualMLP):
@@ -136,7 +142,9 @@ def main() -> None:
                 "first_layer_cosine_to_bp": cosine,
                 "first_layer_grad_norm_ratio_to_bp": ratio,
                 "first_layer_relative_error_to_bp": relative_error,
-                "all_gradient_relative_error_to_fp32_weights": gradient_relative_error(grads, reference),
+                "all_gradient_relative_error_to_fp32_weights": gradient_relative_error(
+                    grads, reference
+                ),
                 "weight_saturation_rate": (
                     model.weight_saturated / model.weight_total if model.weight_total else 0.0
                 ),
