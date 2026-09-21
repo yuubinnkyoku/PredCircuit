@@ -1,0 +1,28 @@
+name: PC-ALM stochastic weight training
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - scripts/diagnose_pcalm_stochastic_training.py
+      - .github/workflows/pcalm-stochastic-training.yml
+  workflow_dispatch:
+
+jobs:
+  trajectory:
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [800, 801, 802, 803, 804, 805, 806, 807]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -e .
+      - run: python scripts/diagnose_pcalm_stochastic_training.py --seed ${{ matrix.seed }} --steps 16 --out results/stochastic-training-${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: stochastic-training-${{ matrix.seed }}
+          path: results/stochastic-training-${{ matrix.seed }}.csv
