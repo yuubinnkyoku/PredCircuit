@@ -1,0 +1,28 @@
+name: PC-ALM stochastic weight update probe
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "scripts/diagnose_pcalm_stochastic_weight_update.py"
+      - ".github/workflows/pcalm-stochastic-weight-update.yml"
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [800, 801, 802, 803, 804, 805, 806, 807, 808, 809, 810, 811, 812, 813, 814, 815, 816, 817, 818, 819]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -e .
+      - run: python scripts/diagnose_pcalm_stochastic_weight_update.py --seed ${{ matrix.seed }} --out stochastic-${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: stochastic-${{ matrix.seed }}
+          path: stochastic-${{ matrix.seed }}.csv
