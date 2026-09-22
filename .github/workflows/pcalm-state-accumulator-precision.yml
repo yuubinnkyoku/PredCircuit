@@ -1,0 +1,31 @@
+name: PC-ALM state accumulator precision diagnostic
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "scripts/diagnose_pcalm_state_accumulator_precision.py"
+      - ".github/workflows/pcalm-state-accumulator-precision.yml"
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -e .
+      - name: Sweep state accumulator precision
+        run: |
+          python scripts/diagnose_pcalm_state_accumulator_precision.py \
+            --seed 860 --budget 128 --state-lr 0.25 --dual-leak 0.02 --interval 32 \
+            --accumulators fp32,fixed24_i3,fixed20_i3,fixed18_i3,fixed16_i3,fixed15_i3 \
+            --out results/pcalm_seed860_state_accumulator_precision.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pcalm-seed860-state-accumulator-precision
+          path: results/pcalm_seed860_state_accumulator_precision.csv
