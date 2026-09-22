@@ -1,0 +1,33 @@
+name: Multi-update method learning curves
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "scripts/train_method_learning_curves.py"
+      - ".github/workflows/train-method-learning-curves.yml"
+
+jobs:
+  train:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [970, 971, 972]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -e .
+      - name: Run learning-curve comparison
+        run: |
+          python scripts/train_method_learning_curves.py \
+            --seed ${{ matrix.seed }} \
+            --updates 24 \
+            --out results/training_seed_${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: training-seed-${{ matrix.seed }}
+          path: results/training_seed_${{ matrix.seed }}.csv
