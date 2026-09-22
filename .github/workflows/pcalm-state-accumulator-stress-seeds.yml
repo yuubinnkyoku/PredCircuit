@@ -14,7 +14,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        block: [10, 20, 30, 40, 50, 60, 70, 80, 90]
+        block: [850, 860]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -22,11 +22,15 @@ jobs:
           python-version: "3.11"
           cache: pip
       - run: pip install -e .
-      - name: Scan ten seeds in this block
+      - name: Probe seeds around the known seed-860 stress case
         shell: bash
         run: |
           mkdir -p results/stress
           for seed in $(seq ${{ matrix.block }} $(( ${{ matrix.block }} + 9 ))); do
+            # Seed 860 is already characterized in detail; do not duplicate it.
+            if [ "$seed" -eq 860 ]; then
+              continue
+            fi
             python scripts/diagnose_pcalm_state_accumulator_precision.py \
               --seed "$seed" --budget 128 --state-lr 0.25 --dual-leak 0.02 --interval 1 \
               --accumulators fixed15_i3 \
