@@ -1,4 +1,4 @@
-name: PC-ALM independent failure budget diagnostic
+name: PC-ALM seed-860 state precision diagnostic
 
 on:
   workflow_dispatch:
@@ -6,27 +6,24 @@ on:
     branches: [main]
     paths:
       - .github/workflows/pcalm-width64-dyadic-state-step-boundary.yml
-      - scripts/diagnose_pcalm_width64_dyadic_state_step_budget.py
+      - scripts/diagnose_pcalm_width64_leaky_state_precision.py
 
 jobs:
   diagnose:
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        seed: [860, 862]
-        budget: [104, 108, 128]
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v10.0.1
-      - name: Diagnose independent holdout failures
+      - name: Isolate seed-860 state precision failure at T128
         run: |
-          uv run python scripts/diagnose_pcalm_width64_dyadic_state_step_budget.py \
-            --seed ${{ matrix.seed }} \
-            --budget ${{ matrix.budget }} \
-            --out results/generated/pcalm_width64_dyadic_step_T${{ matrix.budget }}_seed${{ matrix.seed }}.csv
+          uv run python scripts/diagnose_pcalm_width64_leaky_state_precision.py \
+            --seed 860 \
+            --budget 128 \
+            --state-lr 0.25 \
+            --dual-leak 0.02 \
+            --out results/generated/pcalm_seed860_T128_state_precision.csv
       - uses: actions/upload-artifact@v4
         with:
-          name: pcalm-independent-failure-seed-${{ matrix.seed }}-T${{ matrix.budget }}
-          path: results/generated/pcalm_width64_dyadic_step_T${{ matrix.budget }}_seed${{ matrix.seed }}.csv
+          name: pcalm-seed860-T128-state-precision
+          path: results/generated/pcalm_seed860_T128_state_precision.csv
           if-no-files-found: error
