@@ -1,4 +1,4 @@
-name: PC-ALM T103 independent holdout
+name: PC-ALM independent failure budget diagnostic
 
 on:
   workflow_dispatch:
@@ -9,17 +9,17 @@ on:
       - scripts/diagnose_pcalm_width64_dyadic_state_step_budget.py
 
 jobs:
-  holdout:
+  diagnose:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        seed: [860, 861, 862, 863, 864, 865, 866, 867, 868, 869, 870, 871, 872, 873, 874]
-        budget: [103]
+        seed: [860, 862]
+        budget: [104, 108, 128]
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v10.0.1
-      - name: Run independent T103 holdout
+      - name: Diagnose independent holdout failures
         run: |
           uv run python scripts/diagnose_pcalm_width64_dyadic_state_step_budget.py \
             --seed ${{ matrix.seed }} \
@@ -27,6 +27,6 @@ jobs:
             --out results/generated/pcalm_width64_dyadic_step_T${{ matrix.budget }}_seed${{ matrix.seed }}.csv
       - uses: actions/upload-artifact@v4
         with:
-          name: pcalm-T103-independent-seed-${{ matrix.seed }}
+          name: pcalm-independent-failure-seed-${{ matrix.seed }}-T${{ matrix.budget }}
           path: results/generated/pcalm_width64_dyadic_step_T${{ matrix.budget }}_seed${{ matrix.seed }}.csv
           if-no-files-found: error
