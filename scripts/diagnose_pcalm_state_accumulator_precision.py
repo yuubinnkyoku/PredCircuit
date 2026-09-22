@@ -21,7 +21,9 @@ from predcircuit.pcalm import (
 )
 
 
-def run(model, x, y, *, budget: int, state_lr: float, dual_leak: float, interval: int, accumulator: str):
+def run(
+    model, x, y, *, budget: int, state_lr: float, dual_leak: float, interval: int, accumulator: str
+):
     rho, alpha = 1.0, 0.925
     effective_lr = state_lr * x.shape[0]
     free = free_init(model, x)
@@ -62,7 +64,9 @@ def run(model, x, y, *, budget: int, state_lr: float, dual_leak: float, interval
             break
         duals = duals_after
 
-    loss = al_energy_shifted(model, x, y, [z.detach() for z in free], [d.detach() for d in credit_duals], rho=rho)
+    loss = al_energy_shifted(
+        model, x, y, [z.detach() for z in free], [d.detach() for d in credit_duals], rho=rho
+    )
     grads = [g.detach() for g in torch.autograd.grad(loss, tuple(model.weights))]
     return grads, {
         "finite": finite and all(bool(torch.isfinite(g).all()) for g in grads),
@@ -79,7 +83,9 @@ def main() -> None:
     p.add_argument("--state-lr", type=float, default=0.25)
     p.add_argument("--dual-leak", type=float, default=0.02)
     p.add_argument("--interval", type=int, default=32)
-    p.add_argument("--accumulators", default="fp32,fixed24_i3,fixed20_i3,fixed18_i3,fixed16_i3,fixed15_i3")
+    p.add_argument(
+        "--accumulators", default="fp32,fixed24_i3,fixed20_i3,fixed18_i3,fixed16_i3,fixed15_i3"
+    )
     p.add_argument("--out", type=Path, required=True)
     a = p.parse_args()
     depth, width = 32, 64
@@ -87,27 +93,45 @@ def main() -> None:
     data_seed = a.seed + 10_000 + 1000 * width + depth
     gen = torch.Generator().manual_seed(data_seed)
     x, y = torch.randn(4, 8, generator=gen), torch.randn(4, 4, generator=gen)
-    bp_model = ResidualMLP(depth=depth, width=width, input_dim=8, output_dim=4, activation="relu", seed=model_seed)
+    bp_model = ResidualMLP(
+        depth=depth, width=width, input_dim=8, output_dim=4, activation="relu", seed=model_seed
+    )
     bp = method_grad(bp_model, x, y, Schedule("bp", budget=0), state_lr=a.state_lr, rho=1.0)
     bp_first, bp_norm = bp[0], float(bp[0].norm())
     rows = []
     for accumulator in [v for v in a.accumulators.split(",") if v]:
-        model = ResidualMLP(depth=depth, width=width, input_dim=8, output_dim=4, activation="relu", seed=model_seed)
-        grads, stats = run(model, x, y, budget=a.budget, state_lr=a.state_lr, dual_leak=a.dual_leak, interval=a.interval, accumulator=accumulator)
+        model = ResidualMLP(
+            depth=depth, width=width, input_dim=8, output_dim=4, activation="relu", seed=model_seed
+        )
+        grads, stats = run(
+            model,
+            x,
+            y,
+            budget=a.budget,
+            state_lr=a.state_lr,
+            dual_leak=a.dual_leak,
+            interval=a.interval,
+            accumulator=accumulator,
+        )
         first = grads[0]
         cosine = gradient_cosine([first], [bp_first])
         ratio = float(first.norm()) / bp_norm if bp_norm else math.nan
         rel = gradient_relative_error([first], [bp_first])
-        rows.append({
-            "seed": a.seed,
-            "interval": a.interval,
-            "accumulator": accumulator,
-            **stats,
-            "first_layer_cosine_to_bp": cosine,
-            "first_layer_grad_norm_ratio_to_bp": ratio,
-            "first_layer_relative_error_to_bp": rel,
-            "useful_first_layer_credit": bool(stats["finite"]) and cosine >= 0.9 and 0.5 <= ratio <= 2.0 and rel <= 0.6,
-        })
+        rows.append(
+            {
+                "seed": a.seed,
+                "interval": a.interval,
+                "accumulator": accumulator,
+                **stats,
+                "first_layer_cosine_to_bp": cosine,
+                "first_layer_grad_norm_ratio_to_bp": ratio,
+                "first_layer_relative_error_to_bp": rel,
+                "useful_first_layer_credit": bool(stats["finite"])
+                and cosine >= 0.9
+                and 0.5 <= ratio <= 2.0
+                and rel <= 0.6,
+            }
+        )
     frame = pd.DataFrame(rows)
     a.out.parent.mkdir(parents=True, exist_ok=True)
     frame.to_csv(a.out, index=False)
