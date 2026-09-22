@@ -19,11 +19,11 @@ jobs:
           python-version: "3.11"
           cache: pip
       - run: pip install -e .
-      - name: Sweep state accumulator precision
+      - name: Sweep state accumulator precision and range
         run: |
           python scripts/diagnose_pcalm_state_accumulator_precision.py \
             --seed 860 --budget 128 --state-lr 0.25 --dual-leak 0.02 --interval 32 \
-            --accumulators fp32,fixed24_i3,fixed20_i3,fixed18_i3,fixed16_i3,fixed15_i3 \
+            --accumulators fp32,fixed24_i3,fixed24_i4,fixed24_i5,fixed24_i6,fixed20_i4,fixed20_i5,fixed18_i4,fixed18_i5,fixed16_i4,fixed16_i5 \
             --out results/pcalm_seed860_state_accumulator_precision.csv
       - uses: actions/upload-artifact@v4
         with:
