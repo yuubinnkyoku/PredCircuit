@@ -19,7 +19,7 @@ from predcircuit.pcalm import (
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Add state fractional bits without reducing the proven fixed14_i3 state range."
+        description="Factor the seed-860 failure across update, state, and dual quantization."
     )
     parser.add_argument("--seed", type=int, required=True)
     parser.add_argument("--out", type=Path, required=True)
@@ -42,13 +42,18 @@ def main() -> None:
     bp_first = bp[0]
     bp_norm = float(bp_first.norm())
 
-    # fixed14_i1 update was saturation-free and improved the 15-seed holdout.
-    # Preserve state integer range i3 and add only fractional bits. Dual stays 12-bit.
+    # Full 2^3 factorial around the deployed mixed-precision point.  This separates
+    # single-format effects from interactions instead of attributing recovery to state
+    # precision merely because the all-FP32 reference recovers.
     configs = {
-        "fp32_leaky": ("fp32", "fp32", "fp32"),
-        "u14i1_s14i3_d12i1": ("fixed14_i1", "fixed14_i3", "fixed12_i1"),
-        "u14i1_s15i3_d12i1": ("fixed14_i1", "fixed15_i3", "fixed12_i1"),
-        "u14i1_s16i3_d12i1": ("fixed14_i1", "fixed16_i3", "fixed12_i1"),
+        "fp32": ("fp32", "fp32", "fp32"),
+        "u14_only": ("fixed14_i1", "fp32", "fp32"),
+        "s15_only": ("fp32", "fixed15_i3", "fp32"),
+        "d12_only": ("fp32", "fp32", "fixed12_i1"),
+        "u14_s15": ("fixed14_i1", "fixed15_i3", "fp32"),
+        "u14_d12": ("fixed14_i1", "fp32", "fixed12_i1"),
+        "s15_d12": ("fp32", "fixed15_i3", "fixed12_i1"),
+        "u14_s15_d12": ("fixed14_i1", "fixed15_i3", "fixed12_i1"),
     }
 
     rows: list[dict[str, object]] = []
