@@ -91,28 +91,45 @@ def main() -> None:
     data_seed = a.seed + 10_000 + 1000 * width + depth
     gen = torch.Generator().manual_seed(data_seed)
     x, y = torch.randn(4, 8, generator=gen), torch.randn(4, 4, generator=gen)
-    bp_model = ResidualMLP(depth=depth, width=width, input_dim=8, output_dim=4, activation="relu", seed=model_seed)
+    bp_model = ResidualMLP(
+        depth=depth, width=width, input_dim=8, output_dim=4, activation="relu", seed=model_seed
+    )
     bp = method_grad(bp_model, x, y, Schedule("bp", budget=0), state_lr=a.state_lr, rho=1.0)
     bp_first, bp_norm = bp[0], float(bp[0].norm())
     rows = []
     for interval in a.intervals:
         if interval < 1 or interval > a.budget:
             raise ValueError(f"invalid interval {interval} for budget {a.budget}")
-        model = ResidualMLP(depth=depth, width=width, input_dim=8, output_dim=4, activation="relu", seed=model_seed)
-        grads, stats = run(model, x, y, budget=a.budget, state_lr=a.state_lr, dual_leak=a.dual_leak, interval=interval)
+        model = ResidualMLP(
+            depth=depth, width=width, input_dim=8, output_dim=4, activation="relu", seed=model_seed
+        )
+        grads, stats = run(
+            model,
+            x,
+            y,
+            budget=a.budget,
+            state_lr=a.state_lr,
+            dual_leak=a.dual_leak,
+            interval=interval,
+        )
         first = grads[0]
         cosine = gradient_cosine([first], [bp_first])
         ratio = float(first.norm()) / bp_norm if bp_norm else math.nan
         rel = gradient_relative_error([first], [bp_first])
-        rows.append({
-            "seed": a.seed,
-            "interval": interval,
-            **stats,
-            "first_layer_cosine_to_bp": cosine,
-            "first_layer_grad_norm_ratio_to_bp": ratio,
-            "first_layer_relative_error_to_bp": rel,
-            "useful_first_layer_credit": bool(stats["finite"]) and cosine >= 0.9 and 0.5 <= ratio <= 2.0 and rel <= 0.6,
-        })
+        rows.append(
+            {
+                "seed": a.seed,
+                "interval": interval,
+                **stats,
+                "first_layer_cosine_to_bp": cosine,
+                "first_layer_grad_norm_ratio_to_bp": ratio,
+                "first_layer_relative_error_to_bp": rel,
+                "useful_first_layer_credit": bool(stats["finite"])
+                and cosine >= 0.9
+                and 0.5 <= ratio <= 2.0
+                and rel <= 0.6,
+            }
+        )
     frame = pd.DataFrame(rows)
     a.out.parent.mkdir(parents=True, exist_ok=True)
     frame.to_csv(a.out, index=False)
