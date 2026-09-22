@@ -2,7 +2,7 @@
 
 ## Question
 
-The first-order crossover bound showed that PC-ALM pays about `2T` dense matvec work relative to one reverse BP/ePC credit sweep, while layer-parallel latency only becomes favorable near `T < H`. That model intentionally omitted the memory hierarchy. This note adds a lower-bound traffic model for the hardware candidate now supported by the low-precision experiments.
+The first-order crossover bound showed that PC-ALM pays repeated dense matvec work over relaxation while layer-parallel latency only becomes favorable in a sufficiently small-T regime. This note adds a lower-bound memory-traffic model for the current hardware candidate and corrects the dynamic-state accounting to include batch size.
 
 ## Candidate numerical formats
 
@@ -10,14 +10,14 @@ Use the current concrete candidate rather than FP32 words:
 
 - stored state `z`: 15 bits (`fixed15_i3` candidate),
 - local state accumulator/datapath: 16 bits with one integer guard bit (`fixed16_i4`),
-- dual state `lambda`: 12 bits (current candidate),
+- dual state `lambda`: 12 bits,
 - weights: parameter `b_w` bits; examples below use 16 bits.
 
 The 16-bit guard accumulator is local transient storage and is not charged as persistent BRAM state here.
 
 ## Dense equal-width model
 
-Let `H` be the number of hidden-state layers, width `N`, and relaxation length `T`.
+Let `H` be the number of hidden-state layers, width `N`, batch size `B`, and relaxation length `T`.
 
 ### Weights
 
@@ -35,23 +35,23 @@ Duplicating for conflict-free simultaneous forward/transpose access would be abo
 
 ### Persistent dynamic state
 
-PC-ALM stores both `z` and `lambda`:
+For batch size `B`, PC-ALM stores both `z` and `lambda` for every sample:
 
-`B_dyn,pcalm = H N (15 + 12) = 27 H N` bits.
+`B_dyn,pcalm = B H N (15 + 12) = 27 B H N` bits.
 
 sPC stores only the state:
 
-`B_dyn,spc = 15 H N` bits.
+`B_dyn,spc = 15 B H N` bits.
 
-Thus the lambda state increases persistent dynamic-state capacity by `12/15 = 80%`, while total PC-ALM dynamic state is `27/15 = 1.8x` sPC.
+Thus the lambda state increases persistent dynamic-state capacity by `12/15 = 80%`, while total PC-ALM dynamic state is `27/15 = 1.8x` sPC. The ratio is independent of batch size.
 
-At `H=31, N=64`:
+At the actual main diagnostic shape `B=4, H=31, N=64`:
 
-- `z`: 29,760 bits = 3.63 KiB,
-- `lambda`: 23,808 bits = 2.91 KiB,
-- PC-ALM dynamic total: 53,568 bits = 6.54 KiB.
+- `z`: 119,040 bits = 14.53 KiB,
+- `lambda`: 95,232 bits = 11.63 KiB,
+- PC-ALM dynamic total: 214,272 bits = 26.16 KiB.
 
-The persistent dynamic state is therefore only about 2.6% of the single-copy 16-bit weight capacity in this dense width-64 example. Capacity is not the main problem; repeated accesses are.
+The dynamic state is therefore about 10.5% of the single-copy 16-bit weight capacity at batch 4. Capacity is still not dominant at width 64, but it is not the 2.6% implied by the earlier batch-1 arithmetic.
 
 ## On-chip traffic lower bound
 
@@ -59,23 +59,23 @@ Assume weights are resident next to the layer engines, so there is no per-step o
 
 PC-ALM dynamic-state traffic per step is at least
 
-`Q_dyn,pcalm >= 2 H N (15 + 12) = 54 H N` bits.
+`Q_dyn,pcalm >= 2 B H N (15 + 12) = 54 B H N` bits.
 
-For `H=31, N=64` this is
+For `B=4,H=31,N=64` this is
 
-`107,136 bits = 13.08 KiB / step`.
+`428,544 bits = 52.31 KiB / step`.
 
 Therefore:
 
-- `T=32`: at least 418.5 KiB of dynamic-state BRAM traffic,
-- `T=96`: at least 1.226 MiB,
-- `T=128`: at least 1.635 MiB.
+- `T=32`: at least 1.635 MiB of dynamic-state BRAM traffic,
+- `T=96`: at least 4.904 MiB,
+- `T=128`: at least 6.539 MiB.
 
 For sPC under the same one-read/one-write assumption:
 
-`Q_dyn,spc >= 30 H N` bits/step = 7.27 KiB/step at `H=31,N=64`.
+`Q_dyn,spc >= 30 B H N` bits/step = 29.06 KiB/step at `B=4,H=31,N=64`.
 
-So PC-ALM pays a 1.8x dynamic-state traffic factor per relaxation step before considering whether it reduces the required `T` relative to sPC.
+So PC-ALM still pays exactly a 1.8x dynamic-state traffic factor per relaxation step before considering whether it reduces the required `T` relative to sPC.
 
 ## External-memory crossover
 
@@ -91,19 +91,19 @@ for credit propagation alone. Hence the external weight-traffic ratio is again a
 
 Therefore weight residency is not a minor optimization; it is a prerequisite for any plausible memory-traffic advantage of a spatial PC-ALM engine. Once weights are resident, off-chip traffic can be dominated by examples/activations/parameter synchronization rather than rereading `W` and `W^T`, while the cost that remains is local BRAM traffic.
 
-## Capacity scaling and a useful boundary
+## Capacity scaling and batch dependence
 
-With 16-bit single-copy weights, dense weight capacity scales as `16 H N^2` bits whereas PC-ALM dynamic state scales only as `27 H N` bits. Their ratio is
+With 16-bit single-copy weights, dense weight capacity scales as `16 H N^2` bits whereas PC-ALM dynamic state scales as `27 B H N` bits. Their ratio is
 
-`B_dyn,pcalm / B_W = 27 / (16 N)`.
+`B_dyn,pcalm / B_W = 27 B / (16 N)`.
 
-So for `N=64` it is only 2.64%; for `N=8` it is 21.1%. Lambda capacity matters proportionally more in narrow networks, while dense weights dominate capacity in wider networks.
+For the actual `B=4,N=64` point it is 10.55%; for `B=4,N=8` it is **84.4%**. Thus the earlier batch-1 interpretation understated the narrow-network storage tension by fourfold. Lambda/state capacity becomes a first-order concern precisely in narrow/deep networks, where PC-ALM's algorithmic advantage over sPC has been most interesting.
 
-This creates a hardware tension with the algorithmic results: narrow/deep networks are precisely where PC-ALM may be most interesting versus sPC, but that is also where lambda is least negligible as a fraction of the resident storage.
+This also means batch size is a hardware design variable, not merely an experimental detail. Reducing hardware batch from 4 to 1 cuts dynamic-state capacity and traffic fourfold without changing weight capacity, although it may change effective update scaling and therefore must be revalidated algorithmically.
 
 ## Crossover conditions after adding memory
 
-The earlier idealized latency condition remains approximately `T_pcalm < H` against one ordered reverse sweep when one engine is available per layer. The memory model adds two necessary conditions rather than relaxing it:
+The memory model adds two necessary conditions:
 
 1. weights should be resident/banked on chip (or otherwise reused enough that the `2T` weight-stream penalty is avoided);
 2. any reduction in relaxation steps relative to sPC must compensate for PC-ALM's 1.8x persistent-state traffic per step.
@@ -116,16 +116,28 @@ or
 
 `T_pcalm / T_spc < 0.556`.
 
-Thus PC-ALM must cut the sPC relaxation count by more than about 44% before its extra lambda traffic is repaid on this optimistic state-memory metric. This is a concrete threshold that can now be tested against the existing and future depth/width sweeps.
+The batch correction changes the absolute BRAM capacity and traffic, but not this ratio because both methods carry the same batch factor.
+
+Crucially, existing measurements already clear this *iteration-ratio* threshold by a wide margin at the main width-64 diagnostic: leaky PC-ALM has a useful point at `T=128`, whereas matched sPC is still 0/5 useful through `T=1024`. Therefore the observed lower bound is
+
+`T_spc,min / T_pcalm > 1024/128 = 8`,
+
+or equivalently `T_pcalm/T_spc,min < 0.125`, with the denominator right-censored because sPC's equal-quality success point has not been observed. This is stronger than the 0.556 traffic break-even, but it is a gradient-geometry result, not yet an end-to-end training or wall-clock result.
+
+At the conservative h15/lambda12 traffic model, comparing the known PC-ALM point with the still-failing sPC point gives
+
+`(128 * 27) / (1024 * 15) = 0.225`.
+
+So the PC-ALM run incurs at most 22.5% of the simple persistent-state traffic of that 1024-step sPC run, despite carrying lambda. Since the sPC endpoint still fails the quality gate, this is a one-sided bound rather than an equal-quality speedup claim.
 
 ## Interpretation
 
-This model weakens any generic claim that lambda is "cheap" merely because its arithmetic is cheap. Lambda arithmetic is small compared with `N^2` matvecs, but lambda state creates an 80% increase over sPC's persistent state capacity/traffic at the current 15-bit state and 12-bit dual formats.
+The corrected model changes one important conclusion. At width 64, lambda/state capacity is manageable but not negligible at the actual batch size; at width 8 it is nearly as large as the dense weights themselves. The arithmetic overhead of lambda remains small, but narrow-network BRAM pressure is substantially more serious than the earlier batch-1 calculation suggested.
 
-Conversely, at width 64 the absolute lambda capacity is only 2.91 KiB for 31 hidden layers. The dominant feasibility question is therefore not BRAM capacity but whether banking can sustain the repeated local reads/writes while the matrix engines run.
+Conversely, the already-measured relaxation-budget separation is large enough that the simple state-traffic break-even is not the current bottleneck. The unresolved question is no longer whether PC-ALM can beat the 0.556 iteration-ratio line in this diagnostic; it already does by a censored margin. The important missing evidence is whether that advantage survives end-to-end learning and a concrete FPGA schedule with banking/port constraints.
 
-The strongest FPGA hypothesis is now conditional and falsifiable: **PC-ALM is attractive when weights remain resident, layer-local dynamics are spatially overlapped, and PC-ALM reaches the target gradient/learning quality in less than roughly 0.56x the sPC relaxation steps (for the present 15b/12b formats), ideally also below `H` steps when competing with an ordered BP/ePC reverse wave.**
+The strongest FPGA hypothesis remains conditional and falsifiable: **PC-ALM is attractive when weights remain resident, layer-local dynamics are spatially overlapped, and its large reduction in required relaxation budget survives a real learning task strongly enough to amortize the dual state and banking cost.**
 
 ## Next measurement
 
-Apply this threshold to matched sPC/PC-ALM depth-width sweeps using *minimum T to reach the same BP-cosine/learning-quality target*, not a fixed T. Report `T_pcalm/T_spc`, then overlay the `0.556` state-traffic threshold and the `T_pcalm < H` layer-wave threshold. That directly decides whether the extra dual state is repaid before RTL implementation.
+Do not spend the next run merely extending the sPC T sweep: the existing `>8x` censored separation already clears the 1.8x state-traffic threshold. The higher-value experiment is end-to-end learning on the shared ResidualMLP task with BP, sPC, pure PC-ALM, and leaky PC-ALM, reporting task loss/accuracy together with relaxation T and accumulated MAC/state-traffic estimates. In parallel, any width-8 hardware point must explicitly budget `B`, because at `B=4` the PC-ALM dynamic-state capacity is already about 84% of single-copy 16-bit dense-weight storage.
