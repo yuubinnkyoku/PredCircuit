@@ -1,0 +1,42 @@
+name: PC-ALM state accumulator multi-seed validation
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/pcalm-state-accumulator-multiseed.yml"
+  workflow_dispatch:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -e .
+      - name: Validate interval-32 accumulator formats
+        run: |
+          python scripts/diagnose_pcalm_state_accumulator_precision.py \
+            --seed ${{ matrix.seed }} --budget 128 --state-lr 0.25 --dual-leak 0.02 --interval 32 \
+            --accumulators fp32,fixed16_i4,fixed16_i5 \
+            --out results/pcalm_seed${{ matrix.seed }}_accumulator_interval32.csv
+      - name: Measure every-step 15-bit control
+        run: |
+          python scripts/diagnose_pcalm_state_accumulator_precision.py \
+            --seed ${{ matrix.seed }} --budget 128 --state-lr 0.25 --dual-leak 0.02 --interval 1 \
+            --accumulators fixed15_i3 \
+            --out results/pcalm_seed${{ matrix.seed }}_accumulator_interval1_control.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pcalm-state-accumulator-seed-${{ matrix.seed }}
+          path: |
+            results/pcalm_seed${{ matrix.seed }}_accumulator_interval32.csv
+            results/pcalm_seed${{ matrix.seed }}_accumulator_interval1_control.csv
