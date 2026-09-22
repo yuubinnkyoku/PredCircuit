@@ -17,6 +17,28 @@ def apply_grads(model: ResidualMLP, grads: list[torch.Tensor], lr: float) -> Non
             weight.add_(grad, alpha=-lr)
 
 
+def apply_epc_t1_grads(
+    model: ResidualMLP,
+    grads: list[torch.Tensor],
+    *,
+    lr: float,
+    error_lr: float,
+) -> None:
+    """Compensate the T=1 ePC scale only where the error step introduces it.
+
+    Starting from zero error coordinates, hidden-layer local credits are
+    proportional to ``error_lr`` after one inference step.  The output-layer
+    supervised credit is already on its ordinary scale, so globally dividing
+    every layer by ``error_lr`` would over-step the output layer.
+    """
+    if error_lr <= 0.0:
+        raise ValueError("T=1 ePC compensation requires error_lr > 0")
+    with torch.no_grad():
+        for layer_ix, (weight, grad) in enumerate(zip(model.weights, grads, strict=True)):
+            layer_lr = lr / error_lr if layer_ix < model.depth - 1 else lr
+            weight.add_(grad, alpha=-layer_lr)
+
+
 def eval_loss(model: ResidualMLP, x: torch.Tensor, y: torch.Tensor) -> float:
     with torch.no_grad():
         return float(bp_loss(model, x, y))
@@ -145,9 +167,12 @@ def main() -> None:
         )
         if not epc_finite:
             raise RuntimeError("ePC became non-finite")
-        # At T=1, ePC's first-layer credit is scaled by error_lr relative to BP.
-        # Compensate the global weight step so this baseline is not penalized by that trivial scale.
-        apply_grads(models["epc"], epc, args.weight_lr / args.epc_error_lr)
+        if args.epc_budget == 1:
+            apply_epc_t1_grads(
+                models["epc"], epc, lr=args.weight_lr, error_lr=args.epc_error_lr
+            )
+        else:
+            apply_grads(models["epc"], epc, args.weight_lr)
 
     frame = pd.DataFrame(rows)
     args.out.parent.mkdir(parents=True, exist_ok=True)
