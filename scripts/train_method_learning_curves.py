@@ -23,7 +23,9 @@ def eval_loss(model: ResidualMLP, x: torch.Tensor, y: torch.Tensor) -> float:
 
 
 def main() -> None:
-    p = argparse.ArgumentParser(description="Compare actual multi-update learning, not only one-shot credit geometry.")
+    p = argparse.ArgumentParser(
+        description="Compare actual multi-update learning, not only one-shot credit geometry."
+    )
     p.add_argument("--seed", type=int, required=True)
     p.add_argument("--depth", type=int, default=32)
     p.add_argument("--width", type=int, default=8)
@@ -152,7 +154,9 @@ def main() -> None:
     frame.to_csv(args.out, index=False)
     final = frame[frame["update"] == args.updates].copy()
     initial = frame[frame["update"] == 0].set_index("method")["eval_loss"]
-    final["loss_ratio_to_initial"] = [row.eval_loss / initial[row.method] for row in final.itertuples()]
+    final["loss_ratio_to_initial"] = [
+        row.eval_loss / initial[row.method] for row in final.itertuples()
+    ]
     print(final.to_string(index=False))
 
 
