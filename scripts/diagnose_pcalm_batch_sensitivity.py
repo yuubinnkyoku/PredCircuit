@@ -15,6 +15,56 @@ from predcircuit.pcalm import (
 )
 
 
+def _tail_metrics(trace, window: int = 8) -> dict[str, float]:
+    """Cheap temporal signals that a future PC-ALM controller could track in hardware."""
+    residual_sum = [sum(values) for values in trace.residual_norms]
+    dual_sum = [sum(values) for values in trace.dual_norms]
+    residual_max = [max(values) for values in trace.residual_norms]
+    tail = min(window, len(residual_sum) - 1)
+    if tail <= 0:
+        return {
+            "residual_sum_tail_ratio": 1.0,
+            "residual_sum_tail_rel_change": 0.0,
+            "residual_sum_tail_turns": 0.0,
+            "dual_sum_tail_rel_change": 0.0,
+            "dual_sum_tail_turns": 0.0,
+            "residual_max_tail_ratio": 1.0,
+            "dual_update_max_tail_mean": 0.0,
+        }
+
+    start = -tail - 1
+    eps = 1e-12
+
+    def rel_change(values: list[float]) -> float:
+        segment = values[start:]
+        scale = max(abs(segment[0]), eps)
+        return sum(abs(b - a) for a, b in zip(segment, segment[1:], strict=True)) / (tail * scale)
+
+    def turns(values: list[float]) -> float:
+        segment = values[start:]
+        deltas = [b - a for a, b in zip(segment, segment[1:], strict=True)]
+        signs = [1 if value > 0 else -1 if value < 0 else 0 for value in deltas]
+        nonzero = [value for value in signs if value]
+        if len(nonzero) < 2:
+            return 0.0
+        return float(sum(a != b for a, b in zip(nonzero, nonzero[1:], strict=True)))
+
+    dual_update_mean = 0.0
+    if trace.max_abs_dual_updates:
+        updates = [max(values) for values in trace.max_abs_dual_updates[-tail:]]
+        dual_update_mean = sum(updates) / len(updates)
+
+    return {
+        "residual_sum_tail_ratio": residual_sum[-1] / max(residual_sum[start], eps),
+        "residual_sum_tail_rel_change": rel_change(residual_sum),
+        "residual_sum_tail_turns": turns(residual_sum),
+        "dual_sum_tail_rel_change": rel_change(dual_sum),
+        "dual_sum_tail_turns": turns(dual_sum),
+        "residual_max_tail_ratio": residual_max[-1] / max(residual_max[start], eps),
+        "dual_update_max_tail_mean": dual_update_mean,
+    }
+
+
 def main() -> None:
     p = argparse.ArgumentParser()
     p.add_argument("--seed", type=int, required=True)
@@ -81,6 +131,7 @@ def main() -> None:
                     "dual_l2_sum": sum(dual_final),
                     "max_abs_dual": trace.max_abs_dual[-1],
                     "finite": trace.finite,
+                    **_tail_metrics(trace),
                 }
             )
 
