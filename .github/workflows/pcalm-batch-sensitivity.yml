@@ -1,0 +1,30 @@
+name: PC-ALM batch sensitivity
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - scripts/diagnose_pcalm_batch_sensitivity.py
+      - .github/workflows/pcalm-batch-sensitivity.yml
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [970, 972]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -e .
+      - name: Measure batch sensitivity
+        run: python scripts/diagnose_pcalm_batch_sensitivity.py --seed ${{ matrix.seed }} --out batch_sensitivity_seed_${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: batch-sensitivity-seed-${{ matrix.seed }}
+          path: batch_sensitivity_seed_${{ matrix.seed }}.csv
