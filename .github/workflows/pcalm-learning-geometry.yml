@@ -1,6 +1,11 @@
 name: PC-ALM learning geometry
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/pcalm-learning-geometry.yml'
+      - 'scripts/diagnose_pcalm_learning_geometry.py'
   workflow_dispatch:
 
 jobs:
