@@ -50,9 +50,7 @@ def _tail_metrics(trace, window: int = 8) -> dict[str, float]:
         nonzero = [value for value in signs if value]
         if len(nonzero) < 2:
             return 0.0
-        return float(
-            sum(a != b for a, b in zip(nonzero[:-1], nonzero[1:], strict=True))
-        )
+        return float(sum(a != b for a, b in zip(nonzero[:-1], nonzero[1:], strict=True)))
 
     dual_update_mean = 0.0
     if trace.max_abs_dual_updates:
@@ -129,8 +127,7 @@ def main() -> None:
                     "global_grad_cosine_bp": gradient_cosine(pc, bp),
                     "layer0_grad_cosine_bp": gradient_cosine([pc[0]], [bp[0]]),
                     "layer0_grad_norm_ratio_bp": float(
-                        pc[0].norm()
-                        / bp[0].norm().clamp_min(torch.finfo(bp[0].dtype).eps)
+                        pc[0].norm() / bp[0].norm().clamp_min(torch.finfo(bp[0].dtype).eps)
                     ),
                     "residual_l2_sum": sum(residual_final),
                     "residual_l2_max": max(residual_final),
