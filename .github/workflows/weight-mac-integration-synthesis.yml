@@ -1,0 +1,32 @@
+name: Weight MAC integration synthesis
+
+on:
+  push:
+    paths:
+      - 'rtl/shared_mac_array.sv'
+      - 'rtl/weight_source_dual_orientation.sv'
+      - 'rtl/weight_source_single_copy.sv'
+      - 'rtl/weight_mac_dual_orientation_top.sv'
+      - 'rtl/weight_mac_single_copy_top.sv'
+      - '.github/workflows/weight-mac-integration-synthesis.yml'
+  workflow_dispatch:
+
+jobs:
+  synthesize:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        top: [weight_mac_single_copy_top, weight_mac_dual_orientation_top]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Yosys
+        run: sudo apt-get update && sudo apt-get install -y yosys
+      - name: Synthesize XC7 ${{ matrix.top }}
+        run: |
+          mkdir -p build/rtl
+          yosys -p 'read_verilog -sv rtl/shared_mac_array.sv rtl/weight_source_single_copy.sv rtl/weight_source_dual_orientation.sv rtl/${{ matrix.top }}.sv; synth_xilinx -family xc7 -top ${{ matrix.top }}; stat' 2>&1 | tee build/rtl/${{ matrix.top }}_xc7.log
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.top }}-xc7-synthesis
+          path: build/rtl/${{ matrix.top }}_xc7.log
