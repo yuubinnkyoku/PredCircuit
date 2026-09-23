@@ -1,0 +1,35 @@
+name: PC-ALM eta_h=0.30 multi-update learning
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/pcalm-eta030-learning.yml'
+  workflow_dispatch:
+
+jobs:
+  learn:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [970, 971, 972]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -e .
+      - name: Run eta_h=0.30 T=56 learning curve
+        run: |
+          python scripts/train_method_learning_curves.py \
+            --seed ${{ matrix.seed }} \
+            --state-lr 0.30 \
+            --pcalm-budget 56 \
+            --spc-budget 1 \
+            --updates 24 \
+            --out eta030_t56_seed_${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: eta030-t56-seed-${{ matrix.seed }}
+          path: eta030_t56_seed_${{ matrix.seed }}.csv
