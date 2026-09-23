@@ -86,7 +86,9 @@ def main() -> None:
     rows: list[dict[str, object]] = []
     for update in range(args.updates + 1):
         for name, model in models.items():
-            budget = 0 if name == "bp" else 1 if name == "epc" else int(name.removeprefix("pcalm_t"))
+            budget = (
+                0 if name == "bp" else 1 if name == "epc" else int(name.removeprefix("pcalm_t"))
+            )
             rows.append(
                 {
                     "seed": args.seed,
