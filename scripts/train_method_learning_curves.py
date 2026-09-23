@@ -34,9 +34,7 @@ def apply_epc_t1_grads(
     if error_lr <= 0.0:
         raise ValueError("T=1 ePC compensation requires error_lr > 0")
     with torch.no_grad():
-        for layer_ix, (weight, grad) in enumerate(
-            zip(model.weights, grads, strict=True)
-        ):
+        for layer_ix, (weight, grad) in enumerate(zip(model.weights, grads, strict=True)):
             layer_lr = lr / error_lr if layer_ix < model.depth - 1 else lr
             weight.add_(grad, alpha=-layer_lr)
 
@@ -170,9 +168,7 @@ def main() -> None:
         if not epc_finite:
             raise RuntimeError("ePC became non-finite")
         if args.epc_budget == 1:
-            apply_epc_t1_grads(
-                models["epc"], epc, lr=args.weight_lr, error_lr=args.epc_error_lr
-            )
+            apply_epc_t1_grads(models["epc"], epc, lr=args.weight_lr, error_lr=args.epc_error_lr)
         else:
             apply_grads(models["epc"], epc, args.weight_lr)
 
