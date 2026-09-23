@@ -1,0 +1,33 @@
+name: PC-ALM short-budget probe
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/pcalm-short-budget-probe.yml'
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [980, 981, 982, 983]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -e .
+      - name: Run depth-32 width-8 short-budget layerwise probe
+        run: |
+          python scripts/run_pcalm_layerwise_probe.py \
+            --depths 32 \
+            --width 8 \
+            --budgets 1,2,4,8,12,15,16,24,32 \
+            --seed ${{ matrix.seed }} \
+            --out results/generated/pcalm_short_budget_${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pcalm-short-budget-${{ matrix.seed }}
+          path: results/generated/pcalm_short_budget_${{ matrix.seed }}.csv
