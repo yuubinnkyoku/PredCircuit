@@ -1,0 +1,29 @@
+name: PC-ALM learning geometry
+
+on:
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [970, 972]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -e .
+      - name: Trace geometry during learning
+        run: |
+          python scripts/diagnose_pcalm_learning_geometry.py \
+            --seed ${{ matrix.seed }} \
+            --state-lr 0.30 \
+            --budget 56 \
+            --out learning_geometry_seed_${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: learning-geometry-seed-${{ matrix.seed }}
+          path: learning_geometry_seed_${{ matrix.seed }}.csv
