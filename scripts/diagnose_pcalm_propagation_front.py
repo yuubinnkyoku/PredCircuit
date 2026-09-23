@@ -73,7 +73,10 @@ def main() -> None:
                     "dual_norm": float(dual.norm()),
                     "max_abs_dual": float(dual.abs().max()),
                     "layer_grad_cosine_bp": gradient_cosine([grads[layer]], [bp[layer]]),
-                    "layer_grad_norm_ratio_bp": float(grads[layer].norm() / bp[layer].norm().clamp_min(torch.finfo(bp[layer].dtype).eps)),
+                    "layer_grad_norm_ratio_bp": float(
+                        grads[layer].norm()
+                        / bp[layer].norm().clamp_min(torch.finfo(bp[layer].dtype).eps)
+                    ),
                     "global_grad_cosine_bp": gradient_cosine(grads, bp),
                     "finite": trace.finite,
                 }
@@ -82,7 +85,16 @@ def main() -> None:
     frame = pd.DataFrame(rows)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     frame.to_csv(args.out, index=False)
-    first = frame[frame["layer"] == 0][["budget", "residual_norm", "dual_norm", "layer_grad_cosine_bp", "layer_grad_norm_ratio_bp", "global_grad_cosine_bp"]]
+    first = frame[frame["layer"] == 0][
+        [
+            "budget",
+            "residual_norm",
+            "dual_norm",
+            "layer_grad_cosine_bp",
+            "layer_grad_norm_ratio_bp",
+            "global_grad_cosine_bp",
+        ]
+    ]
     print(first.to_string(index=False))
 
 
