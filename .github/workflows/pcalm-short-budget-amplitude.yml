@@ -1,0 +1,48 @@
+name: PC-ALM short-budget amplitude sweep
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/pcalm-short-budget-amplitude.yml"
+
+# Target the newly identified bottleneck: credit magnitude after the propagation
+# front has already arrived.  Keep the grid deliberately small and reuse the
+# propagation-front baseline rather than repeating a broad stability sweep.
+jobs:
+  sweep:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [970, 971, 972]
+        config:
+          - {name: baseline, state_lr: 0.25, rho: 1.0, alpha: 0.925}
+          - {name: alpha_low, state_lr: 0.25, rho: 1.0, alpha: 0.75}
+          - {name: alpha_high, state_lr: 0.25, rho: 1.0, alpha: 1.10}
+          - {name: rho_low, state_lr: 0.25, rho: 0.5, alpha: 0.925}
+          - {name: rho_high, state_lr: 0.25, rho: 2.0, alpha: 0.925}
+          - {name: eta_low, state_lr: 0.20, rho: 1.0, alpha: 0.925}
+          - {name: eta_high, state_lr: 0.30, rho: 1.0, alpha: 0.925}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv python install 3.11
+      - run: uv sync --extra malecns
+      - name: Measure early credit direction and magnitude
+        run: |
+          uv run python scripts/diagnose_pcalm_propagation_front.py \
+            --seed ${{ matrix.seed }} \
+            --checkpoints 32 56 \
+            --depth 32 \
+            --width 8 \
+            --batch-size 4 \
+            --state-lr ${{ matrix.config.state_lr }} \
+            --rho ${{ matrix.config.rho }} \
+            --alpha ${{ matrix.config.alpha }} \
+            --out results/generated/short_budget_${{ matrix.config.name }}_seed${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: short-budget-${{ matrix.config.name }}-seed-${{ matrix.seed }}
+          path: results/generated/short_budget_${{ matrix.config.name }}_seed${{ matrix.seed }}.csv
+          if-no-files-found: error
