@@ -40,7 +40,9 @@ def local_transfer(
     and return D + C (I-A)^-1 B.  solve() is used rather than an explicit inverse.
     """
     n = z.numel()
-    base = torch.cat([z.reshape(-1), torch.zeros_like(z).reshape(-1), torch.zeros(n, dtype=z.dtype)])
+    base = torch.cat(
+        [z.reshape(-1), torch.zeros_like(z).reshape(-1), torch.zeros(n, dtype=z.dtype)]
+    )
 
     def step(q: torch.Tensor) -> torch.Tensor:
         z_q = q[:n].reshape_as(z)
