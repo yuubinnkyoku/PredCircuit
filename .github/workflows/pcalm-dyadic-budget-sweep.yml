@@ -1,0 +1,31 @@
+name: PC-ALM dyadic budget sweep
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/pcalm-dyadic-budget-sweep.yml
+      - scripts/diagnose_pcalm_dyadic_budget_sweep.py
+      - scripts/diagnose_pcalm_width64_update_lattice_alignment.py
+      - src/predcircuit/pcalm.py
+
+jobs:
+  seed:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [845,846,847,848,849,850,851,852,853,854,855,856,857,858,859]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: >-
+          uv run python scripts/diagnose_pcalm_dyadic_budget_sweep.py
+          --seed ${{ matrix.seed }}
+          --out results/generated/pcalm_dyadic_budget_seed${{ matrix.seed }}.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pcalm-dyadic-budget-seed-${{ matrix.seed }}
+          path: results/generated/pcalm_dyadic_budget_seed${{ matrix.seed }}.csv
+          if-no-files-found: error
