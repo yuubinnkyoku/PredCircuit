@@ -83,9 +83,9 @@ def run_alignment(
     budget: int,
     state_lr: float,
     dual_leak: float,
+    alpha: float = 0.925,
 ) -> tuple[list[torch.Tensor], dict[str, float | bool]]:
     rho = 1.0
-    alpha = 0.925
     effective_lr = state_lr * x.shape[0]
     free = free_init(model, x)
     duals = zero_duals_like(constraint_residuals(model, x, free))
@@ -113,18 +113,15 @@ def run_alignment(
         raw_grads = torch.autograd.grad(energy, variables)
 
         new_free: list[torch.Tensor] = []
-        quantized_grads: list[torch.Tensor] = []
         requested_steps: list[torch.Tensor] = []
         realized_steps: list[torch.Tensor] = []
+        quantized_grads: list[torch.Tensor] = []
         for z, grad in zip(variables, raw_grads, strict=True):
             q_grad, saturated, total = quantize(grad, update_precision)
             update_saturated += saturated
             update_total += total
             requested = -effective_lr * q_grad
-            q_state, saturated, total = quantize(
-                z.detach() + requested,
-                state_precision,
-            )
+            q_state, saturated, total = quantize(z.detach() + requested, state_precision)
             state_saturated += saturated
             state_total += total
             realized = q_state - z.detach()
@@ -195,7 +192,7 @@ def run_alignment(
         "late_update_zero_fraction": late_update_zero / late_count,
         "late_state_zero_step_fraction": late_state_zero / late_count,
         "state_saturation_rate": state_saturated / state_total if state_total else 0.0,
-        "update_saturation_rate": (update_saturated / update_total if update_total else 0.0),
+        "update_saturation_rate": update_saturated / update_total if update_total else 0.0,
         "dual_saturation_rate": dual_saturated / dual_total if dual_total else 0.0,
     }
 
