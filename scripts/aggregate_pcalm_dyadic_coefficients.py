@@ -9,7 +9,7 @@ import pandas as pd
 def main() -> None:
     parser = argparse.ArgumentParser(description="Aggregate dyadic coefficient holdout.")
     parser.add_argument("--input", type=Path, required=True)
-    parser.add_argument("--expected-seeds", type=int, default=20)
+    parser.add_argument("--expected-seeds", type=int, default=15)
     parser.add_argument("--out", type=Path, required=True)
     args = parser.parse_args()
 
@@ -21,7 +21,7 @@ def main() -> None:
         raise RuntimeError("unexpected unique seed count")
 
     summary = (
-        frame.groupby("config", as_index=False)
+        frame.groupby(["precision", "coefficients"], as_index=False)
         .agg(
             seeds=("seed", "nunique"),
             finite_rate=("finite", "mean"),
@@ -29,10 +29,15 @@ def main() -> None:
             cosine_mean=("first_layer_cosine_to_bp", "mean"),
             norm_ratio_mean=("first_layer_grad_norm_ratio_to_bp", "mean"),
             bp_relative_error_mean=("first_layer_relative_error_to_bp", "mean"),
-            tuned_gradient_error_mean=("all_gradient_relative_error_to_tuned", "mean"),
-            tuned_gradient_error_max=("all_gradient_relative_error_to_tuned", "max"),
+            gradient_error_to_original_mean=("all_gradient_relative_error_to_original", "mean"),
+            gradient_error_to_original_max=("all_gradient_relative_error_to_original", "max"),
+            late_update_zero_fraction_mean=("late_update_zero_fraction", "mean"),
+            late_state_zero_step_fraction_mean=("late_state_zero_step_fraction", "mean"),
+            state_saturation_rate_max=("state_saturation_rate", "max"),
+            update_saturation_rate_max=("update_saturation_rate", "max"),
+            dual_saturation_rate_max=("dual_saturation_rate", "max"),
         )
-        .sort_values("config")
+        .sort_values(["precision", "coefficients"])
     )
     args.out.parent.mkdir(parents=True, exist_ok=True)
     summary.to_csv(args.out, index=False)
