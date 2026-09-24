@@ -59,12 +59,7 @@ def main() -> None:
             for layer in range(1, args.depth - 1):
                 mask = (zs[layer - 1][b] > 0).to(torch.float64)
                 jac = torch.eye(args.width, dtype=torch.float64)
-                jac = (
-                    jac
-                    + model.scales[layer]
-                    * model.weights[layer].detach()
-                    @ torch.diag(mask)
-                )
+                jac = jac + model.scales[layer] * model.weights[layer].detach() @ torch.diag(mask)
                 jacobians.append(jac)
             exact = start.clone()
             for jac in reversed(jacobians):
@@ -95,9 +90,7 @@ def main() -> None:
                         "approx": f"residual_rank_{rank}",
                         "rank": rank,
                         "cosine": cosine(approx, exact),
-                        "relative_error": float(
-                            (approx - exact).norm() / (exact.norm() + 1e-30)
-                        ),
+                        "relative_error": float((approx - exact).norm() / (exact.norm() + 1e-30)),
                         "norm_ratio": float(approx.norm() / (exact.norm() + 1e-30)),
                     }
                 )
