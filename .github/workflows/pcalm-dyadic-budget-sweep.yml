@@ -29,3 +29,43 @@ jobs:
           name: pcalm-dyadic-budget-seed-${{ matrix.seed }}
           path: results/generated/pcalm_dyadic_budget_seed${{ matrix.seed }}.csv
           if-no-files-found: error
+
+  aggregate:
+    needs: seed
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: pcalm-dyadic-budget-seed-*
+          path: results/generated
+          merge-multiple: true
+      - name: Aggregate budgets
+        run: |
+          python - <<'PY'
+          import csv, glob, math, statistics
+          rows=[]
+          for path in glob.glob('results/generated/*.csv'):
+              with open(path, newline='') as f:
+                  rows.extend(csv.DictReader(f))
+          budgets=sorted({int(r['budget']) for r in rows})
+          fields=['first_layer_cosine_to_bp','first_layer_grad_norm_ratio_to_bp','first_layer_relative_error_to_bp','residual_total','late_update_zero_fraction','late_state_zero_step_fraction']
+          out=[]
+          for b in budgets:
+              rs=[r for r in rows if int(r['budget'])==b]
+              rec={'budget':b,'n':len(rs),'finite':sum(r['finite']=='True' for r in rs),'useful':sum(r['useful_first_layer_credit']=='True' for r in rs)}
+              for k in fields:
+                  xs=[float(r[k]) for r in rs]
+                  rec[k+'_mean']=statistics.fmean(xs)
+                  rec[k+'_min']=min(xs)
+                  rec[k+'_max']=max(xs)
+              out.append(rec)
+          keys=list(out[0])
+          with open('pcalm_dyadic_budget_aggregate.csv','w',newline='') as f:
+              w=csv.DictWriter(f,fieldnames=keys); w.writeheader(); w.writerows(out)
+          for r in out: print(r)
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pcalm-dyadic-budget-aggregate
+          path: pcalm_dyadic_budget_aggregate.csv
+          if-no-files-found: error
