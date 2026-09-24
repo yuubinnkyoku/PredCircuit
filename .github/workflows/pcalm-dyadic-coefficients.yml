@@ -8,7 +8,7 @@ on:
       - .github/workflows/pcalm-dyadic-coefficients.yml
       - scripts/diagnose_pcalm_dyadic_coefficients.py
       - scripts/aggregate_pcalm_dyadic_coefficients.py
-      - scripts/diagnose_pcalm_matched_credit_budget.py
+      - scripts/diagnose_pcalm_width64_update_lattice_alignment.py
       - src/predcircuit/pcalm.py
 
 jobs:
@@ -17,7 +17,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        seed: [920,921,922,923,924,925,926,927,928,929,930,931,932,933,934,935,936,937,938,939]
+        seed: [845,846,847,848,849,850,851,852,853,854,855,856,857,858,859]
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
@@ -44,6 +44,7 @@ jobs:
       - run: >-
           uv run python scripts/aggregate_pcalm_dyadic_coefficients.py
           --input artifacts
+          --expected-seeds 15
           --out results/generated/pcalm_dyadic_coefficients_summary.csv
       - uses: actions/upload-artifact@v4
         with:
