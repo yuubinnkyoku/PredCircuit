@@ -26,8 +26,8 @@ def loss(model,x,y):
 def main():
     p=argparse.ArgumentParser()
     p.add_argument("--seed",type=int,required=True)
-    p.add_argument("--updates",type=int,default=24)
-    p.add_argument("--weight-lr",type=float,default=0.01)
+    p.add_argument("--updates",type=int,default=64)
+    p.add_argument("--weight-lr",type=float,default=1.0)
     p.add_argument("--out",type=Path,required=True)
     a=p.parse_args()
     gen=torch.Generator().manual_seed(a.seed+90000)
@@ -35,7 +35,7 @@ def main():
     train_x=torch.randn(64,8,generator=gen); eval_x=torch.randn(256,8,generator=gen)
     train_y=torch.tanh(train_x@teacher); eval_y=torch.tanh(eval_x@teacher)
     base=ResidualMLP(depth=32,width=64,input_dim=8,output_dim=4,activation="relu",seed=a.seed+64032)
-    names=["bp","spc_t80",*[f"pcalm_fixed_t{t}" for t in BUDGETS]]
+    names=["bp","spc_t80","pcalm_official_t64",*[f"pcalm_fixed_t{t}" for t in BUDGETS]]
     models={name:clone(base) for name in names}
     rows=[]
     for update in range(a.updates+1):
@@ -47,13 +47,16 @@ def main():
         sg=method_grad(models["spc_t80"],x,y,Schedule("pc",budget=80),state_lr=STATE_LR,rho=1.0)
         if not all(torch.isfinite(g).all() for g in sg): raise RuntimeError("sPC non-finite")
         apply(models["spc_t80"],sg,a.weight_lr)
+        gs,stats=run_alignment(models["pcalm_official_t64"],x,y,update_precision="fixed14_i1",state_precision="fixed16_i3",dual_precision="fixed12_i1",budget=64,state_lr=STATE_LR,dual_leak=0.0,alpha=1.0)
+        if not bool(stats["finite"]) or not all(torch.isfinite(g).all() for g in gs): raise RuntimeError("pcalm_official_t64 non-finite")
+        apply(models["pcalm_official_t64"],gs,a.weight_lr)
         for t in BUDGETS:
             name=f"pcalm_fixed_t{t}"
             gs,stats=run_alignment(models[name],x,y,update_precision="fixed14_i1",state_precision="fixed16_i3",dual_precision="fixed12_i1",budget=t,state_lr=STATE_LR,dual_leak=DUAL_LEAK,alpha=ALPHA)
             if not bool(stats["finite"]) or not all(torch.isfinite(g).all() for g in gs): raise RuntimeError(f"{name} non-finite")
             apply(models[name],gs,a.weight_lr)
-    frame=pd.DataFrame(rows); initial=frame[frame.update==0].set_index("method").eval_loss
-    frame["loss_ratio_to_initial"]=[r.eval_loss/initial[r.method] for r in frame.itertuples()]
+    frame=pd.DataFrame(rows); initial=frame[frame["update"]==0].set_index("method")["eval_loss"]
+    frame["loss_ratio_to_initial"]=frame["eval_loss"]/frame["method"].map(initial)
     a.out.parent.mkdir(parents=True,exist_ok=True); frame.to_csv(a.out,index=False)
-    print(frame[frame.update==a.updates].to_string(index=False))
+    print(frame[frame["update"]==a.updates].to_string(index=False))
 if __name__=="__main__": main()
