@@ -93,6 +93,9 @@ def run_alignment(
     state_saturated = state_total = 0
     update_saturated = update_total = 0
     dual_saturated = dual_total = 0
+    dual_prequant_max_abs = 0.0
+    dual_quantized_max_abs = 0.0
+    dual_zero = 0
     late_requested_step = 0.0
     late_realized_step = 0.0
     late_update_zero = 0.0
@@ -141,12 +144,17 @@ def run_alignment(
 
         duals_after: list[torch.Tensor] = []
         for lam, residual in zip(duals, update_residuals, strict=True):
-            q_dual, saturated, total = quantize(
-                (1.0 - dual_leak) * lam + alpha * residual,
-                dual_precision,
+            dual_candidate = (1.0 - dual_leak) * lam + alpha * residual
+            dual_prequant_max_abs = max(
+                dual_prequant_max_abs, float(dual_candidate.abs().max())
             )
+            q_dual, saturated, total = quantize(dual_candidate, dual_precision)
             dual_saturated += saturated
             dual_total += total
+            dual_quantized_max_abs = max(
+                dual_quantized_max_abs, float(q_dual.abs().max())
+            )
+            dual_zero += int((q_dual == 0).sum())
             duals_after.append(q_dual)
 
         if outer_ix + 1 >= max(1, budget - 31):
@@ -194,6 +202,9 @@ def run_alignment(
         "state_saturation_rate": state_saturated / state_total if state_total else 0.0,
         "update_saturation_rate": update_saturated / update_total if update_total else 0.0,
         "dual_saturation_rate": dual_saturated / dual_total if dual_total else 0.0,
+        "dual_prequant_max_abs": dual_prequant_max_abs,
+        "dual_quantized_max_abs": dual_quantized_max_abs,
+        "dual_zero_fraction": dual_zero / dual_total if dual_total else 0.0,
     }
 
 
