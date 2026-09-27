@@ -17,14 +17,20 @@ def main() -> None:
 
     print(
         "P,layers,forward_conflicts,transpose_conflicts,max_bank_weights,"
-        "RAMB36,capacity_efficiency"
+        "capacity_packed_RAMB36,layer_parallel_RAMB36,capacity_efficiency"
     )
     for p in args.parallelism:
-        result = analyze(args.width, p, args.weight_bits, layers=args.layers)
+        packed = analyze(args.width, p, args.weight_bits, layers=args.layers)
+        one_layer = analyze(args.width, p, args.weight_bits, layers=1)
+        # Capacity packing shares the same P physical banks across layers.  That is
+        # valid for time-multiplexed layers, but it cannot feed all layers in the
+        # same cycle.  Full layer parallelism needs an independent bank set per
+        # simultaneously active layer.
+        layer_parallel_ramb36 = args.layers * one_layer.total_ramb36
         print(
-            f"{p},{args.layers},{result.forward_conflicts},{result.transpose_conflicts},"
-            f"{result.max_bank_occupancy},{result.total_ramb36},"
-            f"{result.capacity_efficiency:.6f}"
+            f"{p},{args.layers},{packed.forward_conflicts},{packed.transpose_conflicts},"
+            f"{packed.max_bank_occupancy},{packed.total_ramb36},"
+            f"{layer_parallel_ramb36},{packed.capacity_efficiency:.6f}"
         )
 
 
