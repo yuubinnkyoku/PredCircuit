@@ -32,7 +32,7 @@ def apply_grads(model: ResidualMLP, grads: list[torch.Tensor], lr: float) -> Non
 
 
 def mse(model: ResidualMLP, x: torch.Tensor, y: torch.Tensor) -> float:
-    pred = model.forward_free(x)[-1]
+    pred = model.forward(x)
     return float((0.5 * (pred - y).square().sum(dim=1)).mean())
 
 
