@@ -7,7 +7,7 @@ from pathlib import Path
 import pandas as pd
 import torch
 
-from predcircuit.epc import local_weight_energy, run_epc
+from predcircuit.epc import local_weight_energy, run_epc, zero_errors
 from predcircuit.magnitude_control import epc_stationarity, mac_accounting, spc_credit
 from predcircuit.pcalm import (
     ResidualMLP,
@@ -40,6 +40,7 @@ def main() -> None:
     p.add_argument("--budgets", default="8,16,32,64,128")
     p.add_argument("--spc-reference-budget", type=int, default=256)
     p.add_argument("--stationarity-tol", type=float, default=1e-3)
+    p.add_argument("--stationarity-relative-tol", type=float, default=1e-2)
     p.add_argument("--activation", choices=["linear", "tanh", "relu"], default="relu")
     p.add_argument("--out", type=Path, required=True)
     a = p.parse_args()
@@ -67,6 +68,9 @@ def main() -> None:
         rho=a.rho,
         budget=a.spc_reference_budget,
     )
+
+    initial_errors = zero_errors(model, x)
+    initial_stationarity = epc_stationarity(model, x, y, initial_errors)
 
     rows: list[dict[str, float | int | bool]] = []
     for error_lr in error_lrs:
@@ -108,7 +112,15 @@ def main() -> None:
             useful_bp = bool(
                 finite and bp_cos >= 0.9 and (0.5 <= norm_ratio <= 2.0) and bp_rel <= 0.6
             )
-            stationarity_ok = bool(rel_energy_step <= a.stationarity_tol)
+            energy_plateau_ok = bool(rel_energy_step <= a.stationarity_tol)
+            stationarity_ok = bool(stationarity <= a.stationarity_tol)
+            stationarity_relative = (
+                stationarity / initial_stationarity if initial_stationarity > 0.0 else math.nan
+            )
+            stationarity_relative_ok = bool(
+                math.isfinite(stationarity_relative)
+                and stationarity_relative <= a.stationarity_relative_tol
+            )
 
             epc_cost = mac_accounting(
                 family="epc",
@@ -149,8 +161,13 @@ def main() -> None:
                     "energy_relative_drop_from_init": rel_energy_drop,
                     "energy_relative_last_step": rel_energy_step,
                     "stationarity_error_grad_norm": stationarity,
+                    "stationarity_error_grad_norm_init": initial_stationarity,
+                    "stationarity_relative_to_init": stationarity_relative,
                     "stationarity_tol": a.stationarity_tol,
+                    "stationarity_relative_tol": a.stationarity_relative_tol,
+                    "energy_plateau_ok": energy_plateau_ok,
                     "stationarity_ok": stationarity_ok,
+                    "stationarity_relative_ok": stationarity_relative_ok,
                     "first_layer_cosine_to_bp": bp_cos,
                     "first_layer_grad_norm_ratio_to_bp": norm_ratio,
                     "first_layer_relative_error_to_bp": bp_rel,
