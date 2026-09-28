@@ -7,7 +7,13 @@ import pandas as pd
 import torch
 
 from predcircuit.magnitude_control import pcalm_leak_grad
-from predcircuit.pcalm import ResidualMLP, Schedule, gradient_cosine, gradient_relative_error, method_grad
+from predcircuit.pcalm import (
+    ResidualMLP,
+    Schedule,
+    gradient_cosine,
+    gradient_relative_error,
+    method_grad,
+)
 
 
 def clone_model(model: ResidualMLP) -> ResidualMLP:
@@ -84,7 +90,9 @@ def main() -> None:
     for update in range(args.updates + 1):
         if update in checkpoints:
             for name, model in models.items():
-                bp = method_grad(model, probe_x, probe_y, Schedule("bp", budget=0), state_lr=0.0, rho=1.0)
+                bp = method_grad(
+                    model, probe_x, probe_y, Schedule("bp", budget=0), state_lr=0.0, rho=1.0
+                )
                 max_abs_dual = 0.0
                 finite = True
                 if name == "bp":
