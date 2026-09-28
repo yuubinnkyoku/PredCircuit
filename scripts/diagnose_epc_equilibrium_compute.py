@@ -105,12 +105,21 @@ def main() -> None:
             bp_cos = gradient_cosine([grads[0]], [bp[0]])
             bp_rel = gradient_relative_error([grads[0]], [bp[0]])
             spc_cos = gradient_cosine([grads[0]], [spc_ref[0]])
+            spc_rel = gradient_relative_error([grads[0]], [spc_ref[0]])
             bp_norm = float(bp[0].norm())
+            spc_norm = float(spc_ref[0].norm())
             grad_norm = float(grads[0].norm())
             norm_ratio = grad_norm / bp_norm if bp_norm > 0 else math.nan
+            spc_norm_ratio = grad_norm / spc_norm if spc_norm > 0 else math.nan
             finite = trace.finite and all(bool(torch.isfinite(g).all()) for g in grads)
             useful_bp = bool(
                 finite and bp_cos >= 0.9 and (0.5 <= norm_ratio <= 2.0) and bp_rel <= 0.6
+            )
+            matched_spc = bool(
+                finite
+                and spc_cos >= 0.99
+                and (0.9 <= spc_norm_ratio <= 1.1)
+                and spc_rel <= 0.15
             )
             energy_plateau_ok = bool(rel_energy_step <= a.stationarity_tol)
             stationarity_ok = bool(stationarity <= a.stationarity_tol)
@@ -172,6 +181,9 @@ def main() -> None:
                     "first_layer_grad_norm_ratio_to_bp": norm_ratio,
                     "first_layer_relative_error_to_bp": bp_rel,
                     "first_layer_cosine_to_spc_ref": spc_cos,
+                    "first_layer_grad_norm_ratio_to_spc_ref": spc_norm_ratio,
+                    "first_layer_relative_error_to_spc_ref": spc_rel,
+                    "matched_spc_equilibrium_credit": matched_spc,
                     "useful_first_layer_credit": useful_bp,
                     "epc_macs_total": epc_cost["total_macs_estimate"],
                     "spc_macs_total": spc_cost["total_macs_estimate"],
