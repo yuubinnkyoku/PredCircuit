@@ -145,15 +145,11 @@ def run_alignment(
         duals_after: list[torch.Tensor] = []
         for lam, residual in zip(duals, update_residuals, strict=True):
             dual_candidate = (1.0 - dual_leak) * lam + alpha * residual
-            dual_prequant_max_abs = max(
-                dual_prequant_max_abs, float(dual_candidate.abs().max())
-            )
+            dual_prequant_max_abs = max(dual_prequant_max_abs, float(dual_candidate.abs().max()))
             q_dual, saturated, total = quantize(dual_candidate, dual_precision)
             dual_saturated += saturated
             dual_total += total
-            dual_quantized_max_abs = max(
-                dual_quantized_max_abs, float(q_dual.abs().max())
-            )
+            dual_quantized_max_abs = max(dual_quantized_max_abs, float(q_dual.abs().max()))
             dual_zero += int((q_dual == 0).sum())
             duals_after.append(q_dual)
 
