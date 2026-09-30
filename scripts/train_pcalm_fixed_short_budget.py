@@ -75,7 +75,8 @@ def main() -> None:
     names = [
         "bp",
         "spc_t80",
-        "pcalm_official_t64",
+        "pcalm_fp32_official_t64",
+        "pcalm_fixed_official_t64",
         *[f"pcalm_fixed_t{budget}" for budget in BUDGETS],
     ]
     models = {name: clone(base) for name in names}
@@ -121,24 +122,33 @@ def main() -> None:
             raise RuntimeError("sPC non-finite")
         apply(models["spc_t80"], spc_grads, args.weight_lr)
 
-        official_grads, stats = run_alignment(
-            models["pcalm_official_t64"],
-            x,
-            y,
-            update_precision="fixed14_i1",
-            state_precision="fixed16_i3",
-            dual_precision="fixed12_i1",
-            budget=64,
-            state_lr=STATE_LR,
-            dual_leak=0.0,
-            alpha=1.0,
-        )
-        if not bool(stats["finite"]) or not all(
-            torch.isfinite(grad).all() for grad in official_grads
+        for name, update_precision, state_precision, dual_precision in (
+            ("pcalm_fp32_official_t64", "fp32", "fp32", "fp32"),
+            (
+                "pcalm_fixed_official_t64",
+                "fixed14_i1",
+                "fixed16_i3",
+                "fixed12_i1",
+            ),
         ):
-            raise RuntimeError("pcalm_official_t64 non-finite")
-        latest_dual_stats["pcalm_official_t64"] = dual_stats(stats)
-        apply(models["pcalm_official_t64"], official_grads, args.weight_lr)
+            official_grads, stats = run_alignment(
+                models[name],
+                x,
+                y,
+                update_precision=update_precision,
+                state_precision=state_precision,
+                dual_precision=dual_precision,
+                budget=64,
+                state_lr=STATE_LR,
+                dual_leak=0.0,
+                alpha=1.0,
+            )
+            if not bool(stats["finite"]) or not all(
+                torch.isfinite(grad).all() for grad in official_grads
+            ):
+                raise RuntimeError(f"{name} non-finite")
+            latest_dual_stats[name] = dual_stats(stats)
+            apply(models[name], official_grads, args.weight_lr)
 
         for budget in BUDGETS:
             name = f"pcalm_fixed_t{budget}"
