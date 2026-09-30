@@ -163,7 +163,7 @@ def main() -> None:
 
     frame = pd.DataFrame(rows)
     initial = frame[frame["update"] == 0].set_index("method")["eval_loss"]
-    frame["loss_ratio_to_initial"] = frame["eval_loss"] / frame["method"].map(initial)
+    frame["loss_ratio_to_initial"] = (\n        frame["eval_loss"] / frame["method"].map(initial)\n    )
     args.out.parent.mkdir(parents=True, exist_ok=True)
     frame.to_csv(args.out, index=False)
     print(frame[frame["update"] == args.updates].to_string(index=False))
