@@ -50,13 +50,29 @@ def dual_stats(stats: dict[str, float | bool]) -> dict[str, float]:
 
 
 def gradient_geometry(grads: list[torch.Tensor], bp_grads: list[torch.Tensor]) -> dict[str, float]:
+    def cosine_or_nan(a: torch.Tensor, b: torch.Tensor) -> tuple[float, float, float]:
+        a = a.reshape(-1)
+        b = b.reshape(-1)
+        a_norm = float(torch.linalg.vector_norm(a))
+        b_norm = float(torch.linalg.vector_norm(b))
+        if a_norm == 0.0 or b_norm == 0.0:
+            return float("nan"), a_norm, b_norm
+        cosine = float(torch.dot(a, b) / (a_norm * b_norm))
+        return cosine, a_norm, b_norm
+
     flat = torch.cat([grad.reshape(-1) for grad in grads])
     flat_bp = torch.cat([grad.reshape(-1) for grad in bp_grads])
-    result = {"bp_grad_cosine": float(torch.nn.functional.cosine_similarity(flat, flat_bp, dim=0))}
+    cosine, grad_norm, bp_grad_norm = cosine_or_nan(flat, flat_bp)
+    result = {
+        "bp_grad_cosine": cosine,
+        "grad_norm": grad_norm,
+        "bp_grad_norm": bp_grad_norm,
+    }
     for layer, (grad, bp_grad) in enumerate(zip(grads, bp_grads, strict=True)):
-        result[f"bp_grad_cosine_l{layer:02d}"] = float(
-            torch.nn.functional.cosine_similarity(grad.reshape(-1), bp_grad.reshape(-1), dim=0)
-        )
+        cosine, grad_norm, bp_grad_norm = cosine_or_nan(grad, bp_grad)
+        result[f"bp_grad_cosine_l{layer:02d}"] = cosine
+        result[f"grad_norm_l{layer:02d}"] = grad_norm
+        result[f"bp_grad_norm_l{layer:02d}"] = bp_grad_norm
     return result
 
 
