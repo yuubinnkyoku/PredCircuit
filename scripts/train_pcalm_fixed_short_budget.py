@@ -49,28 +49,18 @@ def dual_stats(stats: dict[str, float | bool]) -> dict[str, float]:
     return {key: float(stats[key]) for key in DUAL_STAT_KEYS}
 
 
-def gradient_geometry(
-    grads: list[torch.Tensor], bp_grads: list[torch.Tensor]
-) -> dict[str, float]:
+def gradient_geometry(grads: list[torch.Tensor], bp_grads: list[torch.Tensor]) -> dict[str, float]:
     flat = torch.cat([grad.reshape(-1) for grad in grads])
     flat_bp = torch.cat([grad.reshape(-1) for grad in bp_grads])
-    result = {
-        "bp_grad_cosine": float(
-            torch.nn.functional.cosine_similarity(flat, flat_bp, dim=0)
-        )
-    }
+    result = {"bp_grad_cosine": float(torch.nn.functional.cosine_similarity(flat, flat_bp, dim=0))}
     for layer, (grad, bp_grad) in enumerate(zip(grads, bp_grads, strict=True)):
         result[f"bp_grad_cosine_l{layer:02d}"] = float(
-            torch.nn.functional.cosine_similarity(
-                grad.reshape(-1), bp_grad.reshape(-1), dim=0
-            )
+            torch.nn.functional.cosine_similarity(grad.reshape(-1), bp_grad.reshape(-1), dim=0)
         )
     return result
 
 
-def local_bp_grads(
-    model: ResidualMLP, x: torch.Tensor, y: torch.Tensor
-) -> list[torch.Tensor]:
+def local_bp_grads(model: ResidualMLP, x: torch.Tensor, y: torch.Tensor) -> list[torch.Tensor]:
     return method_grad(
         model,
         x,
@@ -186,9 +176,7 @@ def main() -> None:
             ):
                 raise RuntimeError(f"{name} non-finite")
             latest_dual_stats[name] = dual_stats(stats)
-            latest_grad_stats[name] = gradient_geometry(
-                official_grads, official_bp_grads
-            )
+            latest_grad_stats[name] = gradient_geometry(official_grads, official_bp_grads)
             apply(models[name], official_grads, args.weight_lr)
 
         for budget in BUDGETS:
@@ -206,9 +194,7 @@ def main() -> None:
                 dual_leak=DUAL_LEAK,
                 alpha=ALPHA,
             )
-            if not bool(stats["finite"]) or not all(
-                torch.isfinite(grad).all() for grad in grads
-            ):
+            if not bool(stats["finite"]) or not all(torch.isfinite(grad).all() for grad in grads):
                 raise RuntimeError(f"{name} non-finite")
             latest_dual_stats[name] = dual_stats(stats)
             latest_grad_stats[name] = gradient_geometry(grads, fixed_bp_grads)
