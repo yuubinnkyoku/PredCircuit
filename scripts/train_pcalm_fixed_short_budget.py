@@ -21,10 +21,10 @@ DUAL_STAT_KEYS = (
 )
 
 
-def clone(base: ResidualMLP) -> ResidualMLP:
+def clone(base: ResidualMLP, width: int) -> ResidualMLP:
     model = ResidualMLP(
         depth=32,
-        width=64,
+        width=width,
         input_dim=8,
         output_dim=4,
         activation="relu",
@@ -91,6 +91,7 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--seed", type=int, required=True)
     parser.add_argument("--updates", type=int, default=64)
+    parser.add_argument("--width", type=int, default=64)
     parser.add_argument("--weight-lr", type=float, default=1.0)
     parser.add_argument("--out", type=Path, required=True)
     args = parser.parse_args()
@@ -104,7 +105,7 @@ def main() -> None:
 
     base = ResidualMLP(
         depth=32,
-        width=64,
+        width=args.width,
         input_dim=8,
         output_dim=4,
         activation="relu",
@@ -117,7 +118,7 @@ def main() -> None:
         "pcalm_fixed_official_t64",
         *[f"pcalm_fixed_t{budget}" for budget in BUDGETS],
     ]
-    models = {name: clone(base) for name in names}
+    models = {name: clone(base, args.width) for name in names}
     latest_dual_stats: dict[str, dict[str, float]] = {}
     latest_grad_stats: dict[str, dict[str, float]] = {}
     rows: list[dict[str, object]] = []
