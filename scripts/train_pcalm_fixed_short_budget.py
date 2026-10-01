@@ -49,6 +49,38 @@ def dual_stats(stats: dict[str, float | bool]) -> dict[str, float]:
     return {key: float(stats[key]) for key in DUAL_STAT_KEYS}
 
 
+def gradient_geometry(
+    grads: list[torch.Tensor], bp_grads: list[torch.Tensor]
+) -> dict[str, float]:
+    flat = torch.cat([grad.reshape(-1) for grad in grads])
+    flat_bp = torch.cat([grad.reshape(-1) for grad in bp_grads])
+    result = {
+        "bp_grad_cosine": float(
+            torch.nn.functional.cosine_similarity(flat, flat_bp, dim=0)
+        )
+    }
+    for layer, (grad, bp_grad) in enumerate(zip(grads, bp_grads, strict=True)):
+        result[f"bp_grad_cosine_l{layer:02d}"] = float(
+            torch.nn.functional.cosine_similarity(
+                grad.reshape(-1), bp_grad.reshape(-1), dim=0
+            )
+        )
+    return result
+
+
+def local_bp_grads(
+    model: ResidualMLP, x: torch.Tensor, y: torch.Tensor
+) -> list[torch.Tensor]:
+    return method_grad(
+        model,
+        x,
+        y,
+        Schedule("bp", budget=0),
+        state_lr=STATE_LR,
+        rho=1.0,
+    )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--seed", type=int, required=True)
@@ -81,6 +113,7 @@ def main() -> None:
     ]
     models = {name: clone(base) for name in names}
     latest_dual_stats: dict[str, dict[str, float]] = {}
+    latest_grad_stats: dict[str, dict[str, float]] = {}
     rows: list[dict[str, object]] = []
 
     for update in range(args.updates + 1):
@@ -92,6 +125,7 @@ def main() -> None:
                 "eval_loss": loss(model, eval_x, eval_y),
             }
             row.update(latest_dual_stats.get(name, {}))
+            row.update(latest_grad_stats.get(name, {}))
             rows.append(row)
 
         if update == args.updates:
@@ -108,8 +142,10 @@ def main() -> None:
             state_lr=STATE_LR,
             rho=1.0,
         )
+        latest_grad_stats["bp"] = gradient_geometry(bp_grads, bp_grads)
         apply(models["bp"], bp_grads, args.weight_lr)
 
+        spc_bp_grads = local_bp_grads(models["spc_t80"], x, y)
         spc_grads = method_grad(
             models["spc_t80"],
             x,
@@ -120,6 +156,7 @@ def main() -> None:
         )
         if not all(torch.isfinite(grad).all() for grad in spc_grads):
             raise RuntimeError("sPC non-finite")
+        latest_grad_stats["spc_t80"] = gradient_geometry(spc_grads, spc_bp_grads)
         apply(models["spc_t80"], spc_grads, args.weight_lr)
 
         for name, update_precision, state_precision, dual_precision in (
@@ -131,6 +168,7 @@ def main() -> None:
                 "fixed12_i1",
             ),
         ):
+            official_bp_grads = local_bp_grads(models[name], x, y)
             official_grads, stats = run_alignment(
                 models[name],
                 x,
@@ -148,10 +186,14 @@ def main() -> None:
             ):
                 raise RuntimeError(f"{name} non-finite")
             latest_dual_stats[name] = dual_stats(stats)
+            latest_grad_stats[name] = gradient_geometry(
+                official_grads, official_bp_grads
+            )
             apply(models[name], official_grads, args.weight_lr)
 
         for budget in BUDGETS:
             name = f"pcalm_fixed_t{budget}"
+            fixed_bp_grads = local_bp_grads(models[name], x, y)
             grads, stats = run_alignment(
                 models[name],
                 x,
@@ -169,13 +211,12 @@ def main() -> None:
             ):
                 raise RuntimeError(f"{name} non-finite")
             latest_dual_stats[name] = dual_stats(stats)
+            latest_grad_stats[name] = gradient_geometry(grads, fixed_bp_grads)
             apply(models[name], grads, args.weight_lr)
 
     frame = pd.DataFrame(rows)
     initial = frame[frame["update"] == 0].set_index("method")["eval_loss"]
-    frame["loss_ratio_to_initial"] = (
-        frame["eval_loss"] / frame["method"].map(initial)
-    )
+    frame["loss_ratio_to_initial"] = frame["eval_loss"] / frame["method"].map(initial)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     frame.to_csv(args.out, index=False)
     print(frame[frame["update"] == args.updates].to_string(index=False))
