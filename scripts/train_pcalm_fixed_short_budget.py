@@ -93,6 +93,7 @@ def main() -> None:
     parser.add_argument("--updates", type=int, default=64)
     parser.add_argument("--width", type=int, default=64)
     parser.add_argument("--weight-lr", type=float, default=1.0)
+    parser.add_argument("--methods", nargs="+", default=None)
     parser.add_argument("--out", type=Path, required=True)
     args = parser.parse_args()
 
@@ -118,6 +119,11 @@ def main() -> None:
         "pcalm_fixed_official_t64",
         *[f"pcalm_fixed_t{budget}" for budget in BUDGETS],
     ]
+    if args.methods is not None:
+        unknown = sorted(set(args.methods) - set(names))
+        if unknown:
+            parser.error(f"unknown methods: {', '.join(unknown)}")
+        names = args.methods
     models = {name: clone(base, args.width) for name in names}
     latest_dual_stats: dict[str, dict[str, float]] = {}
     latest_grad_stats: dict[str, dict[str, float]] = {}
@@ -129,6 +135,8 @@ def main() -> None:
                 "seed": args.seed,
                 "method": name,
                 "update": update,
+                "model_update": update,
+                "diagnostic_update": update - 1 if update > 0 else pd.NA,
                 "eval_loss": loss(model, eval_x, eval_y),
             }
             row.update(latest_dual_stats.get(name, {}))
@@ -141,30 +149,32 @@ def main() -> None:
         idx = torch.arange(update * 4, update * 4 + 4) % 64
         x, y = train_x[idx], train_y[idx]
 
-        bp_grads = method_grad(
-            models["bp"],
+        if "bp" in models:
+            bp_grads = method_grad(
+                models["bp"],
             x,
             y,
             Schedule("bp", budget=0),
             state_lr=STATE_LR,
             rho=1.0,
         )
-        latest_grad_stats["bp"] = gradient_geometry(bp_grads, bp_grads)
-        apply(models["bp"], bp_grads, args.weight_lr)
+            latest_grad_stats["bp"] = gradient_geometry(bp_grads, bp_grads)
+            apply(models["bp"], bp_grads, args.weight_lr)
 
-        spc_bp_grads = local_bp_grads(models["spc_t80"], x, y)
-        spc_grads = method_grad(
-            models["spc_t80"],
+        if "spc_t80" in models:
+            spc_bp_grads = local_bp_grads(models["spc_t80"], x, y)
+            spc_grads = method_grad(
+                models["spc_t80"],
             x,
             y,
             Schedule("pc", budget=80),
             state_lr=STATE_LR,
             rho=1.0,
         )
-        if not all(torch.isfinite(grad).all() for grad in spc_grads):
-            raise RuntimeError("sPC non-finite")
-        latest_grad_stats["spc_t80"] = gradient_geometry(spc_grads, spc_bp_grads)
-        apply(models["spc_t80"], spc_grads, args.weight_lr)
+            if not all(torch.isfinite(grad).all() for grad in spc_grads):
+                raise RuntimeError("sPC non-finite")
+            latest_grad_stats["spc_t80"] = gradient_geometry(spc_grads, spc_bp_grads)
+            apply(models["spc_t80"], spc_grads, args.weight_lr)
 
         for name, update_precision, state_precision, dual_precision in (
             ("pcalm_fp32_official_t64", "fp32", "fp32", "fp32"),
@@ -175,6 +185,8 @@ def main() -> None:
                 "fixed12_i1",
             ),
         ):
+            if name not in models:
+                continue
             official_bp_grads = local_bp_grads(models[name], x, y)
             official_grads, stats = run_alignment(
                 models[name],
@@ -198,6 +210,8 @@ def main() -> None:
 
         for budget in BUDGETS:
             name = f"pcalm_fixed_t{budget}"
+            if name not in models:
+                continue
             fixed_bp_grads = local_bp_grads(models[name], x, y)
             grads, stats = run_alignment(
                 models[name],
